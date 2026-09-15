@@ -7,6 +7,17 @@ namespace Walkabout.Data
 {
     public class BootstrapRunner
     {
+        /// <summary>
+        /// The bootstrap SQL script hardcodes the literal database name
+        /// "MyMoney" (CREATE DATABASE MyMoney), and every schema/access/test
+        /// script hardcodes "USE MyMoney". The databaseName parameter below
+        /// is accepted (and threaded through to MyMoneyAdmin's reconnect as
+        /// InitialCatalog) but is never substituted into the actual SQL, so
+        /// any value other than this exact literal would fail confusingly
+        /// mid-bootstrap. Validate up front instead.
+        /// </summary>
+        public const string RequiredDatabaseName = "MyMoney";
+
         private readonly string sqlScriptsRoot;
 
         public BootstrapRunner(string sqlScriptsRoot)
@@ -16,6 +27,12 @@ namespace Walkabout.Data
 
         public bool Run(string server, string databaseName)
         {
+            if (!string.Equals(databaseName, RequiredDatabaseName, StringComparison.Ordinal))
+            {
+                Console.WriteLine($"Unsupported database name '{databaseName}'. The bootstrap SQL scripts hardcode the database name '{RequiredDatabaseName}' (CREATE DATABASE {RequiredDatabaseName}, USE {RequiredDatabaseName}, ...), so only '{RequiredDatabaseName}' is supported. Pass '{RequiredDatabaseName}' as the database name.");
+                return false;
+            }
+
             if (!SaBootstrapConnection.TryConnect(server, out string saPassword))
             {
                 Console.WriteLine("Bootstrap cancelled.");
