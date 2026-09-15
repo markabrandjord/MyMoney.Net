@@ -28,8 +28,9 @@ namespace Walkabout.Data
 
             var password = this.GetPasswordHelper(passPhrase);
 
-            // Create uninitialized Rijndael encryption object.
-            RijndaelManaged symmetricKey = new RijndaelManaged();
+            // Create uninitialized AES encryption object (same default 128-bit block size as
+            // the RijndaelManaged this replaces, so it stays compatible with existing encrypted files).
+            Aes symmetricKey = Aes.Create();
 
             // Use the password to generate pseudo-random bytes for the encryption
             // key. Specify the size of the key in bytes (instead of bits).
@@ -82,8 +83,9 @@ namespace Walkabout.Data
             // key. Specify the size of the key in bytes (instead of bits).
             byte[] keyBytes = password.GetBytes(this.keySize / 8);
 
-            // Create uninitialized Rijndael encryption object.
-            RijndaelManaged symmetricKey = new RijndaelManaged();
+            // Create uninitialized AES encryption object (same default 128-bit block size as
+            // the RijndaelManaged this replaces, so it stays compatible with existing encrypted files).
+            Aes symmetricKey = Aes.Create();
 
             // It is reasonable to set encryption mode to Cipher Block Chaining
             // (CBC). Use default options for other symmetric key parameters.

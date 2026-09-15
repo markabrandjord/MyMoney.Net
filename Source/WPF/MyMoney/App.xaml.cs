@@ -41,58 +41,62 @@ namespace Walkabout
 #if PerformanceBlocks
             this.perfClient = new PerformanceClient();
             _ = this.perfClient.Start();
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.AppInitialize)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.AppInitialize))
+            {
 #endif
-            var path = Path.Combine(Path.GetTempPath(), "MyMoney");
-            var logs = Path.Combine(path, "Logs");
-            Directory.CreateDirectory(logs);
-            this.rootLog = new Log(logs);
-            this.appLog = Log.GetLogger("App");
-            Log.CheckCrashLog(path);
+                var path = Path.Combine(Path.GetTempPath(), "MyMoney");
+                var logs = Path.Combine(path, "Logs");
+                Directory.CreateDirectory(logs);
+                this.rootLog = new Log(logs);
+                this.appLog = Log.GetLogger("App");
+                Log.CheckCrashLog(path);
 
-            Debug.WriteLine($"Writing logs to {logs}");
-            appLog.Info("Launching MyMoney.Net");
+                Debug.WriteLine($"Writing logs to {logs}");
+                appLog.Info("Launching MyMoney.Net");
 
-            HelpService.Initialize();
+                HelpService.Initialize();
 
-            Process currentRunningInstanceOfMyMoney = null;
+                Process currentRunningInstanceOfMyMoney = null;
 
-            if (SaveImportArgs())
-            {
-                // Application is running Process command line args
-                currentRunningInstanceOfMyMoney = BringToFrontApplicationIfAlreadyRunning();
-            }
-
-            bool noSettings = false;
-
-            foreach (string arg in e.Args)
-            {
-                if (string.Compare(arg, "/nosettings", StringComparison.OrdinalIgnoreCase) == 0)
+                if (SaveImportArgs())
                 {
-                    noSettings = true;
+                    // Application is running Process command line args
+                    currentRunningInstanceOfMyMoney = BringToFrontApplicationIfAlreadyRunning();
                 }
+
+                bool noSettings = false;
+
+                foreach (string arg in e.Args)
+                {
+                    if (string.Compare(arg, "/nosettings", StringComparison.OrdinalIgnoreCase) == 0)
+                    {
+                        noSettings = true;
+                    }
+                }
+
+                if (currentRunningInstanceOfMyMoney != null)
+                {
+
+                    // Let the currently running application handle the IMPORT file
+                    // we can close this instance
+                    this.Shutdown();
+                    return;
+                }
+
+                // Load the application settings
+                settings = this.LoadSettings(noSettings);
+
+                System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
+                AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(this.OnAppDomainUnhandledException);
+                TaskScheduler.UnobservedTaskException += this.TaskScheduler_UnobservedTaskException1;
+
+
+                // Lets run the application since there's no another instance running
+                MainWindow mainWindow = new MainWindow(settings);
+                mainWindow.Show();
+#if PerformanceBlocks
             }
-
-            if (currentRunningInstanceOfMyMoney != null)
-            {
-
-                // Let the currently running application handle the IMPORT file
-                // we can close this instance 
-                this.Shutdown();
-                return;
-            }
-
-            // Load the application settings
-            settings = this.LoadSettings(noSettings);
-
-            System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
-            AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(this.OnAppDomainUnhandledException);
-            TaskScheduler.UnobservedTaskException += this.TaskScheduler_UnobservedTaskException1;
-
-
-            // Lets run the application since there's no another instance running
-            MainWindow mainWindow = new MainWindow(settings);
-            mainWindow.Show();
+#endif
         }
 
         protected override void OnExit(ExitEventArgs e)
