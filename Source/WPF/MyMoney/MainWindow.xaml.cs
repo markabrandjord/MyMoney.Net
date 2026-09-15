@@ -614,7 +614,10 @@ namespace Walkabout
                         string path = this.database.DatabasePath;
                         this.SetupOnlineServices(money);
                         money.SetStockQuoteCache(this.cache);
-                        OfxRequest.OfxLogPath = Path.Combine(Path.GetDirectoryName(path), "Logs");
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            OfxRequest.OfxLogPath = Path.Combine(Path.GetDirectoryName(path), "Logs");
+                        }
                     }
 
                     this.accountsControl.MyMoney = this.myMoney;
