@@ -64,4 +64,19 @@
       <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationUI'))" />
     </ItemGroup>
   </Target>
+
+  <!--
+    Self-test for the target above: if a future SDK reorders or renames
+    ResolveAssemblyReferences/ResolveFrameworkReferences such that the Remove
+    condition above silently matches nothing, this fails the build immediately
+    instead of only being caught later by LayerBoundaryTests.
+    MyMoneyBusiness_HasNoUiRenderingAssemblyReference (see MyMoney.Net issue #11).
+  -->
+  <Target Name="VerifyNoWpfViewRenderingAssemblies" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <_LeakedWpfViewRenderingAssembly Include="@(ReferencePath)" Condition="$([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationUI'))" />
+    </ItemGroup>
+    <Error Condition="'@(_LeakedWpfViewRenderingAssembly)' != ''"
+           Text="MyMoney.Business must never reference WPF UI-rendering assemblies, but RemoveWpfViewRenderingAssemblies failed to strip: @(_LeakedWpfViewRenderingAssembly). This target's Remove condition may no longer match this SDK's ResolveAssemblyReferences/ResolveFrameworkReferences target ordering." />
+  </Target>
 </Project>

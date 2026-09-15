@@ -19,7 +19,7 @@
 - File moves use `git mv` so history is preserved.
 - The full existing test suite (currently 29 passed, 1 skipped, 0 failed) must keep passing, unchanged, after every task that touches build output.
 - No new inline/mock business-logic unit tests beyond the portability-boundary tests in Task 6 — deeper test coverage is item #3's scope, not this plan's (spec: Non-Goals).
-- `Importers/`, `Ofx/`, `Reports/`, `Charts/`, `Taxes/`, `ScenarioTest.csproj`'s own test logic, and the StockQuote fetch/throttle machinery (`StockQuoteManager`, `Yahoo`/`Polygon`/`TwelveData`/`MarketStack`, throttling) are never modified by this plan (spec: Non-Goals).
+- `Importers/`, `Ofx/`, `Reports/`, `Charts/`, `Taxes/`, `ScenarioTest.csproj`'s own test logic, and the StockQuote fetch/throttle machinery (`StockQuoteManager`, `Yahoo`/`Polygon`/`TwelveData`/`MarketStack`, throttling) are not moved or refactored by this plan; call-site signature adaptations forced by moved helpers (e.g. an interface a moved type now implements) are in scope (spec: Non-Goals).
 
 ---
 

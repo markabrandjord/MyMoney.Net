@@ -2972,7 +2972,7 @@ namespace Walkabout.Data
             this.ExecuteNonQuery("backup database [" + this.DatabaseName + "] to disk = '" + backupPath + "' with init");
         }
 
-        public static SqlServerDatabase Restore(string server, string databasePath, string userId, string password, string backupPath, IDirectorySecurity securityService)
+        public static SqlServerDatabase Restore(string server, string databasePath, string userId, string password, string backupPath, IDirectorySecurity securityService, IDataLayerUiCallback uiCallback = null)
         {
             SqlServerDatabase database = new SqlServerDatabase()
             {
@@ -2981,7 +2981,8 @@ namespace Walkabout.Data
                 UserId = userId,
                 Password = password,
                 BackupPath = backupPath,
-                SecurityService = securityService
+                SecurityService = securityService,
+                UiCallback = uiCallback
             };
             database.Restore();
             return database;
