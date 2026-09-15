@@ -8,7 +8,7 @@ namespace Walkabout.Controls
 {
     internal class HandyFlowDocumentScrollViewer : FlowDocumentScrollViewer
     {
-        private ScrollViewer? scrollViewer;
+        private ScrollViewer scrollViewer;
         private const double ScrollSpeedMultiplier = 1.0;
 
         public override void OnApplyTemplate()
