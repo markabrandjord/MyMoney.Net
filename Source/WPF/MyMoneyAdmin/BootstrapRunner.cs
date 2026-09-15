@@ -39,9 +39,24 @@ namespace Walkabout.Data
                 return false;
             }
 
-            string adminPassword = DataEnginePasswordGenerator.Generate();
-            string userPassword = DataEnginePasswordGenerator.Generate();
-            string testPassword = DataEnginePasswordGenerator.Generate();
+            // Re-bootstrapping an already-set-up database (e.g. retrying
+            // after a deployment-step failure) must not rotate passwords
+            // that a working credentials file already holds -- the bootstrap
+            // script's ALTER LOGIN branch would change the server-side
+            // password before the deployment scripts run, and if any of
+            // those then fails, the credentials file (only written at the
+            // very end, see below) keeps the OLD password while the server
+            // now has the NEW one, permanently desyncing the two. Reusing
+            // existing passwords when all three are already present makes
+            // ALTER LOGIN a true no-op, so a failed re-run stays harmless.
+            var existingCredentials = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath()).Load();
+            bool haveAllThree = existingCredentials.ContainsKey("MyMoneyAdmin")
+                && existingCredentials.ContainsKey("MyMoneyUser")
+                && existingCredentials.ContainsKey("MyMoneyTest");
+
+            string adminPassword = haveAllThree ? existingCredentials["MyMoneyAdmin"].Password : DataEnginePasswordGenerator.Generate();
+            string userPassword = haveAllThree ? existingCredentials["MyMoneyUser"].Password : DataEnginePasswordGenerator.Generate();
+            string testPassword = haveAllThree ? existingCredentials["MyMoneyTest"].Password : DataEnginePasswordGenerator.Generate();
 
             string bootstrapScript = File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Bootstrap", "CreateDatabaseAndLogins.sql"))
                 .Replace("{{AdminPassword}}", adminPassword.Replace("'", "''"))
