@@ -83,7 +83,7 @@ namespace Walkabout.Setup
                 }
 
                 string exe = ProcessHelper.MainExecutable;
-                string currentVersion = NativeMethods.GetFileVersion(exe);
+                string currentVersion = NativeMethods.GetFileVersion(exe, System.Reflection.Assembly.GetExecutingAssembly());
 
                 XElement first = changelist.Root.Element("change");
                 string version = (string)(first?.Attribute("version"));

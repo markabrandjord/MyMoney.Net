@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <RootNamespace>Walkabout</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!--
+      Transaction.amount/Split.amount are public fields alongside public
+      Amount properties - a real CLS-compliance violation (case-only
+      identifier collision), but the field is read directly from 15+ call
+      sites spanning this project and MyMoney.csproj (chart tallying,
+      transaction search). Hiding it would be a real cross-assembly
+      refactor, not a warning-noise fix; out of scope for #9. Suppressing
+      just this code, not the CS300x family that Properties/AssemblyInfo.cs's
+      [assembly: CLSCompliant(true)] already resolves properly.
+    -->
+    <NoWarn>$(NoWarn);CS3005</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      PublicResXFileCodeGenerator (not the default ResXFileCodeGenerator) so
+      that Resources.Designer.cs's class and string properties come out
+      public, not internal - ~56 call sites across MyMoney.csproj need them
+      once Task 4 wires the ProjectReference. Resources.Designer.cs itself
+      was hand-edited to match (this environment can't trigger a real
+      regeneration); if it's ever regenerated for real (e.g. from Visual
+      Studio), this Generator value is what keeps that regeneration public
+      instead of silently reverting to internal.
+    -->
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!--
+    Microsoft.WindowsDesktop.App.WPF is the only FrameworkReference profile that
+    resolves WindowsBase.dll (needed by Utilities/EventHandlerCollection.cs and
+    Utilities/Dispatcher.cs for the domain model's cross-thread event-marshaling
+    backbone - see Global Constraints in the layer-extraction plan). There is no
+    WindowsBase-only profile: this one also resolves the true UI-rendering
+    assemblies (PresentationCore, PresentationFramework and its skin variants,
+    PresentationUI) from the same ref pack. This project must never be able to
+    compile against those, so they're stripped back out of the resolved
+    reference list here - a stray reference to a WPF view type then fails to
+    compile immediately instead of silently succeeding, same enforcement intent
+    as leaving UseWPF unset.
+  -->
+  <Target Name="RemoveWpfViewRenderingAssemblies" BeforeTargets="ResolveAssemblyReferences" AfterTargets="ResolveFrameworkReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationUI'))" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Self-test for the target above: if a future SDK reorders or renames
+    ResolveAssemblyReferences/ResolveFrameworkReferences such that the Remove
+    condition above silently matches nothing, this fails the build immediately
+    instead of only being caught later by LayerBoundaryTests.
+    MyMoneyBusiness_HasNoUiRenderingAssemblyReference (see MyMoney.Net issue #11).
+  -->
+  <Target Name="VerifyNoWpfViewRenderingAssemblies" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <_LeakedWpfViewRenderingAssembly Include="@(ReferencePath)" Condition="$([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationUI'))" />
+    </ItemGroup>
+    <Error Condition="'@(_LeakedWpfViewRenderingAssembly)' != ''"
+           Text="MyMoney.Business must never reference WPF UI-rendering assemblies, but RemoveWpfViewRenderingAssemblies failed to strip: @(_LeakedWpfViewRenderingAssembly). This target's Remove condition may no longer match this SDK's ResolveAssemblyReferences/ResolveFrameworkReferences target ordering." />
+  </Target>
+</Project>

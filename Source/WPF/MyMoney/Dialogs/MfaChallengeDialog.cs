@@ -51,7 +51,7 @@ namespace Walkabout.Dialogs
         {
             if (this.phraseTable == null)
             {
-                this.phraseTable = ProcessHelper.GetEmbeddedResourceAsXml("Walkabout.Ofx.MfaPhrases.xml");
+                this.phraseTable = ProcessHelper.GetEmbeddedResourceAsXml(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Ofx.MfaPhrases.xml");
             }
             return this.phraseTable;
         }

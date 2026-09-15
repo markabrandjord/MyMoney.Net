@@ -789,7 +789,7 @@ namespace Walkabout.StockQuotes
     /// <summary>
     /// A log of stocks we have downloaded a history for
     /// </summary>
-    public class DownloadLog
+    public class DownloadLog : IStockDownloadLog
     {
         private readonly ConcurrentDictionary<string, StockQuoteHistory> database = new ConcurrentDictionary<string, StockQuoteHistory>();
         private readonly ConcurrentDictionary<string, DownloadInfo> _downloaded = new ConcurrentDictionary<string, DownloadInfo>();

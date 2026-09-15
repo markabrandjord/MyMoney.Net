@@ -5,7 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:c="clr-namespace:Walkabout.WpfConverters"
              xmlns:local="clr-namespace:Walkabout.Views.Controls"
-             xmlns:localData="clr-namespace:Walkabout.Data"  
+             xmlns:localData="clr-namespace:Walkabout.Data;assembly=MyMoney.Business"  
              xmlns:help="clr-namespace:Walkabout.Help"
              Background="{DynamicResource SystemControlPageBackgroundChromeLowBrush}"
              help:HelpService.HelpKeyword="Basics/Categories/"
