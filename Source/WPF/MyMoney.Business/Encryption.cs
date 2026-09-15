@@ -9,7 +9,7 @@ namespace Walkabout.Data
     /// (Note: I've tried doing something in memory by chaining streams but kept running
     /// into the infamous CryptographicException : "Padding is invalid and cannot be removed").
     /// </summary>
-    internal class Encryption
+    public class Encryption
     {
         // These settings cannot change.
         private readonly string saltValue = "Money Rocks";       // can be any string

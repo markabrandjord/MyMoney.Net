@@ -19,10 +19,22 @@ namespace Walkabout.Properties {
     // class via a tool like ResGen or Visual Studio.
     // To add or remove a member, edit your .ResX file then rerun ResGen
     // with the /str option, or rebuild your VS project.
+    //
+    // NOTE: this class and its string properties were hand-edited from
+    // internal to public (the code-behind ResX tool wasn't runnable in this
+    // environment to regenerate it properly). This makes it visible across
+    // the MyMoney.Business/MyMoney.csproj assembly boundary, which ~56 call
+    // sites in MyMoney.csproj need once Task 4 wires the ProjectReference.
+    // MyMoney.Business.csproj's <EmbeddedResource Update="Properties\Resources.resx">
+    // was updated to <Generator>PublicResXFileCodeGenerator</Generator> to
+    // match, so a future *real* regeneration (e.g. from Visual Studio) will
+    // reproduce this same public accessibility instead of silently
+    // regressing it back to internal - if you ever see this file regenerated
+    // as internal again, the <Generator> value is the first thing to check.
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "17.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    internal class Resources {
+    public class Resources {
         
         private static global::System.Resources.ResourceManager resourceMan;
         
@@ -36,7 +48,7 @@ namespace Walkabout.Properties {
         ///   Returns the cached ResourceManager instance used by this class.
         /// </summary>
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
-        internal static global::System.Resources.ResourceManager ResourceManager {
+        public static global::System.Resources.ResourceManager ResourceManager {
             get {
                 if (object.ReferenceEquals(resourceMan, null)) {
                     global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Walkabout.Properties.Resources", typeof(Resources).Assembly);
@@ -51,7 +63,7 @@ namespace Walkabout.Properties {
         ///   resource lookups using this strongly typed resource class.
         /// </summary>
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
-        internal static global::System.Globalization.CultureInfo Culture {
+        public static global::System.Globalization.CultureInfo Culture {
             get {
                 return resourceCulture;
             }
@@ -63,7 +75,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Account name cannot contain the characters &apos;{&apos;, &apos;}&apos;, &apos;:&apos;, &apos;*&apos;, &apos;&quot;&apos;, &apos;/&apos;, &apos;\\&apos;, &apos;&lt;&apos;, &apos;&gt;&apos;, &apos;|&apos;, or &apos;?&apos;.
         /// </summary>
-        internal static string AccountNameValidChars {
+        public static string AccountNameValidChars {
             get {
                 return ResourceManager.GetString("AccountNameValidChars", resourceCulture);
             }
@@ -72,7 +84,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Account &apos;{0}&apos; should be of type {1} in order to import these transactions..
         /// </summary>
-        internal static string AccountTypeMismatch {
+        public static string AccountTypeMismatch {
             get {
                 return ResourceManager.GetString("AccountTypeMismatch", resourceCulture);
             }
@@ -81,7 +93,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to All files (*.*)|*.*.
         /// </summary>
-        internal static string AllFileFilter {
+        public static string AllFileFilter {
             get {
                 return ResourceManager.GetString("AllFileFilter", resourceCulture);
             }
@@ -90,7 +102,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Binary XML files (*.bxml)|*.bxml.
         /// </summary>
-        internal static string BinaryXmlFileFilter {
+        public static string BinaryXmlFileFilter {
             get {
                 return ResourceManager.GetString("BinaryXmlFileFilter", resourceCulture);
             }
@@ -99,7 +111,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Please configure your Stock Quote Acount from the Online menu.
         /// </summary>
-        internal static string ConfigureStockQuoteService {
+        public static string ConfigureStockQuoteService {
             get {
                 return ResourceManager.GetString("ConfigureStockQuoteService", resourceCulture);
             }
@@ -108,7 +120,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to CSV files (*.csv)|*.csv.
         /// </summary>
-        internal static string CsvFileFilter {
+        public static string CsvFileFilter {
             get {
                 return ResourceManager.GetString("CsvFileFilter", resourceCulture);
             }
@@ -117,7 +129,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Stock quote request for symbol {0} returned a different symbol {1}.
         /// </summary>
-        internal static string DifferentSymbolReturned {
+        public static string DifferentSymbolReturned {
             get {
                 return ResourceManager.GetString("DifferentSymbolReturned", resourceCulture);
             }
@@ -126,7 +138,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Account with name &apos;{0}&apos; already exists, would you like to use the existing account instead?.
         /// </summary>
-        internal static string DuplicateAccount {
+        public static string DuplicateAccount {
             get {
                 return ResourceManager.GetString("DuplicateAccount", resourceCulture);
             }
@@ -135,7 +147,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Account Exists.
         /// </summary>
-        internal static string DuplicateAccountCaption {
+        public static string DuplicateAccountCaption {
             get {
                 return ResourceManager.GetString("DuplicateAccountCaption", resourceCulture);
             }
@@ -144,7 +156,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Error fetching stock quotes for query {0}.
         /// </summary>
-        internal static string ErrorFetchingSymbols {
+        public static string ErrorFetchingSymbols {
             get {
                 return ResourceManager.GetString("ErrorFetchingSymbols", resourceCulture);
             }
@@ -153,7 +165,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Fetched stock quotes {0}.
         /// </summary>
-        internal static string FetchedStockQuotes {
+        public static string FetchedStockQuotes {
             get {
                 return ResourceManager.GetString("FetchedStockQuotes", resourceCulture);
             }
@@ -162,7 +174,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Found some unknown stock symbols: {0}..
         /// </summary>
-        internal static string FoundUnknownStockQuotes {
+        public static string FoundUnknownStockQuotes {
             get {
                 return ResourceManager.GetString("FoundUnknownStockQuotes", resourceCulture);
             }
@@ -171,7 +183,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Merge Security.
         /// </summary>
-        internal static string MergeSecurityCaption {
+        public static string MergeSecurityCaption {
             get {
                 return ResourceManager.GetString("MergeSecurityCaption", resourceCulture);
             }
@@ -180,7 +192,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Money Files (*.db)|*.db.
         /// </summary>
-        internal static string MoneyFileFilter {
+        public static string MoneyFileFilter {
             get {
                 return ResourceManager.GetString("MoneyFileFilter", resourceCulture);
             }
@@ -189,7 +201,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Money SQL CE Files (*.MyMoney.sdf)|*.MyMoney.sdf.
         /// </summary>
-        internal static string MoneySQLCEFileFilter {
+        public static string MoneySQLCEFileFilter {
             get {
                 return ResourceManager.GetString("MoneySQLCEFileFilter", resourceCulture);
             }
@@ -198,7 +210,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Money SQL Lite Files (*.mmdb)|*.mmdb|Old Money SQL Lite Files (*.MyMoney.db)|*.MyMoney.db.
         /// </summary>
-        internal static string MoneySQLLiteFileFilter {
+        public static string MoneySQLLiteFileFilter {
             get {
                 return ResourceManager.GetString("MoneySQLLiteFileFilter", resourceCulture);
             }
@@ -207,7 +219,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to OFX files (*.ofx)|*.ofx.
         /// </summary>
-        internal static string OfxFileFilter {
+        public static string OfxFileFilter {
             get {
                 return ResourceManager.GetString("OfxFileFilter", resourceCulture);
             }
@@ -216,7 +228,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Password.
         /// </summary>
-        internal static string PasswordPrompt {
+        public static string PasswordPrompt {
             get {
                 return ResourceManager.GetString("PasswordPrompt", resourceCulture);
             }
@@ -225,7 +237,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to QFX files (*.qfx)|*.qfx.
         /// </summary>
-        internal static string QfxFileFilter {
+        public static string QfxFileFilter {
             get {
                 return ResourceManager.GetString("QfxFileFilter", resourceCulture);
             }
@@ -234,7 +246,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to QIF files (*.qif)|*.qif.
         /// </summary>
-        internal static string QifFileFilter {
+        public static string QifFileFilter {
             get {
                 return ResourceManager.GetString("QifFileFilter", resourceCulture);
             }
@@ -243,7 +255,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Would you like to delete the security &apos;{0}&apos; and move all investments referencing that old security to the new security you selected &apos;{1}&apos;.
         /// </summary>
-        internal static string RenameSecurity {
+        public static string RenameSecurity {
             get {
                 return ResourceManager.GetString("RenameSecurity", resourceCulture);
             }
@@ -252,7 +264,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to You cannot delete the security &apos;{0}&apos; because there are still {1} transactions referencing it.  You need to move those transactions to some other security first.  You can do that easily using drag/drop..
         /// </summary>
-        internal static string SecurityDeleteDisabled {
+        public static string SecurityDeleteDisabled {
             get {
                 return ResourceManager.GetString("SecurityDeleteDisabled", resourceCulture);
             }
@@ -261,7 +273,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Delete Disabled.
         /// </summary>
-        internal static string SecurityDeleteDisabledCaption {
+        public static string SecurityDeleteDisabledCaption {
             get {
                 return ResourceManager.GetString("SecurityDeleteDisabledCaption", resourceCulture);
             }
@@ -270,7 +282,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Symbol &apos;{0}&apos; contains illegal characters.
         /// </summary>
-        internal static string SkippingSecurityIllegalSymbol {
+        public static string SkippingSecurityIllegalSymbol {
             get {
                 return ResourceManager.GetString("SkippingSecurityIllegalSymbol", resourceCulture);
             }
@@ -279,7 +291,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Not updating security &apos;{0}&apos; because it has an empty stock symbol.
         /// </summary>
-        internal static string SkippingSecurityMissingSymbol {
+        public static string SkippingSecurityMissingSymbol {
             get {
                 return ResourceManager.GetString("SkippingSecurityMissingSymbol", resourceCulture);
             }
@@ -288,7 +300,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to SQL Server Backup Files (*.dat)|*.dat.
         /// </summary>
-        internal static string SqlServerBackupFileFilter {
+        public static string SqlServerBackupFileFilter {
             get {
                 return ResourceManager.GetString("SqlServerBackupFileFilter", resourceCulture);
             }
@@ -297,7 +309,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to C means this transaction was entered manually but has cleared at your bank.
         /// </summary>
-        internal static string StatusClearedTip {
+        public static string StatusClearedTip {
             get {
                 return ResourceManager.GetString("StatusClearedTip", resourceCulture);
             }
@@ -306,7 +318,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to E means this was an electronically downloaded transaction.
         /// </summary>
-        internal static string StatusElectronicTip {
+        public static string StatusElectronicTip {
             get {
                 return ResourceManager.GetString("StatusElectronicTip", resourceCulture);
             }
@@ -315,7 +327,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to R means this is a reconciled transaction.
         /// </summary>
-        internal static string StatusReconciledTip {
+        public static string StatusReconciledTip {
             get {
                 return ResourceManager.GetString("StatusReconciledTip", resourceCulture);
             }
@@ -324,7 +336,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to V means this is a voided transaction.
         /// </summary>
-        internal static string StatusVoidTip {
+        public static string StatusVoidTip {
             get {
                 return ResourceManager.GetString("StatusVoidTip", resourceCulture);
             }
@@ -333,7 +345,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Fetching Stock Quotes.
         /// </summary>
-        internal static string StockQuoteCaption {
+        public static string StockQuoteCaption {
             get {
                 return ResourceManager.GetString("StockQuoteCaption", resourceCulture);
             }
@@ -342,7 +354,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Unhanded exception processing stock quote results.
         /// </summary>
-        internal static string StockQuotesException {
+        public static string StockQuotesException {
             get {
                 return ResourceManager.GetString("StockQuotesException", resourceCulture);
             }
@@ -351,7 +363,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Daily stock quote service quota has been exceeded..
         /// </summary>
-        internal static string StockServiceDailyQuotaExceeded {
+        public static string StockServiceDailyQuotaExceeded {
             get {
                 return ResourceManager.GetString("StockServiceDailyQuotaExceeded", resourceCulture);
             }
@@ -360,7 +372,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Monthly stock quote service quota has been exceeded..
         /// </summary>
-        internal static string StockServiceMonthlyQuotaExceeded {
+        public static string StockServiceMonthlyQuotaExceeded {
             get {
                 return ResourceManager.GetString("StockServiceMonthlyQuotaExceeded", resourceCulture);
             }
@@ -369,7 +381,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Stock quote service quota has been exceeded, try again later..
         /// </summary>
-        internal static string StockServiceQuotaExceeded {
+        public static string StockServiceQuotaExceeded {
             get {
                 return ResourceManager.GetString("StockServiceQuotaExceeded", resourceCulture);
             }
@@ -378,7 +390,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Stock symbol {0} not found online.
         /// </summary>
-        internal static string SymbolNotFound {
+        public static string SymbolNotFound {
             get {
                 return ResourceManager.GetString("SymbolNotFound", resourceCulture);
             }
@@ -387,7 +399,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Transfer from closed account:.
         /// </summary>
-        internal static string TransferFromClosedAccountPrefix {
+        public static string TransferFromClosedAccountPrefix {
             get {
                 return ResourceManager.GetString("TransferFromClosedAccountPrefix", resourceCulture);
             }
@@ -396,7 +408,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Transfer from: .
         /// </summary>
-        internal static string TransferFromPrefix {
+        public static string TransferFromPrefix {
             get {
                 return ResourceManager.GetString("TransferFromPrefix", resourceCulture);
             }
@@ -405,7 +417,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Transfer to closed account: .
         /// </summary>
-        internal static string TransferToClosedAccountPrefix {
+        public static string TransferToClosedAccountPrefix {
             get {
                 return ResourceManager.GetString("TransferToClosedAccountPrefix", resourceCulture);
             }
@@ -414,7 +426,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Transfer to: .
         /// </summary>
-        internal static string TransferToPrefix {
+        public static string TransferToPrefix {
             get {
                 return ResourceManager.GetString("TransferToPrefix", resourceCulture);
             }
@@ -423,7 +435,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to TXF File (.txf)|*.txf.
         /// </summary>
-        internal static string TurboTaxFileFilter {
+        public static string TurboTaxFileFilter {
             get {
                 return ResourceManager.GetString("TurboTaxFileFilter", resourceCulture);
             }
@@ -432,7 +444,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The device is busy. Close any apps that are using this device or wait for it to finish and then try again..
         /// </summary>
-        internal static string WIA_ERROR_BUSY {
+        public static string WIA_ERROR_BUSY {
             get {
                 return ResourceManager.GetString("WIA_ERROR_BUSY", resourceCulture);
             }
@@ -441,7 +453,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to One or more of the device’s cover is open.
         /// </summary>
-        internal static string WIA_ERROR_COVER_OPEN {
+        public static string WIA_ERROR_COVER_OPEN {
             get {
                 return ResourceManager.GetString("WIA_ERROR_COVER_OPEN", resourceCulture);
             }
@@ -450,7 +462,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Error in scanner destination..
         /// </summary>
-        internal static string WIA_ERROR_DESTINATION {
+        public static string WIA_ERROR_DESTINATION {
             get {
                 return ResourceManager.GetString("WIA_ERROR_DESTINATION", resourceCulture);
             }
@@ -459,7 +471,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Communication with the WIA device failed. Make sure that the device is powered on and connected to the PC. If the problem persists, disconnect and reconnect the device..
         /// </summary>
-        internal static string WIA_ERROR_DEVICE_COMMUNICATION {
+        public static string WIA_ERROR_DEVICE_COMMUNICATION {
             get {
                 return ResourceManager.GetString("WIA_ERROR_DEVICE_COMMUNICATION", resourceCulture);
             }
@@ -468,7 +480,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The device is locked. Close any apps that are using this device or wait for it to finish and then try again.
         /// </summary>
-        internal static string WIA_ERROR_DEVICE_LOCKED {
+        public static string WIA_ERROR_DEVICE_LOCKED {
             get {
                 return ResourceManager.GetString("WIA_ERROR_DEVICE_LOCKED", resourceCulture);
             }
@@ -477,7 +489,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The device driver threw an exception..
         /// </summary>
-        internal static string WIA_ERROR_EXCEPTION_IN_DRIVER {
+        public static string WIA_ERROR_EXCEPTION_IN_DRIVER {
             get {
                 return ResourceManager.GetString("WIA_ERROR_EXCEPTION_IN_DRIVER", resourceCulture);
             }
@@ -486,7 +498,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to An unknown error has occurred with the scanning device..
         /// </summary>
-        internal static string WIA_ERROR_GENERAL_ERROR {
+        public static string WIA_ERROR_GENERAL_ERROR {
             get {
                 return ResourceManager.GetString("WIA_ERROR_GENERAL_ERROR", resourceCulture);
             }
@@ -495,7 +507,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to There is an incorrect setting on the scanner..
         /// </summary>
-        internal static string WIA_ERROR_INCORRECT_HARDWARE_SETTING {
+        public static string WIA_ERROR_INCORRECT_HARDWARE_SETTING {
             get {
                 return ResourceManager.GetString("WIA_ERROR_INCORRECT_HARDWARE_SETTING", resourceCulture);
             }
@@ -504,7 +516,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The device does not support this command.
         /// </summary>
-        internal static string WIA_ERROR_INVALID_COMMAND {
+        public static string WIA_ERROR_INVALID_COMMAND {
             get {
                 return ResourceManager.GetString("WIA_ERROR_INVALID_COMMAND", resourceCulture);
             }
@@ -513,7 +525,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The response from the driver is invalid..
         /// </summary>
-        internal static string WIA_ERROR_INVALID_DRIVER_RESPONSE {
+        public static string WIA_ERROR_INVALID_DRIVER_RESPONSE {
             get {
                 return ResourceManager.GetString("WIA_ERROR_INVALID_DRIVER_RESPONSE", resourceCulture);
             }
@@ -522,7 +534,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The scanner device was deleted. It can no longer be accessed.
         /// </summary>
-        internal static string WIA_ERROR_ITEM_DELETED {
+        public static string WIA_ERROR_ITEM_DELETED {
             get {
                 return ResourceManager.GetString("WIA_ERROR_ITEM_DELETED", resourceCulture);
             }
@@ -531,7 +543,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The scanner&apos;s lamp is off.
         /// </summary>
-        internal static string WIA_ERROR_LAMP_OFF {
+        public static string WIA_ERROR_LAMP_OFF {
             get {
                 return ResourceManager.GetString("WIA_ERROR_LAMP_OFF", resourceCulture);
             }
@@ -540,7 +552,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to A scan job was interrupted because an Imprinter/Endorser item reached the maximum valid value .
         /// </summary>
-        internal static string WIA_ERROR_MAXIMUM_PRINTER_ENDORSER_COUNTER {
+        public static string WIA_ERROR_MAXIMUM_PRINTER_ENDORSER_COUNTER {
             get {
                 return ResourceManager.GetString("WIA_ERROR_MAXIMUM_PRINTER_ENDORSER_COUNTER", resourceCulture);
             }
@@ -549,7 +561,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to A scan error occurred because of a multiple page feed condition.
         /// </summary>
-        internal static string WIA_ERROR_MULTI_FEED {
+        public static string WIA_ERROR_MULTI_FEED {
             get {
                 return ResourceManager.GetString("WIA_ERROR_MULTI_FEED", resourceCulture);
             }
@@ -558,7 +570,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Network reservation failed.
         /// </summary>
-        internal static string WIA_ERROR_NETWORK_RESERVATION_FAILED {
+        public static string WIA_ERROR_NETWORK_RESERVATION_FAILED {
             get {
                 return ResourceManager.GetString("WIA_ERROR_NETWORK_RESERVATION_FAILED", resourceCulture);
             }
@@ -567,7 +579,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The scanning device is not online..
         /// </summary>
-        internal static string WIA_ERROR_OFFLINE {
+        public static string WIA_ERROR_OFFLINE {
             get {
                 return ResourceManager.GetString("WIA_ERROR_OFFLINE", resourceCulture);
             }
@@ -576,7 +588,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The user requested a scan and there are no documents left in the document feeder..
         /// </summary>
-        internal static string WIA_ERROR_PAPER_EMPTY {
+        public static string WIA_ERROR_PAPER_EMPTY {
             get {
                 return ResourceManager.GetString("WIA_ERROR_PAPER_EMPTY", resourceCulture);
             }
@@ -585,7 +597,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to Paper is jammed in the scanner&apos;s document feeder..
         /// </summary>
-        internal static string WIA_ERROR_PAPER_JAM {
+        public static string WIA_ERROR_PAPER_JAM {
             get {
                 return ResourceManager.GetString("WIA_ERROR_PAPER_JAM", resourceCulture);
             }
@@ -594,7 +606,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to An unspecified problem occurred with the scanner&apos;s document feeder.
         /// </summary>
-        internal static string WIA_ERROR_PAPER_PROBLEM {
+        public static string WIA_ERROR_PAPER_PROBLEM {
             get {
                 return ResourceManager.GetString("WIA_ERROR_PAPER_PROBLEM", resourceCulture);
             }
@@ -603,7 +615,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to An unspecified error has occurred with the scanner that requires user intervention. The user should ensure that the device is turned on, online, and any cables are properly connected..
         /// </summary>
-        internal static string WIA_ERROR_USER_INTERVENTION {
+        public static string WIA_ERROR_USER_INTERVENTION {
             get {
                 return ResourceManager.GetString("WIA_ERROR_USER_INTERVENTION", resourceCulture);
             }
@@ -612,7 +624,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to The scanner is warming up..
         /// </summary>
-        internal static string WIA_ERROR_WARMING_UP {
+        public static string WIA_ERROR_WARMING_UP {
             get {
                 return ResourceManager.GetString("WIA_ERROR_WARMING_UP", resourceCulture);
             }
@@ -621,7 +633,7 @@ namespace Walkabout.Properties {
         /// <summary>
         ///   Looks up a localized string similar to XML files (*.xml)|*.xml.
         /// </summary>
-        internal static string XmlFileFilter {
+        public static string XmlFileFilter {
             get {
                 return ResourceManager.GetString("XmlFileFilter", resourceCulture);
             }

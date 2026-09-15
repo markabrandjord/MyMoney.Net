@@ -15124,7 +15124,7 @@ namespace Walkabout.Data
         public Transaction Transaction { get { return this.t; } }
     }
 
-    internal class MoneyException : Exception
+    public class MoneyException : Exception
     {
         public MoneyException(string message)
             : base(message)

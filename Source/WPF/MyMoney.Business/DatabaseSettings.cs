@@ -125,7 +125,7 @@ namespace Walkabout.Data
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
-        internal bool MigrateSettings(ISettingsMigrationSource settings)
+        public bool MigrateSettings(ISettingsMigrationSource settings)
         {
             bool changed = false;
             if (!this.fiscalYearStart.HasValue)

@@ -5,7 +5,7 @@ using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
-    internal class AutoCategorization
+    public class AutoCategorization
     {
         private KNearestNeighbor<Category> singleNeighbors = new KNearestNeighbor<Category>();
         private KNearestNeighbor<Category> splitNeighbors = new KNearestNeighbor<Category>();

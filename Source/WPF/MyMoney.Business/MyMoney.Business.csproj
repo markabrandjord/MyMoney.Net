@@ -19,8 +19,18 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <!--
+      PublicResXFileCodeGenerator (not the default ResXFileCodeGenerator) so
+      that Resources.Designer.cs's class and string properties come out
+      public, not internal - ~56 call sites across MyMoney.csproj need them
+      once Task 4 wires the ProjectReference. Resources.Designer.cs itself
+      was hand-edited to match (this environment can't trigger a real
+      regeneration); if it's ever regenerated for real (e.g. from Visual
+      Studio), this Generator value is what keeps that regeneration public
+      instead of silently reverting to internal.
+    -->
     <EmbeddedResource Update="Properties\Resources.resx">
-      <Generator>ResXFileCodeGenerator</Generator>
+      <Generator>PublicResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
   </ItemGroup>

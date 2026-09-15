@@ -7,7 +7,7 @@ using System.Xml;
 
 namespace Walkabout.Utilities
 {
-    internal class SimpleGraph
+    public class SimpleGraph
     {
         public Dictionary<string, SimpleGraphNode> Nodes;
         public List<SimpleGraphLink> Links;
@@ -121,7 +121,7 @@ namespace Walkabout.Utilities
         }
     }
 
-    internal class SimpleGraphNode : SimpleGraphEntry
+    public class SimpleGraphNode : SimpleGraphEntry
     {
         public string Id;
         public List<SimpleGraphNode> LinkTarget;
@@ -135,7 +135,7 @@ namespace Walkabout.Utilities
         public string Label { get; set; }
     }
 
-    internal class SimpleGraphLink : SimpleGraphEntry
+    public class SimpleGraphLink : SimpleGraphEntry
     {
         public SimpleGraphNode Source;
         public SimpleGraphNode Target;
@@ -147,7 +147,7 @@ namespace Walkabout.Utilities
         }
     }
 
-    internal class SimpleGraphEntry
+    public class SimpleGraphEntry
     {
         public List<SimpleGraphProperty> Properties = new List<SimpleGraphProperty>();
         public string Category;
@@ -175,7 +175,7 @@ namespace Walkabout.Utilities
 
     }
 
-    internal class SimpleGraphProperty
+    public class SimpleGraphProperty
     {
         public string Id;
         public object Value;
