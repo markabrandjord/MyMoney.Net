@@ -5,8 +5,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Windows.Forms;
-using System.Windows.Navigation;
 using System.Xml;
 using System.Xml.Serialization;
 using Walkabout.Data;

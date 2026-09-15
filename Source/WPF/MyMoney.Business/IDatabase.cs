@@ -4,6 +4,22 @@ using Walkabout.Utilities;
 namespace Walkabout.Data
 {
     /// <summary>
+    /// Identifies which storage engine an IDatabase implementation talks to.
+    /// Moved here (out of Database/SqlDatabase.cs, a SQL-Server-engine-specific
+    /// file that stays out of MyMoney.Business) because it is part of the
+    /// IDatabase contract itself, not any one engine's implementation detail.
+    /// </summary>
+    public enum DbFlavor
+    {
+        None,
+        SqlServer,
+        SqlCE,
+        Sqlite,
+        Xml,
+        BinaryXml
+    }
+
+    /// <summary>
     /// Interface for talking to different types of money storage.
     /// </summary>
     public interface IDatabase

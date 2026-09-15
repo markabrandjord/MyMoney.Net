@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoneyAdmin", "MyMoneyAdmi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UITests", "UITests\UITests.csproj", "{26E80421-1E19-4F44-B49C-F5C12000AEDE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Business", "MyMoney.Business\MyMoney.Business.csproj", "{419D683B-349D-4DBB-84FC-4AA73017D29E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -309,6 +311,30 @@ Global
 		{26E80421-1E19-4F44-B49C-F5C12000AEDE}.Release|x64.Build.0 = Release|Any CPU
 		{26E80421-1E19-4F44-B49C-F5C12000AEDE}.Release|x86.ActiveCfg = Release|Any CPU
 		{26E80421-1E19-4F44-B49C-F5C12000AEDE}.Release|x86.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|ARM.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|ARM.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|x64.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Debug|x86.Build.0 = Debug|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|ARM.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|ARM.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|ARM64.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x64.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x64.Build.0 = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x86.ActiveCfg = Release|Any CPU
+		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

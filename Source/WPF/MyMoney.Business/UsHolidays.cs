@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Walkabout.Utilities
 {
-    internal class UsHolidays
+    public class UsHolidays
     {
         private HashSet<DateTime> holidays;
         private int year;

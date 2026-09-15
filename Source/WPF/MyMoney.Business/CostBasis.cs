@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Security;
-using System.Windows.Navigation;
 
 namespace Walkabout.Data
 {

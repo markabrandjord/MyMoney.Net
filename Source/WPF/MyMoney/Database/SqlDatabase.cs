@@ -16,16 +16,6 @@ using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
-    public enum DbFlavor
-    {
-        None,
-        SqlServer,
-        SqlCE,
-        Sqlite,
-        Xml,
-        BinaryXml
-    }
-
     public enum ConnectMode
     {
         Create,
