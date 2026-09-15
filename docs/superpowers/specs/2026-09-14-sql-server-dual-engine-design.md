@@ -293,9 +293,11 @@ On app startup (DEBUG builds only):
 
 ## Error Handling
 
-- `sa` disabled → Yes/No retry dialog (see `sa` Handling above).
-- `sa` authentication fails for any other reason → distinct, specific
-  error message; bootstrap aborts.
+- `sa` authentication fails, for any reason (disabled, wrong password,
+  login doesn't exist -- these are indistinguishable to the client; see
+  the `sa` Handling section's revision note) → generic failure message
+  plus a Retry/Cancel prompt (`RetryLoop`/`SaBootstrapConnection`).
+  Retry re-attempts the connection; Cancel aborts the bootstrap.
 - `dataengine.credentials.json` missing or unreadable when the app
   expects `engine: "SqlServer"` and the database already exists → this
   indicates the credentials file was lost/moved after a successful
@@ -324,7 +326,15 @@ On app startup (DEBUG builds only):
 - Whether the credentials file's containing folder needs filesystem
   ACL hardening beyond default user-profile permissions. Not required
   for this dev-only prototype; noted for future consideration if this
-  moves beyond a single developer's workstation.
+  moves beyond a single developer's workstation. Note this assessment's
+  blast radius is now larger than when originally written: per the `sa`
+  Handling section's revision, the file holds a fourth entry (`sa`)
+  alongside the three scoped app accounts, so a compromise of this file
+  now means full SQL Server instance control, not just the three
+  purpose-limited accounts. This doesn't change the "not required for
+  this dev-only prototype" conclusion, but any future revisit of this
+  question should weigh the larger blast radius, not the original
+  three-account one.
 - Migrating existing XML `Settings`/`DatabaseSettings` persistence to
   JSON, and unifying it with `dataengine.config.json`'s format —
   explicitly deferred as a separate future work item.

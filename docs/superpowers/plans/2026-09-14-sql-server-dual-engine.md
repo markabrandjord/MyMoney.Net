@@ -5,6 +5,7 @@
 **Goal:** Let a DEBUG build of the WPF app run against SQL Server (in addition to today's default SQLite), via a revived `MyMoneyAdmin` tool that bootstraps a tiered-trust SQL Server database (three logins, stored-procedure-only access) and a new JSON config file that selects the engine.
 
 **Architecture:** A new console project (`MyMoneyAdmin`) performs one-time `sa`-driven bootstrap (create DB + three logins via a self-dropping `master`-db procedure, then deploy hand-authored schema/access/test stored procedures as the new `MyMoneyAdmin` login). The WPF app reads a new `dataengine.config.json` at startup (DEBUG builds only); when configured for SQL Server it auto-loads (invoking `MyMoneyAdmin` first if the database doesn't exist yet) using a new `SqlServerStoredProcDatabase` class that calls stored procedures instead of raw SQL. This plan implements the full mechanism end-to-end for one table (`Payees`) as a proving vertical slice — extending coverage to the rest of `Money.cs`'s tables is explicitly out of scope here (see Known Limitation below).
+**Post-implementation correction (whole-branch review, see `final-review-fix-report.md`):** as originally implemented, `SqlServerStoredProcDatabase` only overrode `ReadPayees`/`UpdatePayees` and inherited the base class's `Load()` unchanged, which tried to DDL/read every table via raw SQL that `MyMoneyUser` has no grants on — so the app's actual startup auto-load path could never succeed; only the Payees-only integration test (which calls `ReadPayees`/`UpdatePayees` directly, bypassing `Load()`) exercised the working path. `SqlServerStoredProcDatabase` now also overrides `Load()` to read only `Payees`, so the auto-load path this paragraph describes is now actually reachable through the app's normal startup — confirmed by build/unit-test verification, but still not confirmed against a real SQL Server (see the fix report's "needs live-server confirmation" list).
 
 **Tech Stack:** C# / .NET 10.0, `Microsoft.Data.SqlClient` 7.0.2, `Newtonsoft.Json` 13.0.4, NUnit 4.6.1 (existing project dependencies — no new packages required).
 
@@ -1614,7 +1615,11 @@ git commit -m "Wire DEBUG-only SQL Server auto-load into MainWindow startup"
 - Config-driven engine selection (`dataengine.config.json`) → Task 1, Task 10.
 - Credential store outside repo (`%USERPROFILE%\.secrets\MyMoney\...`) → Task 2.
 - Auto-generated passwords → Task 3.
-- `sa` never persisted, Retry/Cancel on failure → Task 4, Task 8.
+- `sa` credentials persisted in the same credentials file as the three
+  app accounts (revised 2026-09-14, mid-implementation, from the
+  original "never persisted" design -- see the spec's `sa` Handling
+  section for the accepted tradeoff), Retry/Cancel on any connection
+  failure → Task 4, Task 8.
 - Master-db self-dropping bootstrap procedure → Task 5.
 - Three tiered SQL logins → Task 5.
 - Hand-authored stored procedures for schema/access/test → Task 6.
