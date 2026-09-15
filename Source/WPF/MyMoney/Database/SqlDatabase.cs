@@ -1340,7 +1340,7 @@ namespace Walkabout.Data
 
 
         #region TABLE PAYEES and ALIAS
-        public void ReadPayees(Payees payees, MyMoney money)
+        public virtual void ReadPayees(Payees payees, MyMoney money)
         {
             payees.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Name FROM Payees");
@@ -1448,7 +1448,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdatePayees(Payees payees)
+        public virtual void UpdatePayees(Payees payees)
         {
             if (payees.Count == 0)
             {
