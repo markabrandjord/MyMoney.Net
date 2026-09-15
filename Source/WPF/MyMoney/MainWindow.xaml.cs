@@ -133,18 +133,6 @@ namespace Walkabout
 
             this.InitializeComponent();
 
-#if DEBUG
-            {
-                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
-                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney))
-                {
-                    this.database = autoDatabase;
-                    this.DataContext = autoMoney;
-                    this.canSave = true;
-                }
-            }
-#endif
-
             //-----------------------------------------------------------------
             // ACCOUNTS CONTROL
             this.accountsControl = new AccountsControl();
@@ -276,6 +264,44 @@ namespace Walkabout
             DownloadControl dc = item.Content as DownloadControl;
             this.ofxController = new OfxDownloadController(dc);
 
+#if DEBUG
+            // DEBUG-only SQL Server auto-load (see DataEngineStartup). This
+            // must run down here -- after DataContextChanged is subscribed
+            // (above) and after accountsControl/categoriesControl/
+            // payeesControl/securitiesControl exist (also above) -- not
+            // right after InitializeComponent(): setting this.DataContext
+            // before those are ready would either no-op (DataContextChanged
+            // not subscribed yet) or NullReferenceException (controls not
+            // created yet), and either way it would then get silently
+            // overwritten by the unconditional "this.DataContext =
+            // this.myMoney;" earlier in this constructor. Placing it here
+            // instead mirrors the app's normal successful-load sequence
+            // (see the LoadDatabase(...) UI-thread continuation): set
+            // database, flip UI bits that depend on it, then swap
+            // DataContext so OnDataContextChanged does the real wiring
+            // (re-pointing accountsControl/categoriesControl/payeesControl/
+            // securitiesControl and recreating attachmentManager/
+            // statementManager against the *new* MyMoney instance) exactly
+            // the same way a normal file-based Open does.
+            {
+                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
+                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg => this.log.Warning(msg)))
+                {
+                    this.database = autoDatabase;
+                    this.MenuFileAddUser.Visibility = autoDatabase.SupportsUserLogin ? Visibility.Visible : Visibility.Collapsed;
+                    this.DataContext = autoMoney; // triggers OnDataContextChanged -> full wiring, same as a normal load.
+                    this.canSave = true;
+                    // Suppress OnMainWindowLoaded's normal "open the last
+                    // database from Settings" / "create a new database"
+                    // flow -- we already have a loaded database now, and
+                    // that flow would otherwise stomp on it (or, worse,
+                    // pop a "create a new database?" confirmation dialog
+                    // on every startup, since this.database is non-null).
+                    this.emptyWindow = true;
+                    this.ApplyDisplayCurrency();
+                }
+            }
+#endif
         }
 
         private void OnExchangeRateError(object sender, Exception e)

@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
@@ -27,6 +28,38 @@ namespace Walkabout.Data
                 return this.ConnectionStringOverride;
             }
             return base.GetConnectionString(includeDatabase);
+        }
+
+        /// <summary>
+        /// Overrides the base SqlServerDatabase.Load(), which starts with
+        /// LazyCreateTables() (DDL against every [TableMapping] table) and
+        /// then reads every table via raw SQL (ReadOnlineAccounts,
+        /// ReadCategories, ReadAccounts, ReadTransactions, etc.). MyMoneyUser
+        /// only has EXECUTE grants on the four Payees_* access procedures
+        /// (see Database/SqlScripts/Access/Payees_AccessProcs.sql) -- it has
+        /// no direct table grants at all -- so LazyCreateTables() and every
+        /// ReadXxx() other than ReadPayees() would fail with a SQL Server
+        /// permissions error. This override reads only Payees, matching the
+        /// "Payees-only vertical slice" this class exists to prove out (see
+        /// the "Known Limitation" section of the plan that introduced it).
+        /// Every other MyMoney collection is left empty, not because the
+        /// data doesn't exist, but because reading it isn't wired up yet.
+        /// </summary>
+        public override MyMoney Load(IStatusService status)
+        {
+            MyMoney money = new MyMoney();
+            money.BeginUpdate(this);
+            try
+            {
+                this.ReadPayees(money.Payees, money);
+            }
+            finally
+            {
+                money.FlushUpdates();
+                money.EndUpdate();
+                money.OnLoaded();
+            }
+            return money;
         }
 
         public override void ReadPayees(Payees payees, MyMoney money)

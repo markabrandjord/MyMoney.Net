@@ -531,7 +531,7 @@ namespace Walkabout.Data
         }
 
 
-        public MyMoney Load(IStatusService status)
+        public virtual MyMoney Load(IStatusService status)
         {
             this.status = status;
 
