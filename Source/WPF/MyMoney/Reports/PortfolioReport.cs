@@ -192,7 +192,11 @@ namespace Walkabout.Reports
         {
             using (StreamWriter writer = new StreamWriter(filename, false, Encoding.UTF8))
             {
-                this.InternalGenerate(new CsvReportWriter(writer));
+                // Run on the thread pool and block synchronously (matching every other IReport.Export
+                // implementation, which are all synchronous) rather than discarding the Task, which let
+                // the `using` block close the writer before InternalGenerate finished writing to it.
+                // Task.Run avoids a SynchronizationContext deadlock from blocking the UI thread here.
+                Task.Run(() => this.InternalGenerate(new CsvReportWriter(writer))).GetAwaiter().GetResult();
             }
         }
 
