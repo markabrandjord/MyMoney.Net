@@ -2,7 +2,6 @@
 using System.IO;
 using System.Xml;
 using System.Xml.Serialization;
-using Walkabout.Configuration;
 
 namespace Walkabout.Data
 {
@@ -126,7 +125,7 @@ namespace Walkabout.Data
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
-        internal bool MigrateSettings(Settings settings)
+        internal bool MigrateSettings(ISettingsMigrationSource settings)
         {
             bool changed = false;
             if (!this.fiscalYearStart.HasValue)

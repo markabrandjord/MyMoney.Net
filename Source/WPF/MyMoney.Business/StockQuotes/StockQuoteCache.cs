@@ -12,7 +12,7 @@ namespace Walkabout.StockQuotes
     public class StockQuoteCache
     {
         private readonly MyMoney myMoney;
-        private readonly DownloadLog log;
+        private readonly IStockDownloadLog log;
         private IDictionary<Security, List<Investment>> transactionsBySecurity;
         private DateTime cacheDate;
         private HashSet<Security> changed;
@@ -21,7 +21,7 @@ namespace Walkabout.StockQuotes
         // For an O(1) Date => StockQuote lookup, so we index the stock quote history in a Dictionary here.
         private readonly Dictionary<Security, StockQuoteIndex> quoteIndex = new Dictionary<Security, StockQuoteIndex>();
 
-        public StockQuoteCache(MyMoney money, DownloadLog log)
+        public StockQuoteCache(MyMoney money, IStockDownloadLog log)
         {
             this.myMoney = money;
             this.log = log;

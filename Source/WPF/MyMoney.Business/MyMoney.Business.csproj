@@ -8,4 +8,39 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!--
+    Microsoft.WindowsDesktop.App.WPF is the only FrameworkReference profile that
+    resolves WindowsBase.dll (needed by Utilities/EventHandlerCollection.cs and
+    Utilities/Dispatcher.cs for the domain model's cross-thread event-marshaling
+    backbone - see Global Constraints in the layer-extraction plan). There is no
+    WindowsBase-only profile: this one also resolves the true UI-rendering
+    assemblies (PresentationCore, PresentationFramework and its skin variants,
+    PresentationUI) from the same ref pack. This project must never be able to
+    compile against those, so they're stripped back out of the resolved
+    reference list here - a stray reference to a WPF view type then fails to
+    compile immediately instead of silently succeeding, same enforcement intent
+    as leaving UseWPF unset.
+  -->
+  <Target Name="RemoveWpfViewRenderingAssemblies" BeforeTargets="ResolveAssemblyReferences" AfterTargets="ResolveFrameworkReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationUI'))" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -3241,10 +3241,6 @@ namespace Walkabout.Data
     }
 
     // This is a fake SQL type so we can differentiate between "char" and "nchar"
-    internal class SqlAscii
-    {
-    }
-
     public class BackupResults
     {
         public int LastRun;

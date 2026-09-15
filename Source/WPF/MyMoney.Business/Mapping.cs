@@ -7,6 +7,19 @@ using System.Text;
 
 namespace Walkabout.Data
 {
+    /// <summary>
+    /// Marker type used by ColumnMapping's SQL-type inference to distinguish an
+    /// ASCII/char string column from a Unicode/nchar one (see the typeof(SqlAscii)
+    /// checks below). Moved here (out of Database/SqlDatabase.cs, a SQL-Server-
+    /// engine-specific file that stays out of MyMoney.Business) because it is
+    /// part of the Mapping vocabulary this file defines, not any one engine's
+    /// implementation detail - the same reasoning as DbFlavor living in
+    /// IDatabase.cs instead of SqlDatabase.cs.
+    /// </summary>
+    public class SqlAscii
+    {
+    }
+
     public class TableMapping : Attribute
     {
         private List<ColumnMapping> columns;
