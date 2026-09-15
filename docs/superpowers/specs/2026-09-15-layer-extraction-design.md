@@ -128,39 +128,77 @@ MyMoney.Data.csproj  (net10.0-windows7.0)
   Database/XmlStore.cs
   Database/CsvStore.cs
   Database/SqlServerStoredProcDatabase.cs   (item #2)
-  Database/SampleDatabase.cs        -- Application.Current.MainWindow lookup
-                                        replaced with the same callback
   Database/DataEngineConfig.cs              (item #2, no WPF dependency)
   Database/DataEngineCredentialStore.cs     (item #2, no WPF dependency)
   Database/DataEnginePasswordGenerator.cs   (item #2, no WPF dependency)
+  Database/IDirectorySecurity.cs    -- pre-existing interface
+                                        (SqlServerDatabase already has a
+                                        settable IDirectorySecurity
+                                        SecurityService property; only its
+                                        one concrete implementation,
+                                        SecurityService, is WPF-app-bound
+                                        via Setup/DirectorySetup, so it
+                                        stays in MyMoney.csproj, same
+                                        injection pattern as
+                                        IDataLayerUiCallback below)
   Database/IDataLayerUiCallback.cs  -- new: the UI-decoupling interface
                                         (see below)
 
 MyMoney.csproj  (WPF app, thinned)
   references MyMoney.Business, MyMoney.Data
-  Database/MoneyDataObject.cs   -- relocated here from Database/ (it's WPF
+  Interop/MoneyDataObject.cs    -- relocated here from Database/ (it's WPF
                                     clipboard interop, IDataObject, not
                                     domain data)
   Database/DataEngineStartup.cs -- stays here; it wires into
                                     MainWindow.xaml.cs's constructor and is
                                     inherently WPF-startup-sequence code
-  StockQuotes/ (minus StockQuoteCache.cs) -- StockQuoteManager and the
-                                    fetch providers stay here, now consuming
-                                    StockQuoteCache from MyMoney.Business
-                                    instead of a sibling file
+  Database/SampleDatabase.cs    -- stays here in full, unmodified in kind:
+                                    it's not a storage engine (no IDatabase
+                                    implementation, lives in namespace
+                                    Walkabout.Assistance not Walkabout.Data)
+                                    but a WPF wizard whose Create() method
+                                    directly drives a real dialog
+                                    (SampleDatabaseOptions.ShowDialog()) as
+                                    its actual control flow -- discovered
+                                    during implementation planning to be far
+                                    more WPF-coupled than a single
+                                    Application.Current.MainWindow lookup.
+                                    Its portable data-construction logic
+                                    (everything after the dialog returns)
+                                    is split out into a new
+                                    SampleDataGenerator class in
+                                    MyMoney.Business instead -- not routed
+                                    through IDataLayerUiCallback, since the
+                                    dialog-driving code that stays here
+                                    never crosses the assembly boundary at
+                                    all.
+  StockQuotes/ (minus StockQuoteCache.cs, IStockQuoteService.cs) --
+                                    StockQuoteManager and the fetch
+                                    providers stay here, now consuming
+                                    StockQuoteCache/StockQuoteHistory from
+                                    MyMoney.Business instead of sibling
+                                    files
   a new class implementing IDataLayerUiCallback with the real
-    MessageBoxEx/dialog-owner calls, registered wherever SqlDatabase/
-    SampleDatabase are constructed
+    MessageBoxEx call, registered wherever SqlServerDatabase is
+    constructed (IDataLayerUiCallback ended up serving only the
+    SqlDatabase.cs mixed-mode-login warning -- see above for why
+    SampleDatabase doesn't use it)
   everything else unchanged: Views/, Reports/, Charts/, Taxes/,
     Importers/, Ofx/, MainWindow.xaml.cs, etc.
 ```
 
 ## UI-Decoupling Mechanism
 
-`SqlDatabase.cs`'s mixed-mode-login warning and `SampleDatabase.cs`'s
-dialog-owner lookup are the only two real UI calls found inside the
-code being extracted. Both are replaced by a single small interface
-in `MyMoney.Data`:
+Investigation during implementation planning found `SampleDatabase.cs`
+is not actually a data-layer class at all (see Architecture, above) —
+it stays in `MyMoney.csproj` entirely, so its
+`Application.Current.MainWindow` dialog-owner lookup never needs to
+cross the assembly boundary. That leaves exactly one real UI call
+inside the code being extracted: `SqlServerDatabase.AddLogin`'s
+mixed-mode-login warning (`SqlDatabase.cs`) — the original authors had
+already left a `// TODO - we need to remove any UI from the DataBase
+model lower layer` comment at that exact line. It's replaced by a
+single small interface in `MyMoney.Data`:
 
 ```csharp
 namespace Walkabout.Data
@@ -168,25 +206,18 @@ namespace Walkabout.Data
     public interface IDataLayerUiCallback
     {
         void ShowWarning(string message, string title);
-        object GetDialogOwner();  // returns a window handle/owner object;
-                                   // typed as object to avoid a WPF
-                                   // dependency in this project — the WPF
-                                   // implementation casts it appropriately
     }
 }
 ```
 
-`SqlDatabase` and `SampleDatabase` take an `IDataLayerUiCallback` (via
-constructor parameter or settable property, matching whichever pattern
-the implementation finds least invasive to the existing call sites —
-decided during implementation, not a design-level fork) and call it
-instead of touching WPF types directly. `MyMoney.csproj` provides the
-real implementation (backed by `MessageBoxEx.Show` and
-`Application.Current.MainWindow`) at the point these classes are
-constructed. If no callback is supplied (e.g. a future non-WPF
-consumer), the two call sites degrade gracefully — log and continue
-for the warning, `null` owner for the dialog (the underlying dialog
-API already accepts a null owner).
+`SqlServerDatabase` takes an `IDataLayerUiCallback` via a settable
+property (matching the existing `SecurityService` property's pattern
+on the same class) and calls it instead of touching
+`MessageBoxEx`/`MessageBoxButton`/`MessageBoxImage` directly.
+`MyMoney.csproj` provides the real implementation (backed by
+`MessageBoxEx.Show`) and sets it wherever `SqlServerDatabase` is
+constructed. If no callback is supplied, the call site degrades
+gracefully (a no-op via `?.`) rather than throwing.
 
 ## Migration Sequencing
 
