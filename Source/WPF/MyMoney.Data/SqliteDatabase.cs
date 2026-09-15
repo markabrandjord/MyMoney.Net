@@ -34,8 +34,10 @@ namespace Walkabout.Data
 
 
         // BugBug: there's some sort of horrible exponential performance bug in the System.Data.Sqlite wrappers.
-        // so for now we have to return false, even though that too is slow.  
+        // so for now we have to return false, even though that too is slow.
         public override bool SupportsBatchUpdate { get { return false; } }
+
+        public override bool SupportsParameterizedUpdate { get { return true; } }
 
         protected override string GetConnectionString(bool includeDatabase)
         {
@@ -477,6 +479,36 @@ namespace Walkabout.Data
 #endif
                 using (DbCommand command = new SQLiteCommand(cmd, this.sqliteConnection))
                 {
+                    command.ExecuteNonQuery();
+                }
+            }
+            catch (Exception)
+            {
+                throw; // useful for setting breakpoints.
+            }
+        }
+
+        public override void ExecuteNonQuery(string cmd, params (string Name, object Value)[] parameters)
+        {
+            Debug.Assert(this.DbFlavor == DbFlavor.Sqlite);
+            if (cmd == null || cmd.Trim().Length == 0)
+            {
+                return;
+            }
+
+            this.AppendLog(cmd);
+            try
+            {
+                this.Connect();
+                using (DbCommand command = new SQLiteCommand(cmd, this.sqliteConnection))
+                {
+                    foreach (var (name, value) in parameters)
+                    {
+                        DbParameter p = command.CreateParameter();
+                        p.ParameterName = name;
+                        p.Value = value ?? DBNull.Value;
+                        command.Parameters.Add(p);
+                    }
                     command.ExecuteNonQuery();
                 }
             }
