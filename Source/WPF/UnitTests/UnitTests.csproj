@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
+    <ProjectReference Include="..\MyMoneyAdmin\MyMoneyAdmin.csproj" />
   </ItemGroup>
 
 </Project>
