@@ -147,6 +147,17 @@ namespace Walkabout.Data
 
         public virtual bool SupportsBatchUpdate { get { return true; } }
 
+        /// <summary>
+        /// When true, the per-row CRUD methods (UpdatePayees, etc.) build parameterized
+        /// commands (SqlParameter/DbParameter) instead of interpolating DBString-escaped
+        /// values directly into the SQL text. Deliberately a separate flag from
+        /// SupportsBatchUpdate rather than reusing it: SqlCeDatabase also has
+        /// SupportsBatchUpdate == false, and this codebase has no way to exercise SQL CE
+        /// in this environment to verify a behavior change there, so its code path must
+        /// stay untouched. Only SqliteDatabase opts in.
+        /// </summary>
+        public virtual bool SupportsParameterizedUpdate { get { return false; } }
+
         public virtual bool Exists
         {
             get
@@ -874,6 +885,38 @@ namespace Walkabout.Data
             }
         }
 
+        /// <summary>
+        /// Executes a parameterized non-query statement. Only reached when
+        /// SupportsParameterizedUpdate is true (SqliteDatabase overrides this method); this
+        /// base implementation exists for interface completeness and virtual-dispatch
+        /// correctness, not because real SqlServerDatabase usage currently reaches it.
+        /// </summary>
+        public virtual void ExecuteNonQuery(string cmd, params (string Name, object Value)[] parameters)
+        {
+            if (cmd == null || cmd.Trim().Length == 0)
+            {
+                return;
+            }
+
+            this.log.AppendLine(cmd);
+            try
+            {
+                using (SqlCommand command = new SqlCommand(cmd, this.ConnectSqlServer(), this.transaction))
+                {
+                    command.CommandTimeout = 30;
+                    foreach (var (name, value) in parameters)
+                    {
+                        command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                    }
+                    command.ExecuteNonQuery();
+                }
+            }
+            catch (Exception)
+            {
+                throw; // useful for setting breakpoints.
+            }
+        }
+
         public virtual IDataReader ExecuteReader(string cmd)
         {
 
@@ -1458,6 +1501,25 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Payee p in payees)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (p.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE Payees SET Name=@Name WHERE Id=@Id;",
+                            ("@Name", p.Name), ("@Id", p.Id));
+                    }
+                    else if (p.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO Payees (Id, Name) VALUES (@Id, @Name);",
+                            ("@Id", p.Id), ("@Name", p.Name));
+                    }
+                    else if (p.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Payees WHERE Id=@Id;", ("@Id", p.Id));
+                    }
+                    continue;
+                }
+
                 if (p.IsChanged)
                 {
                     sb.AppendLine("-- updating payee: " + p.Name);
