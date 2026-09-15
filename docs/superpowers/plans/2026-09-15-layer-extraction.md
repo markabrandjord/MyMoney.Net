@@ -316,9 +316,18 @@ Expected: 0 errors.
 
 - [ ] **Step 7: Confirm no WPF assembly reference**
 
-Run: `dotnet build Source/WPF/MyMoney.Data/MyMoney.Data.csproj -v:d 2>&1 | grep -i "PresentationFramework\|PresentationCore\|WindowsBase"`
+**Correction (found during Task 2, 2026-09-15):** the literal `-v:d | grep` command below produces non-empty output in practice, but it's a false positive, not a real leak — `MyMoney.Business`'s `FrameworkReference` (added by Task 1's Ruling A) flows transitively through the `ProjectReference` and shows up in `MyMoney.Data`'s verbose RAR log as an available-but-unused compiler input, even though `MyMoney.Data.dll` itself never references it. The actual gate is what the assembly's own metadata says it references, not what MSBuild's resolver had available — use the reflection-based check instead (the same mechanism Task 6's `LayerBoundaryTests` uses), which is the check that actually matters:
 
-Expected: no output.
+```bash
+dotnet build Source/WPF/MyMoney.Data/MyMoney.Data.csproj
+dotnet run --project Source/WPF/MyMoney.Data -- 2>/dev/null || true
+```
+(If there's no convenient way to run a one-off reflection check from the command line at this point in the plan — `MyMoney.Data.csproj` is a library, not an executable — skip straight to Task 6, where `LayerBoundaryTests.MyMoneyData_HasNoWpfAssemblyReference` performs this exact check for real, in a real test run, and treat that as this step's actual verification. Don't rely on the `-v:d | grep` command below as a pass/fail gate; it's noisy in this specific transitively-referenced-project shape.)
+
+Run for informational purposes only, not as a gate (expect it to show `WindowsBase`/possibly others among many unrelated lines — that's the known noise, not a failure):
+```bash
+dotnet build Source/WPF/MyMoney.Data/MyMoney.Data.csproj -v:d 2>&1 | grep -i "PresentationFramework\|PresentationCore\|WindowsBase"
+```
 
 - [ ] **Step 8: Add to solution**
 
@@ -590,6 +599,8 @@ namespace Walkabout.Data
 - [ ] **Step 5: Wire the callback where AddLogin is reachable**
 
 `AddLogin` is called from `Source/WPF/MyMoney/Dialogs/AddLoginDialog.xaml.cs:81` (`this.database.AddLogin(user, pswd)`). Find where that dialog's `this.database` field is assigned (its constructor or an initializer) and confirm it is (or cast it to) a `SqlServerDatabase`. Set `.UiCallback = new WpfDataLayerUiCallback()` on it at that assignment point, the same way `.SecurityService = new SecurityService()` is already set at the two `new SqlServerDatabase()` sites in `MainWindow.xaml.cs`. If `AddLoginDialog` receives an already-constructed `SqlServerDatabase` from `MainWindow.xaml.cs` instead of constructing its own, add `UiCallback = new WpfDataLayerUiCallback()` to the object initializers at `MainWindow.xaml.cs`'s two `new SqlServerDatabase()` sites (~line 1992 and ~line 2204) instead, alongside the existing `SecurityService = new SecurityService()` line — trace the actual data flow from `AddLoginDialog`'s `database` field backward to find the real construction site before deciding which.
+
+**Also wire it for `CsvStore` (found during Task 2, not in the original brief):** Task 2's per-file grep for the brief's move list missed a second `MessageBoxEx.Show` call — `CsvStore.Backup` ("XML Backup is not implemented"). Task 2 already applied the same `IDataLayerUiCallback` pattern to it (`CsvStore` now has a `UiCallback` property, same shape as `SqlServerDatabase`'s). Find every `new CsvStore(...)` construction site in `MyMoney.csproj` (`grep -rn "new CsvStore(" Source/WPF/MyMoney --include=*.cs`) and set `.UiCallback = new WpfDataLayerUiCallback()` on each, same as the `SqlServerDatabase` sites above.
 
 - [ ] **Step 6: Fix the Restore() factory's removed default**
 
