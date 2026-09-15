@@ -1426,10 +1426,36 @@ git commit -m "Add BootstrapRunner and Program entry point for MyMoneyAdmin"
 
 ## Task 10: WPF app startup integration
 
+**Revision note (post-implementation, multiple rounds):** the code blocks
+below are the task's original design and no longer match the shipped
+files exactly — both diverged during implementation and two further
+rounds of whole-branch review and live-server verification. Treat this
+section as historical context, not a literal reference; the actual
+source files are authoritative:
+- `Source/WPF/MyMoney/Database/DataEngineStartup.cs`
+- `Source/WPF/MyMoney/MainWindow.xaml.cs`
+- `Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj`
+
+Three concrete divergences worth calling out explicitly (see Step 1 and
+Step 3 below for what actually happened and why):
+1. The MSBuild wiring described in Step 1 (a `ProjectReference` from
+   `MyMoney.csproj` to `MyMoneyAdmin.csproj`) was never implemented —
+   it would have created a real circular project reference. The copy
+   target lives in `MyMoneyAdmin.csproj` instead; `MyMoney.csproj` is
+   never modified by this task.
+2. The auto-load block in Step 3 does not sit right after
+   `InitializeComponent()` — it moved to the end of the constructor,
+   after `DataContextChanged` is subscribed, to fix a bug where the
+   loaded model was being silently discarded.
+3. `DataEngineStartup.TryAutoLoad` gained a synthetic `DatabasePath`
+   assignment, config/credential-file error handling, and database-name
+   validation beyond what Step 2's code block shows below, following
+   two further review rounds and live-server testing.
+
 **Files:**
 - Create: `Source/WPF/MyMoney/Database/DataEngineStartup.cs`
-- Modify: `Source/WPF/MyMoney/MainWindow.xaml.cs` (constructor, around `Source/WPF/MyMoney/MainWindow.xaml.cs:134`, right after `this.InitializeComponent();`)
-- Modify: `Source/WPF/MyMoney/MyMoney.csproj` (add a build-order-only reference to `MyMoneyAdmin.csproj` and a post-build copy target, so `MyMoneyAdmin.exe` ends up next to `MyMoney.exe`)
+- Modify: `Source/WPF/MyMoney/MainWindow.xaml.cs` (constructor — see revision note above for the actual insertion point)
+- Modify: `Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj` (add a post-build copy target so `MyMoneyAdmin.exe` ends up next to `MyMoney.exe` — see revision note above for why this landed here instead of `MyMoney.csproj`)
 
 **Interfaces:**
 - Consumes: `DataEngineConfig.Load` (Task 1), `DataEngineCredentialStore` (Task 2), `SqlServerStoredProcDatabase` (Task 7).
@@ -1441,36 +1467,47 @@ git commit -m "Add BootstrapRunner and Program entry point for MyMoneyAdmin"
 
 `MyMoneyAdmin.csproj` (Task 4) builds to its own separate output folder
 (`Source/WPF/MyMoneyAdmin/bin/...`) — nothing so far puts `MyMoneyAdmin.exe`
-next to `MyMoney.exe`, which Step 2 below needs. Add this to
-`Source/WPF/MyMoney/MyMoney.csproj`, inside the existing `<Project>` element:
+next to `MyMoney.exe`, which Step 2 below needs.
+
+**As actually implemented:** `MyMoneyAdmin.csproj` already has a
+`ProjectReference` to `MyMoney.csproj` (from Task 9, needed for
+`DataEngineCredentialStore`/`DataEnginePasswordGenerator`). Adding the
+reverse reference this step originally called for — from `MyMoney.csproj`
+to `MyMoneyAdmin.csproj` — would create a real circular project reference
+(`MyMoney → MyMoneyAdmin → MyMoney`) and fails at restore. Since
+`MyMoneyAdmin` already depends on (and therefore always builds after)
+`MyMoney`, no new reference is needed in either direction — the copy
+target just needs to live in `MyMoneyAdmin.csproj` instead, copying its
+own output into `MyMoney`'s output directory after it builds.
+`MyMoney.csproj` is never modified by this task. Add this to
+`Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj`, inside the existing
+`<Project>` element:
 
 ```xml
-  <ItemGroup>
-    <!-- Build-order-only reference: pulls in MyMoneyAdmin's own build
-         (so its .exe exists to copy below) without adding an assembly
-         reference to it -- MyMoney never calls into MyMoneyAdmin's API. -->
-    <ProjectReference Include="..\MyMoneyAdmin\MyMoneyAdmin.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-  </ItemGroup>
-
-  <Target Name="CopyMyMoneyAdminOutput" AfterTargets="Build">
+  <Target Name="CopyMyMoneyAdminOutputToMyMoney" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
     <ItemGroup>
-      <MyMoneyAdminOutput Include="$(MSBuildThisFileDirectory)..\MyMoneyAdmin\bin\$(Configuration)\net10.0\**\*.*" />
+      <MyMoneyAdminOutput Include="$(OutDir)**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(MyMoneyAdminOutput)"
-          DestinationFolder="$(OutDir)%(RecursiveDir)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\MyMoney\bin\$(Configuration)\net10.0-windows7.0\win-x64\%(RecursiveDir)"
           SkipUnchangedFiles="true"
-          Condition="Exists('$(MSBuildThisFileDirectory)..\MyMoneyAdmin\bin\$(Configuration)\net10.0')" />
+          Condition="Exists('$(MSBuildThisFileDirectory)..\MyMoney\bin\$(Configuration)\net10.0-windows7.0\win-x64')" />
   </Target>
 ```
+
+The `Condition="'$(Configuration)' == 'Debug'"` on the target itself is
+required, not optional — without it, Release builds copy `MyMoneyAdmin.exe`
+next to `MyMoney.exe` too, contradicting "Release builds completely
+unaffected." (This condition was missing in an earlier round and caught
+by review before merge.)
 
 Run `dotnet build Source/WPF/MyMoney.sln` and confirm `MyMoneyAdmin.exe` (and
 its dependency DLLs) now appear alongside `MyMoney.exe` in
 `Source/WPF/MyMoney/bin/Debug/net10.0-windows7.0/win-x64/`. If they don't
 show up, check that `$(Configuration)` matches what you built (Debug vs
-Release) and that Task 4/9 already produced a `MyMoneyAdmin/bin/Debug/net10.0/`
-folder to copy from.
+Release) and that Task 4/9 already produced a `MyMoneyAdmin/bin/Debug/net10.0-windows7.0/`
+folder to copy from. Also confirm with a `-c Release` build that they're
+absent there.
 
 - [ ] **Step 2: Write the DataEngineStartup implementation**
 
@@ -1521,7 +1558,13 @@ namespace Walkabout.Data
                 DataSource = config.Server,
                 InitialCatalog = config.Database,
                 UserID = userCredential.UserId,
-                Password = userCredential.Password
+                Password = userCredential.Password,
+                // Required against real dev SQL Server instances with a
+                // self-signed/untrusted cert -- omitting this was found,
+                // via live-server testing, to block every connection
+                // attempt in this feature (all four connection-string
+                // builders across the codebase need it, not just this one).
+                TrustServerCertificate = true
             };
 
             var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
@@ -1566,21 +1609,22 @@ namespace Walkabout.Data
 
 - [ ] **Step 3: Wire into `MainWindow`'s constructor**
 
-In `Source/WPF/MyMoney/MainWindow.xaml.cs`, immediately after the `this.InitializeComponent();` line (currently line 134), add:
-
-```csharp
-#if DEBUG
-            {
-                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
-                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney))
-                {
-                    this.database = autoDatabase;
-                    this.DataContext = autoMoney;
-                    this.canSave = true;
-                }
-            }
-#endif
-```
+**As actually implemented:** this does *not* sit right after
+`InitializeComponent()`. The original placement set `this.DataContext`
+before `DataContextChanged` was subscribed (that subscription happens
+later in the constructor), so the auto-loaded model was silently
+discarded — the handler that does the real wiring (`this.myMoney =
+money`, and populating `accountsControl`/`categoriesControl`/etc.) never
+ran. Fixed by moving this block to the end of the constructor, after
+`DataContextChanged += ...` is subscribed and after the account/category/
+payee/securities controls and `ofxController` are constructed — mirroring
+the same sequence a normal file-based load already uses elsewhere in this
+file (database, `DataContext`, `canSave`, `emptyWindow`), rather than a
+minimal hand-picked subset of it. See
+`Source/WPF/MyMoney/MainWindow.xaml.cs` for the current, authoritative
+placement and body — it now also sets `this.emptyWindow = true` (so
+`OnMainWindowLoaded` doesn't separately try to reopen the last-used file)
+and threads a logger callback into `TryAutoLoad` for visible diagnostics.
 
 - [ ] **Step 4: Build**
 
@@ -1603,7 +1647,7 @@ Expected: 0 errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/MyMoney.csproj
+git add Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj
 git commit -m "Wire DEBUG-only SQL Server auto-load into MainWindow startup"
 ```
 
