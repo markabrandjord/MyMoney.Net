@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Microsoft.Data.SqlClient;
 
 namespace Walkabout.Data
@@ -84,22 +83,14 @@ namespace Walkabout.Data
                 }
             }
 
-            List<Payee> toRemove = new List<Payee>();
             foreach (Payee p in payees)
             {
-                if (p.IsDeleted)
-                {
-                    toRemove.Add(p);
-                }
-                else
+                if (!p.IsDeleted)
                 {
                     p.OnUpdated();
                 }
             }
-            foreach (Payee p in toRemove)
-            {
-                p.Parent.RemoveChild(p);
-            }
+            payees.RemoveDeleted();
         }
 
         private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)

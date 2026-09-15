@@ -37,14 +37,25 @@ namespace Walkabout.Tests
             Assert.That(found, Is.Not.Null);
             Assert.That(found.Id, Is.EqualTo(999001));
 
-            found.OnDelete();
-            var toDelete = new Payees(reloaded);
-            toDelete.Add(found);
+            // Exercise the dbo.Payees_Update path (p.IsChanged branch).
+            found.Name = "SqlServerStoredProcDatabaseTests Payee Updated";
+            db.UpdatePayees(reloaded.Payees);
+
+            var afterUpdate = new MyMoney();
+            db.ReadPayees(afterUpdate.Payees, afterUpdate);
+            var updated = afterUpdate.Payees.FindPayee("SqlServerStoredProcDatabaseTests Payee Updated", false);
+            Assert.That(updated, Is.Not.Null);
+            Assert.That(updated.Id, Is.EqualTo(999001));
+            Assert.That(afterUpdate.Payees.FindPayee("SqlServerStoredProcDatabaseTests Payee", false), Is.Null);
+
+            updated.OnDelete();
+            var toDelete = new Payees(afterUpdate);
+            toDelete.Add(updated);
             db.UpdatePayees(toDelete);
 
             var afterDelete = new MyMoney();
             db.ReadPayees(afterDelete.Payees, afterDelete);
-            Assert.That(afterDelete.Payees.FindPayee("SqlServerStoredProcDatabaseTests Payee", false), Is.Null);
+            Assert.That(afterDelete.Payees.FindPayee("SqlServerStoredProcDatabaseTests Payee Updated", false), Is.Null);
         }
     }
 }
