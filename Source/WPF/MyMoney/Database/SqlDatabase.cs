@@ -1055,6 +1055,35 @@ namespace Walkabout.Data
             return "'" + value.ToString("G", CultureInfo.InvariantCulture) + "'";
         }
 
+        /// <summary>
+        /// Parameter-value equivalents of DBDateTime/DBGuid above, for the parameterized CRUD
+        /// path (SupportsParameterizedUpdate). Preserve the same null-sentinel semantics and
+        /// (for dates) the same whole-second truncation as the SQL-text versions, so persisted
+        /// values are unchanged - only how they reach the database changes.
+        /// </summary>
+        private static object DBDateTimeParam(DateTime dt)
+        {
+            if (dt == DateTime.MinValue)
+            {
+                return DBNull.Value;
+            }
+            return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Kind);
+        }
+
+        private static object DBNullableDateTimeParam(DateTime? ndt)
+        {
+            if (!ndt.HasValue)
+            {
+                return DBNull.Value;
+            }
+            return DBDateTimeParam(ndt.Value);
+        }
+
+        private static object DBGuidParam(SqlGuid guid)
+        {
+            return guid.IsNull ? (object)DBNull.Value : guid.ToString();
+        }
+
         // return 0 if the column is null
         internal static int ReadInt32(IDataReader reader, int i)
         {
@@ -1164,6 +1193,48 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Account a in accounts)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (a.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE Accounts SET AccountId=@AccountId,OfxAccountId=@OfxAccountId,Name=@Name,Type=@Type,Description=@Description," +
+                            "OnlineAccount=@OnlineAccount,OpeningBalance=@OpeningBalance,LastSync=@LastSync,LastBalance=@LastBalance,SyncGuid=@SyncGuid," +
+                            "Flags=@Flags,Currency=@Currency,WebSite=@WebSite,ReconcileWarning=@ReconcileWarning,CategoryIdForPrincipal=@CategoryIdForPrincipal," +
+                            "CategoryIdForInterest=@CategoryIdForInterest WHERE Id=@Id;",
+                            ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                            ("@Type", (int)a.Type), ("@Description", a.Description),
+                            ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                            ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                            ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                            ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                            ("@ReconcileWarning", a.ReconcileWarning),
+                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
+                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id),
+                            ("@Id", a.Id));
+                    }
+                    else if (a.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            "INSERT INTO Accounts (Id,AccountId,OfxAccountId,Name,Type,Description,OnlineAccount,OpeningBalance,LastSync,LastBalance,SyncGuid,Flags,Currency,WebSite,ReconcileWarning,CategoryIdForPrincipal,CategoryIdForInterest) " +
+                            "VALUES (@Id,@AccountId,@OfxAccountId,@Name,@Type,@Description,@OnlineAccount,@OpeningBalance,@LastSync,@LastBalance,@SyncGuid,@Flags,@Currency,@WebSite,@ReconcileWarning,@CategoryIdForPrincipal,@CategoryIdForInterest);",
+                            ("@Id", a.Id), ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                            ("@Type", (int)a.Type), ("@Description", a.Description),
+                            ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                            ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                            ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                            ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                            ("@ReconcileWarning", a.ReconcileWarning),
+                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
+                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id));
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Accounts WHERE Id=@Id;", ("@Id", a.Id));
+                    }
+                    continue;
+                }
+
                 if (a.IsChanged)
                 {
                     sb.AppendLine("-- updating account: " + a.Name);
@@ -1302,6 +1373,42 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (OnlineAccount i in accounts)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (i.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE OnlineAccounts SET Name=@Name,Institution=@Institution,OFX=@OFX,FID=@FID,UserId=@UserId,Password=@Password," +
+                            "BankId=@BankId,BranchId=@BranchId,BrokerId=@BrokerId,OfxVersion=@OfxVersion,LogoUrl=@LogoUrl,AppId=@AppId,AppVersion=@AppVersion," +
+                            "ClientUid=@ClientUid,UserCred1=@UserCred1,UserCred2=@UserCred2,AuthToken=@AuthToken,AccessKey=@AccessKey,UserKey=@UserKey," +
+                            "UserKeyExpireDate=@UserKeyExpireDate WHERE Id=@Id;",
+                            ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                            ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                            ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                            ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                            ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                            ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)),
+                            ("@Id", i.Id));
+                    }
+                    else if (i.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            "INSERT INTO OnlineAccounts (Id,Name,Institution,OFX,FID,UserId,Password,BankId,BranchId,BrokerId,OfxVersion,LogoUrl,AppId,AppVersion,ClientUid,UserCred1,UserCred2,AuthToken,AccessKey,UserKey,UserKeyExpireDate) " +
+                            "VALUES (@Id,@Name,@Institution,@OFX,@FID,@UserId,@Password,@BankId,@BranchId,@BrokerId,@OfxVersion,@LogoUrl,@AppId,@AppVersion,@ClientUid,@UserCred1,@UserCred2,@AuthToken,@AccessKey,@UserKey,@UserKeyExpireDate);",
+                            ("@Id", i.Id), ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                            ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                            ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                            ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                            ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                            ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)));
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM OnlineAccounts WHERE Id=@Id;", ("@Id", i.Id));
+                    }
+                    continue;
+                }
+
                 if (i.IsChanged)
                 {
                     sb.AppendLine("-- updating online account: " + i.Name);
@@ -1576,6 +1683,25 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Alias a in aliases)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (a.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE Aliases SET Pattern=@Pattern,Payee=@Payee,Flags=@Flags WHERE Id=@Id;",
+                            ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType), ("@Id", a.Id));
+                    }
+                    else if (a.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO Aliases (Id, Pattern, Payee, Flags) VALUES (@Id,@Pattern,@Payee,@Flags);",
+                            ("@Id", a.Id), ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType));
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Aliases WHERE Id=@Id;", ("@Id", a.Id));
+                    }
+                    continue;
+                }
+
                 if (a.IsChanged)
                 {
                     sb.AppendLine("-- updating alias: " + a.Pattern);
@@ -1630,6 +1756,25 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (AccountAlias a in accountAliases)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (a.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE AccountAliases SET Pattern=@Pattern,AccountId=@AccountId,Flags=@Flags WHERE Id=@Id;",
+                            ("@Pattern", a.Pattern), ("@AccountId", a.AccountId), ("@Flags", (int)a.AliasType), ("@Id", a.Id));
+                    }
+                    else if (a.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO AccountAliases (Id, Pattern, AccountId, Flags) VALUES (@Id,@Pattern,@AccountId,@Flags);",
+                            ("@Id", a.Id), ("@Pattern", a.Pattern), ("@AccountId", a.AccountId), ("@Flags", (int)a.AliasType));
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM AccountAliases WHERE Id=@Id;", ("@Id", a.Id));
+                    }
+                    continue;
+                }
+
                 if (a.IsChanged)
                 {
                     sb.AppendLine("-- updating account alias: " + a.Pattern);
@@ -1685,6 +1830,27 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (TransactionExtra e in extras)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (e.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE TransactionExtras SET [Transaction]=@Transaction,[TaxYear]=@TaxYear,[TaxDate]=@TaxDate WHERE Id=@Id;",
+                            ("@Transaction", e.Transaction), ("@TaxYear", e.TaxYear),
+                            ("@TaxDate", DBNullableDateTimeParam(e.TaxDate)), ("@Id", e.Id));
+                    }
+                    else if (e.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO TransactionExtras ([Id], [Transaction], [TaxYear], [TaxDate]) VALUES (@Id,@Transaction,@TaxYear,@TaxDate);",
+                            ("@Id", e.Id), ("@Transaction", e.Transaction), ("@TaxYear", e.TaxYear),
+                            ("@TaxDate", DBNullableDateTimeParam(e.TaxDate)));
+                    }
+                    else if (e.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM TransactionExtras WHERE Id=@Id;", ("@Id", e.Id));
+                    }
+                    continue;
+                }
+
                 if (e.IsChanged)
                 {
                     sb.AppendLine("-- updating transaction extra: " + e.Transaction);
@@ -1809,6 +1975,52 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (RentBuilding p in buildings)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (p.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE RentBuildings SET Name=@Name, Address=@Address, PurchasedPrice=@PurchasedPrice, LandValue=@LandValue, " +
+                            "EstimatedValue=@EstimatedValue, CategoryForIncome=@CategoryForIncome, CategoryForTaxes=@CategoryForTaxes, " +
+                            "CategoryForInterest=@CategoryForInterest, CategoryForRepairs=@CategoryForRepairs, CategoryForMaintenance=@CategoryForMaintenance, " +
+                            "CategoryForManagement=@CategoryForManagement, OwnershipName1=@OwnershipName1, OwnershipName2=@OwnershipName2, " +
+                            "OwnershipPercentage1=@OwnershipPercentage1, OwnershipPercentage2=@OwnershipPercentage2, Note=@Note WHERE Id=@Id;",
+                            ("@Name", p.Name), ("@Address", p.Address), ("@PurchasedPrice", p.PurchasedPrice), ("@LandValue", p.LandValue),
+                            ("@EstimatedValue", p.EstimatedValue), ("@CategoryForIncome", p.CategoryForIncome), ("@CategoryForTaxes", p.CategoryForTaxes),
+                            ("@CategoryForInterest", p.CategoryForInterest), ("@CategoryForRepairs", p.CategoryForRepairs),
+                            ("@CategoryForMaintenance", p.CategoryForMaintenance), ("@CategoryForManagement", p.CategoryForManagement),
+                            ("@OwnershipName1", p.OwnershipName1), ("@OwnershipName2", p.OwnershipName2),
+                            ("@OwnershipPercentage1", p.OwnershipPercentage1), ("@OwnershipPercentage2", p.OwnershipPercentage2),
+                            ("@Note", p.Note), ("@Id", p.Id));
+                    }
+                    else if (p.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            @"INSERT INTO RentBuildings (
+                                Id, Name, Address, PurchasedDate, PurchasedPrice, LandValue, EstimatedValue,
+                                CategoryForIncome, CategoryForTaxes, CategoryForInterest, CategoryForRepairs,
+                                CategoryForMaintenance, CategoryForManagement, OwnershipName1, OwnershipName2,
+                                OwnershipPercentage1, OwnershipPercentage2, Note) VALUES (
+                                @Id, @Name, @Address, @PurchasedDate, @PurchasedPrice, @LandValue, @EstimatedValue,
+                                @CategoryForIncome, @CategoryForTaxes, @CategoryForInterest, @CategoryForRepairs,
+                                @CategoryForMaintenance, @CategoryForManagement, @OwnershipName1, @OwnershipName2,
+                                @OwnershipPercentage1, @OwnershipPercentage2, @Note);",
+                            ("@Id", p.Id), ("@Name", p.Name), ("@Address", p.Address), ("@PurchasedDate", DBDateTimeParam(p.PurchasedDate)),
+                            ("@PurchasedPrice", p.PurchasedPrice), ("@LandValue", p.LandValue), ("@EstimatedValue", p.EstimatedValue),
+                            ("@CategoryForIncome", p.CategoryForIncome), ("@CategoryForTaxes", p.CategoryForTaxes),
+                            ("@CategoryForInterest", p.CategoryForInterest), ("@CategoryForRepairs", p.CategoryForRepairs),
+                            ("@CategoryForMaintenance", p.CategoryForMaintenance), ("@CategoryForManagement", p.CategoryForManagement),
+                            ("@OwnershipName1", p.OwnershipName1), ("@OwnershipName2", p.OwnershipName2),
+                            ("@OwnershipPercentage1", p.OwnershipPercentage1), ("@OwnershipPercentage2", p.OwnershipPercentage2),
+                            ("@Note", p.Note));
+                    }
+                    else if (p.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM RentBuildings WHERE Id=@Id;", ("@Id", p.Id));
+                    }
+                    continue;
+                }
+
                 if (p.IsChanged)
                 {
                     sb.AppendLine("-- updating RentalBuildings : " + p.Name);
@@ -1940,6 +2152,25 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (RentUnit x in units)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (x.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE RentUnits SET Name=@Name, Renter=@Renter, Note=@Note WHERE Id=@Id AND Building=@Building;",
+                            ("@Name", x.Name), ("@Renter", x.Renter), ("@Note", x.Note), ("@Id", x.Id), ("@Building", x.Building));
+                    }
+                    else if (x.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO RentUnits (Id, Building, Name, Renter, Note) VALUES (@Id,@Building,@Name,@Renter,@Note);",
+                            ("@Id", x.Id), ("@Building", x.Building), ("@Name", x.Name), ("@Renter", x.Renter), ("@Note", x.Note));
+                    }
+                    else if (x.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM RentUnits WHERE Id=@Id AND Building=@Building;", ("@Id", x.Id), ("@Building", x.Building));
+                    }
+                    continue;
+                }
+
                 if (x.IsChanged)
                 {
                     sb.AppendLine("-- updating RentUnits : " + x.Name);
@@ -2034,6 +2265,27 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (LoanPayment i in loans)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (i.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE LoanPayments SET Date=@Date,AccountId=@AccountId,Principal=@Principal,Interest=@Interest,Memo=@Memo WHERE Id=@Id;",
+                            ("@Date", DBDateTimeParam(i.Date)), ("@AccountId", i.AccountId), ("@Principal", i.Principal),
+                            ("@Interest", i.Interest), ("@Memo", i.Memo), ("@Id", i.Id));
+                    }
+                    else if (i.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO LoanPayments (Id,AccountId,Date,Principal,Interest,Memo) VALUES (@Id,@AccountId,@Date,@Principal,@Interest,@Memo);",
+                            ("@Id", i.Id), ("@AccountId", i.AccountId), ("@Date", DBDateTimeParam(i.Date)),
+                            ("@Principal", i.Principal), ("@Interest", i.Interest), ("@Memo", i.Memo));
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM LoanPayments WHERE Id=@Id;", ("@Id", i.Id));
+                    }
+                    continue;
+                }
+
                 if (i.IsChanged)
                 {
                     sb.AppendLine("-- updating LoanPayments : " + i.Id);
@@ -2151,6 +2403,35 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Category c in categories)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (c.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE Categories SET Name=@Name,Description=@Description,Type=@Type,ParentId=@ParentId,Budget=@Budget," +
+                            "Frequency=@Frequency,Balance=@Balance,Color=@Color,TaxRefNum=@TaxRefNum WHERE Id=@Id;",
+                            ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
+                            ("@ParentId", c.ParentCategory != null ? c.ParentCategory.Id : -1), ("@Budget", c.Budget),
+                            ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
+                            ("@TaxRefNum", c.TaxRefNum), ("@Id", c.Id));
+                    }
+                    else if (c.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            "INSERT INTO Categories (Id,Name,Description,Type,ParentId,Budget,Frequency,Balance,Color,TaxRefNum) " +
+                            "VALUES (@Id,@Name,@Description,@Type,@ParentId,@Budget,@Frequency,@Balance,@Color,@TaxRefNum);",
+                            ("@Id", c.Id), ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
+                            ("@ParentId", c.ParentCategory != null ? c.ParentCategory.Id : -1), ("@Budget", c.Budget),
+                            ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
+                            ("@TaxRefNum", c.TaxRefNum));
+                    }
+                    else if (c.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Categories WHERE Id=@Id;", ("@Id", c.Id));
+                    }
+                    continue;
+                }
+
                 if (c.IsChanged)
                 {
                     sb.AppendLine("-- udpating Categories : " + c.Name);
@@ -2261,6 +2542,27 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Currency s in currencies)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (s.IsChanged)
+                    {
+                        this.ExecuteNonQuery("UPDATE Currencies SET Symbol=@Symbol,Name=@Name,Ratio=@Ratio,LastRatio=@LastRatio,CultureCode=@CultureCode WHERE Id=@Id;",
+                            ("@Symbol", s.Symbol), ("@Name", s.Name), ("@Ratio", s.Ratio), ("@LastRatio", s.LastRatio),
+                            ("@CultureCode", s.CultureCode), ("@Id", s.Id));
+                    }
+                    else if (s.IsInserted)
+                    {
+                        this.ExecuteNonQuery("INSERT INTO Currencies (Id,Symbol,Name,Ratio,LastRatio,CultureCode) VALUES (@Id,@Symbol,@Name,@Ratio,@LastRatio,@CultureCode);",
+                            ("@Id", s.Id), ("@Symbol", s.Symbol), ("@Name", s.Name), ("@Ratio", s.Ratio), ("@LastRatio", s.LastRatio),
+                            ("@CultureCode", s.CultureCode));
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Currencies WHERE Id=@Id;", ("@Id", s.Id));
+                    }
+                    continue;
+                }
+
                 if (s.IsChanged)
                 {
                     sb.AppendLine("-- inserting Currencies : " + s.Name);
@@ -2365,6 +2667,33 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (Security s in securities)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (s.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE Securities SET Name=@Name,Symbol=@Symbol,Price=@Price,LastPrice=@LastPrice,CuspId=@CuspId," +
+                            "SecurityType=@SecurityType,Taxable=@Taxable,PriceDate=@PriceDate WHERE Id=@Id;",
+                            ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                            ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                            ("@PriceDate", DBDateTimeParam(s.PriceDate)), ("@Id", s.Id));
+                    }
+                    else if (s.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            "INSERT INTO Securities (Id,Name,Symbol,Price,LastPrice,CuspId,SecurityType,Taxable,PriceDate) " +
+                            "VALUES (@Id,@Name,@Symbol,@Price,@LastPrice,@CuspId,@SecurityType,@Taxable,@PriceDate);",
+                            ("@Id", s.Id), ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                            ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                            ("@PriceDate", DBDateTimeParam(s.PriceDate)));
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Securities WHERE Id=@Id;", ("@Id", s.Id));
+                    }
+                    continue;
+                }
+
                 if (s.IsChanged)
                 {
                     sb.AppendLine("-- updating Securities : " + s.Name);
@@ -2457,6 +2786,33 @@ namespace Walkabout.Data
             StringBuilder sb = new StringBuilder();
             foreach (StockSplit s in stockSplits)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (s.IsChanged && s.Date != DateTime.MinValue)
+                    {
+                        if (s.Security != null)
+                        {
+                            this.ExecuteNonQuery("UPDATE StockSplits SET Date=@Date,Security=@Security,Numerator=@Numerator,Denominator=@Denominator WHERE Id=@Id;",
+                                ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security.Id), ("@Numerator", s.Numerator),
+                                ("@Denominator", s.Denominator), ("@Id", s.Id));
+                        }
+                    }
+                    else if (s.IsInserted && s.Date != DateTime.MinValue)
+                    {
+                        if (s.Security != null)
+                        {
+                            this.ExecuteNonQuery("INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (@Id,@Date,@Security,@Numerator,@Denominator);",
+                                ("@Id", s.Id), ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
+                                ("@Numerator", s.Numerator), ("@Denominator", s.Denominator));
+                        }
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM StockSplits WHERE Id=@Id;", ("@Id", s.Id));
+                    }
+                    continue;
+                }
+
                 if (s.IsChanged && s.Date != DateTime.MinValue)
                 {
                     if (s.Security != null)
@@ -2749,6 +3105,64 @@ namespace Walkabout.Data
                     // with a new database that has no accounts yet.
                     continue;
                 }
+
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (t.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE Transactions SET Number=@Number,Account=@Account,Date=@Date,Amount=@Amount,Status=@Status,Memo=@Memo," +
+                            "Payee=@Payee,Category=@Category,Transfer=@Transfer,TransferSplit=@TransferSplit,FITID=@FITID,SalesTax=@SalesTax," +
+                            "Flags=@Flags,ReconciledDate=@ReconciledDate,BudgetBalanceDate=@BudgetBalanceDate,MergeDate=@MergeDate," +
+                            "OriginalPayee=@OriginalPayee WHERE Id=@Id;",
+                            ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)), ("@Amount", t.Amount),
+                            ("@Status", (int)t.Status), ("@Memo", t.Memo),
+                            ("@Payee", t.Payee != null ? t.Payee.Id : -1), ("@Category", t.Category != null ? t.Category.Id : -1),
+                            ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                            ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                            ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
+                            ("@ReconciledDate", DBNullableDateTimeParam(t.ReconciledDate)),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                            ("@MergeDate", DBNullableDateTimeParam(t.MergeDate)), ("@OriginalPayee", t.OriginalPayee), ("@Id", t.Id));
+                    }
+                    else if (t.IsInserted)
+                    {
+                        if (t.Id == -1)
+                        {
+                            Debug.WriteLine("Ignoring bad transaction with id=-1");
+                            continue;
+                        }
+
+                        this.ExecuteNonQuery(
+                            "INSERT INTO Transactions ([Id],[Number],[Account],[Date],[Amount],[Status],[Memo],[Payee],[Category],[Transfer],[TransferSplit],[FITID],[SalesTax],[Flags],[ReconciledDate],[BudgetBalanceDate],[MergeDate],[OriginalPayee]) " +
+                            "VALUES (@Id,@Number,@Account,@Date,@Amount,@Status,@Memo,@Payee,@Category,@Transfer,@TransferSplit,@FITID,@SalesTax,@Flags,@ReconciledDate,@BudgetBalanceDate,@MergeDate,@OriginalPayee);",
+                            ("@Id", t.Id), ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)),
+                            ("@Amount", t.Amount), ("@Status", (int)t.Status), ("@Memo", t.Memo),
+                            ("@Payee", t.Payee != null ? t.Payee.Id : -1), ("@Category", t.Category != null ? t.Category.Id : -1),
+                            ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                            ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                            ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
+                            ("@ReconciledDate", DBNullableDateTimeParam(t.ReconciledDate)),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                            ("@MergeDate", DBNullableDateTimeParam(t.MergeDate)), ("@OriginalPayee", t.OriginalPayee));
+                    }
+                    else if (t.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM Transactions WHERE Id=@Id;", ("@Id", t.Id));
+                    }
+
+                    if (t.Splits != null)
+                    {
+                        this.UpdateSplits(t.Splits);
+                    }
+
+                    if (t.Investment != null)
+                    {
+                        this.UpdateInvestment(t.Investment);
+                    }
+                    continue;
+                }
+
                 if (t.IsChanged)
                 {
                     sb.AppendLine("-- updating Transaction : " + t.Number);
@@ -2841,6 +3255,37 @@ namespace Walkabout.Data
 
             foreach (Split s in splits)
             {
+                if (this.SupportsParameterizedUpdate)
+                {
+                    if (s.IsChanged)
+                    {
+                        this.ExecuteNonQuery(
+                            "UPDATE [Splits] SET [Amount]=@Amount,[Category]=@Category,[Memo]=@Memo,[Transfer]=@Transfer,[Payee]=@Payee," +
+                            "Flags=@Flags,BudgetBalanceDate=@BudgetBalanceDate WHERE [Id]=@Id AND [Transaction]=@Transaction;",
+                            ("@Amount", s.Amount), ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", s.Memo),
+                            ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                            ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)), ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                    }
+                    else if (s.IsInserted)
+                    {
+                        this.ExecuteNonQuery(
+                            "INSERT INTO [Splits] ([Id],[Transaction],[Amount],[Category],[Memo],[Transfer],[Payee],[Flags],[BudgetBalanceDate]) " +
+                            "VALUES (@Id,@Transaction,@Amount,@Category,@Memo,@Transfer,@Payee,@Flags,@BudgetBalanceDate);",
+                            ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
+                            ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", s.Memo),
+                            ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                            ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)));
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        this.ExecuteNonQuery("DELETE FROM [Splits] WHERE [Id]=@Id AND [Transaction]=@Transaction;",
+                            ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                    }
+                    continue;
+                }
+
                 if (s.IsChanged)
                 {
                     sb.AppendLine("-- updating Split : " + s.Id);
@@ -2966,6 +3411,37 @@ namespace Walkabout.Data
         {
             if (i == null)
             {
+                return;
+            }
+
+            if (this.SupportsParameterizedUpdate)
+            {
+                if (i.IsChanged)
+                {
+                    this.ExecuteNonQuery(
+                        "UPDATE Investments SET Security=@Security,UnitPrice=@UnitPrice,Units=@Units,Commission=@Commission," +
+                        "InvestmentType=@InvestmentType,TradeType=@TradeType,TaxExempt=@TaxExempt,Withholding=@Withholding," +
+                        "MarkUpDown=@MarkUpDown,Taxes=@Taxes,Fees=@Fees,[Load]=@Load WHERE Id=@Id;",
+                        ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice), ("@Units", i.Units),
+                        ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type), ("@TradeType", (int)i.TradeType),
+                        ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding), ("@MarkUpDown", i.MarkUpDown),
+                        ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load), ("@Id", i.Id));
+                }
+                else if (i.IsInserted)
+                {
+                    this.ExecuteNonQuery(
+                        "INSERT INTO Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load]) " +
+                        "VALUES (@Id,@Security,@UnitPrice,@Units,@Commission,@InvestmentType,@TradeType,@TaxExempt,@Withholding,@MarkUpDown,@Taxes,@Fees,@Load);",
+                        ("@Id", i.Id), ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                        ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
+                        ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
+                        ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load));
+                }
+                else if (i.IsDeleted)
+                {
+                    this.ExecuteNonQuery("DELETE FROM Investments WHERE Id=@Id;", ("@Id", i.Id));
+                }
+                i.OnUpdated();
                 return;
             }
 
