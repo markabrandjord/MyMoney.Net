@@ -126,6 +126,63 @@ and correct data" is true and comparable across every engine; testing
 "the original object's flags changed after Save() without a reload" is not,
 and the suite must not assert it.
 
+#### Ruling: `XmlStore.Save()` is not being changed to call `OnUpdated()`
+
+Raised and investigated during design review: could this asymmetry just be
+fixed at the source, so every `IDatabase` implementation left the graph in
+the same "clean" state after a successful save, removing the need for the
+post-reload-only carve-out above?
+
+**Root cause of the asymmetry.** `SqlServerDatabase`'s `UpdateXxx` methods are
+*incremental* — each row's SQL statement is decided by inspecting that item's
+`IsChanged`/`IsInserted`/`IsDeleted` flags, so clearing them via `OnUpdated()`
+afterward is load-bearing: without it, an already-saved, unchanged row would
+look "changed" forever and get re-sent on every subsequent save. `XmlStore.Save()`
+is not incremental — it serializes the entire graph unconditionally every
+time and never consults those flags for its own logic (only `RemoveDeleted()`,
+which is `IsDeleted`-specific). `OnUpdated()` is necessary for one family and
+genuinely inert for the other; that's why only one calls it today.
+
+**What was checked before deciding.**
+- No override of `PersistentObject.OnUpdated()` exists anywhere in the domain
+  model, and the base implementation only flips the `change` enum — it never
+  calls `FireChangeEvent(...)` the way `OnInserted()`/`OnDelete()` do. So
+  adding the call would not have triggered any change-notification side
+  effects.
+- The app's actual "unsaved changes" indicator (title bar, exit-save-prompt
+  via `MainWindow.SaveIfDirty()`) is driven by `MainWindow`'s own independent
+  `dirty` bool, explicitly cleared by `SetDirty(false)` right after `Save()`
+  succeeds — it does not read individual `PersistentObject.IsChanged` flags
+  at all. The asymmetry has no effect on that behavior either way.
+- No test or UI code was found asserting `IsChanged`/`IsInserted` state
+  specifically after an `XmlStore.Save()` call.
+
+**Decision: leave `XmlStore` unchanged.** Even though the change looked
+low-risk by the checks above, three things argue against making it as part of
+this work:
+1. **Real, uncompensated perf cost.** Walking every container (Accounts,
+   Categories, Payees, Transactions + nested Splits, Securities, StockSplits,
+   LoanPayments, OnlineAccounts, Aliases, AccountAliases, TransactionExtras,
+   ...) to call `OnUpdated()` is an O(n) pass over the whole graph that
+   `XmlStore.Save()` does not currently pay, on a path that already tracks and
+   logs its own elapsed time (`Debug.WriteLine("Saved XML store in ...")`),
+   suggesting save latency here is an existing, live concern, not a
+   hypothetical one.
+2. **A second list to keep in sync.** That container walk would duplicate,
+   in a second file, the same enumeration `SqlServerDatabase`'s save logic
+   already walks in `SqlDatabase.cs` — two independent lists that can
+   silently drift as new container types are added, the same class of risk
+   issue #11's self-testing MSBuild guard was written to catch elsewhere.
+3. **Scope discipline.** `XmlStore` is a real, shipping production
+   `IDatabase` implementation (the legacy `.xml` money-file format), not
+   test-only code. Changing its behavior — even a change that checks out as
+   safe today — is a different risk class than anything else in this spec,
+   and doesn't belong bundled into a test-support-library change.
+
+The inconsistency is real but currently inert (nothing depends on it). Fixing
+it buys conceptual tidiness, not correctness. If ever wanted, it's a small,
+well-bounded, separately-tracked follow-up — not part of this work.
+
 ### 2. `MockDatabase`: real serialization round-trip against memory, not object-identity passthrough
 
 If `MockDatabase.Save()` just remembered the `MyMoney` reference it was given
