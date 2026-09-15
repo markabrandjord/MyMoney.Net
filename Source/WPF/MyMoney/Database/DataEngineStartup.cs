@@ -102,7 +102,21 @@ namespace Walkabout.Data
                     TrustServerCertificate = true
                 };
 
-                var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
+                var sqlServerDatabase = new SqlServerStoredProcDatabase
+                {
+                    ConnectionStringOverride = builder.ConnectionString,
+                    // SqlServerStoredProcDatabase has no on-disk file -- it's
+                    // a SQL Server connection -- but DatabasePath is used
+                    // throughout MainWindow (OFX log path, caption text,
+                    // attachment/statement/report directories, per-database
+                    // settings) via Path.GetFileName/GetDirectoryName, which
+                    // throw or misbehave on null. A synthetic, descriptive,
+                    // never-actually-read-from-disk path keeps every one of
+                    // those call sites working without special-casing this
+                    // engine at each one individually (see MyMoney.Net
+                    // issue #3 and its second review's C1 finding).
+                    DatabasePath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "SqlServer", config.Database + ".sqlserver")
+                };
                 money = sqlServerDatabase.Load(null);
                 database = sqlServerDatabase;
                 return true;
