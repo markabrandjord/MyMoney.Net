@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - SQL Server support (config parsing of `"SqlServer"`, the `MyMoneyAdmin`-invocation path, `SqlServerStoredProcDatabase`) is reachable only in DEBUG builds. A Release build that encounters `"engine": "SqlServer"` in config silently falls back to SQLite and logs it.
-- `sa` credentials are never persisted anywhere — prompted fresh each bootstrap run, held in memory only for the duration of that connection.
+- `sa` credentials **(revised 2026-09-14, mid-implementation, at the developer's explicit request — see spec's "`sa` Handling" section)**: stored in the same credentials file as the three app accounts, under the key `"sa"`. `MyMoneyAdmin` checks for a stored `"sa"` entry first and uses it without prompting; if absent, it prompts interactively and saves the result. This widens the credentials file's blast radius (it can now grant full SQL Server control, not just the three scoped accounts) — an accepted tradeoff for this dev-network prototype.
 - The three account passwords (`MyMoneyAdmin`, `MyMoneyUser`, `MyMoneyTest`) are auto-generated, never typed by the developer, and stored only in `%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json` — outside the repo, gitignore is not relied upon.
 - `SqliteDatabase` and all its current behavior are untouched by this plan. No file under `Database/SqliteDatabase.cs` is modified.
 - All schema/access/test SQL is hand-authored `.sql` content checked into the repo — never generated at runtime from `Mapping.cs` reflection.
@@ -938,7 +938,7 @@ namespace Walkabout.Tests
             Assert.That(found, Is.Not.Null);
             Assert.That(found.Id, Is.EqualTo(999001));
 
-            found.OnDeleted();
+            found.OnDelete();
             var toDelete = new Payees(reloaded);
             toDelete.Add(found);
             db.UpdatePayees(toDelete);
@@ -1098,14 +1098,20 @@ git commit -m "Add SqlServerStoredProcDatabase overriding Payees CRUD to call st
 
 ## Task 8: `sa` bootstrap connection
 
+**Revised 2026-09-14 (mid-implementation):** originally `sa`'s password was
+never persisted. At the developer's explicit request (see the spec's `sa`
+Handling section for the accepted tradeoff), it's now checked in the
+credentials file first and saved there after a successful interactive
+prompt, the same as the three app accounts.
+
 **Files:**
 - Create: `Source/WPF/MyMoneyAdmin/SaBootstrapConnection.cs`
 
 **Interfaces:**
-- Consumes: `RetryLoop.Run` (Task 4).
+- Consumes: `RetryLoop.Run` (Task 4); `DataEngineCredentialStore`, `DataEngineCredential` (Task 2) — reads/writes an entry keyed `"sa"` alongside the three app accounts.
 - Produces: `class SaBootstrapConnection { static bool TryConnect(string server, out string password); }` — relied on by Task 9's `BootstrapRunner`.
 
-This wraps the actual `sa` connection attempt (real ADO.NET, so not unit-tested — covered by Task 4's `RetryLoop` unit tests plus manual verification here) with the console-based password prompt and Retry/Cancel loop.
+This wraps the actual `sa` connection attempt (real ADO.NET, so not unit-tested — covered by Task 4's `RetryLoop` unit tests plus manual verification here) with credential-file reuse, the console-based password prompt, and the Retry/Cancel loop.
 
 - [ ] **Step 1: Write the implementation**
 
@@ -1117,46 +1123,36 @@ namespace Walkabout.Data
 {
     public static class SaBootstrapConnection
     {
+        private const string SaAccountName = "sa";
+
         /// <summary>
-        /// Prompts for the 'sa' password and attempts a connection, looping
-        /// on Retry/Cancel per RetryLoop. The password is never written to
-        /// disk and is discarded (falls out of scope) once this method
-        /// returns. On success, the working password is returned via `out`
-        /// so the caller can reuse the same connection parameters for the
-        /// bootstrap script without re-prompting.
+        /// Connects as 'sa'. Checks the credentials file for a previously
+        /// saved 'sa' password first and uses it without prompting if it
+        /// still works; otherwise prompts interactively (Retry/Cancel on
+        /// failure per RetryLoop) and, on success, saves the password to
+        /// the credentials file so later runs on this machine don't
+        /// re-prompt. See the spec's "sa Handling" section for why this
+        /// account is persisted here, unlike the rest of this codebase's
+        /// general practice for admin credentials.
         /// </summary>
         public static bool TryConnect(string server, out string password)
         {
+            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            var stored = credentialStore.Load();
+
+            if (stored.TryGetValue(SaAccountName, out DataEngineCredential saved) && TryOpenConnection(server, saved.Password))
+            {
+                password = saved.Password;
+                return true;
+            }
+
             string capturedPassword = null;
             bool result = RetryLoop.Run(
                 tryAction: () =>
                 {
                     Console.Write("Enter 'sa' password: ");
                     capturedPassword = ReadPasswordFromConsole();
-
-                    var builder = new SqlConnectionStringBuilder
-                    {
-                        DataSource = server,
-                        UserID = "sa",
-                        Password = capturedPassword,
-                        InitialCatalog = "master",
-                        ConnectTimeout = 10
-                    };
-
-                    try
-                    {
-                        using (var connection = new SqlConnection(builder.ConnectionString))
-                        {
-                            connection.Open();
-                        }
-                        return true;
-                    }
-                    catch (SqlException ex)
-                    {
-                        Console.WriteLine($"Could not connect as 'sa': {ex.Message}");
-                        Console.WriteLine("Verify the 'sa' account is enabled on the server and the password is correct.");
-                        return false;
-                    }
+                    return TryOpenConnection(server, capturedPassword);
                 },
                 promptOnFailure: () =>
                 {
@@ -1167,8 +1163,41 @@ namespace Walkabout.Data
                         : RetryLoop.PromptResult.Cancel;
                 });
 
+            if (result)
+            {
+                stored[SaAccountName] = new DataEngineCredential { UserId = SaAccountName, Password = capturedPassword };
+                credentialStore.Save(stored);
+            }
+
             password = result ? capturedPassword : null;
             return result;
+        }
+
+        private static bool TryOpenConnection(string server, string password)
+        {
+            var builder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = SaAccountName,
+                Password = password,
+                InitialCatalog = "master",
+                ConnectTimeout = 10
+            };
+
+            try
+            {
+                using (var connection = new SqlConnection(builder.ConnectionString))
+                {
+                    connection.Open();
+                }
+                return true;
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine($"Could not connect as 'sa': {ex.Message}");
+                Console.WriteLine("Verify the 'sa' account is enabled on the server and the password is correct.");
+                return false;
+            }
         }
 
         private static string ReadPasswordFromConsole()
@@ -1195,9 +1224,12 @@ namespace Walkabout.Data
 
 - [ ] **Step 2: Manual verification (no automated test — requires a real SQL Server and a real terminal)**
 
-1. With `sa` disabled on a dev instance, run a small throwaway program calling `SaBootstrapConnection.TryConnect("<your-server>", out _)`, enter any password, confirm it prints the failure message and prompts Retry/Cancel, and that typing `C` returns `false` without looping further.
-2. Enable `sa`, set a known password, repeat: confirm entering that password returns `true`.
+1. With `sa` disabled on a dev instance and no `"sa"` entry in the credentials file, run a small throwaway program calling `SaBootstrapConnection.TryConnect("<your-server>", out _)`, enter any password, confirm it prints the failure message and prompts Retry/Cancel, and that typing `C` returns `false` without looping further.
+2. Enable `sa`, set a known password, repeat: confirm entering that password returns `true`, and that the credentials file now has a `"sa"` entry with that password.
 3. Confirm the password you typed is masked (not echoed) in the console.
+4. Run it again without changing anything: confirm it connects successfully with **no password prompt at all** (reused from the credentials file).
+5. Change the actual `sa` password on the server (so the stored one is now stale) and run once more: confirm it falls through to the interactive prompt rather than looping forever on the stale stored password.
+6. Disable `sa` again on the server (its normal resting state — see spec's `sa` Handling section) with the credentials file still holding a stored `sa` entry from a previous run: confirm the stored-password attempt fails (same as any other failure — disabled and wrong-password are indistinguishable to the client) and correctly falls through to the interactive Retry/Cancel prompt rather than getting stuck assuming the stored credential must still be valid.
 
 - [ ] **Step 3: Commit**
 
@@ -1396,6 +1428,7 @@ git commit -m "Add BootstrapRunner and Program entry point for MyMoneyAdmin"
 **Files:**
 - Create: `Source/WPF/MyMoney/Database/DataEngineStartup.cs`
 - Modify: `Source/WPF/MyMoney/MainWindow.xaml.cs` (constructor, around `Source/WPF/MyMoney/MainWindow.xaml.cs:134`, right after `this.InitializeComponent();`)
+- Modify: `Source/WPF/MyMoney/MyMoney.csproj` (add a build-order-only reference to `MyMoneyAdmin.csproj` and a post-build copy target, so `MyMoneyAdmin.exe` ends up next to `MyMoney.exe`)
 
 **Interfaces:**
 - Consumes: `DataEngineConfig.Load` (Task 1), `DataEngineCredentialStore` (Task 2), `SqlServerStoredProcDatabase` (Task 7).
@@ -1403,7 +1436,42 @@ git commit -m "Add BootstrapRunner and Program entry point for MyMoneyAdmin"
 
 `TryAutoLoad` returns `false` (with `database`/`money` both `null`) whenever the config says SQLite, is missing, or the file doesn't exist and can't be bootstrapped — in every such case `MainWindow` falls through to its existing, completely unmodified empty-launch / File-menu-driven behavior.
 
-- [ ] **Step 1: Write the implementation**
+- [ ] **Step 1: Wire MyMoneyAdmin's build output into MyMoney's output directory**
+
+`MyMoneyAdmin.csproj` (Task 4) builds to its own separate output folder
+(`Source/WPF/MyMoneyAdmin/bin/...`) — nothing so far puts `MyMoneyAdmin.exe`
+next to `MyMoney.exe`, which Step 2 below needs. Add this to
+`Source/WPF/MyMoney/MyMoney.csproj`, inside the existing `<Project>` element:
+
+```xml
+  <ItemGroup>
+    <!-- Build-order-only reference: pulls in MyMoneyAdmin's own build
+         (so its .exe exists to copy below) without adding an assembly
+         reference to it -- MyMoney never calls into MyMoneyAdmin's API. -->
+    <ProjectReference Include="..\MyMoneyAdmin\MyMoneyAdmin.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
+  <Target Name="CopyMyMoneyAdminOutput" AfterTargets="Build">
+    <ItemGroup>
+      <MyMoneyAdminOutput Include="$(MSBuildThisFileDirectory)..\MyMoneyAdmin\bin\$(Configuration)\net10.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(MyMoneyAdminOutput)"
+          DestinationFolder="$(OutDir)%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\MyMoneyAdmin\bin\$(Configuration)\net10.0')" />
+  </Target>
+```
+
+Run `dotnet build Source/WPF/MyMoney.sln` and confirm `MyMoneyAdmin.exe` (and
+its dependency DLLs) now appear alongside `MyMoney.exe` in
+`Source/WPF/MyMoney/bin/Debug/net10.0-windows7.0/win-x64/`. If they don't
+show up, check that `$(Configuration)` matches what you built (Debug vs
+Release) and that Task 4/9 already produced a `MyMoneyAdmin/bin/Debug/net10.0/`
+folder to copy from.
+
+- [ ] **Step 2: Write the DataEngineStartup implementation**
 
 ```csharp
 using System;
@@ -1495,7 +1563,7 @@ namespace Walkabout.Data
 }
 ```
 
-- [ ] **Step 2: Wire into `MainWindow`'s constructor**
+- [ ] **Step 3: Wire into `MainWindow`'s constructor**
 
 In `Source/WPF/MyMoney/MainWindow.xaml.cs`, immediately after the `this.InitializeComponent();` line (currently line 134), add:
 
@@ -1513,28 +1581,28 @@ In `Source/WPF/MyMoney/MainWindow.xaml.cs`, immediately after the `this.Initiali
 #endif
 ```
 
-- [ ] **Step 3: Build**
+- [ ] **Step 4: Build**
 
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors.
 
-- [ ] **Step 4: Manual verification — SQLite path unaffected**
+- [ ] **Step 5: Manual verification — SQLite path unaffected**
 
 1. Ensure `%LOCALAPPDATA%\MyMoney\dataengine.config.json` does not exist.
 2. Launch `MyMoney.exe` (DEBUG build).
 3. Confirm the app launches exactly as before — empty main window, no auto-loaded database, File menu drives everything as it always has.
 
-- [ ] **Step 5: Manual verification — SQL Server auto-load**
+- [ ] **Step 6: Manual verification — SQL Server auto-load**
 
 1. Complete Task 9's bootstrap against a dev SQL Server.
 2. Create `%LOCALAPPDATA%\MyMoney\dataengine.config.json`: `{ "engine": "SqlServer", "server": "<your-server>", "database": "MyMoney" }`.
 3. Launch `MyMoney.exe` (DEBUG build).
 4. Confirm the app auto-loads without any File-menu interaction, and that adding/editing/deleting a payee through the UI persists (verify with a direct `SELECT * FROM dbo.Payees` in SSMS as `MyMoneyAdmin`, or `EXEC dbo.Payees_SelectAll` as `MyMoneyUser`).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs
+git add Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/MyMoney.csproj
 git commit -m "Wire DEBUG-only SQL Server auto-load into MainWindow startup"
 ```
 

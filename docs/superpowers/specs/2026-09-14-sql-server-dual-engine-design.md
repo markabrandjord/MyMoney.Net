@@ -145,27 +145,54 @@ failing. Release should behave as if this feature doesn't exist.
 
 ## `sa` Handling
 
-`sa` is treated as an ephemeral, manually-managed credential — never
-stored, never automated beyond a single bootstrap run:
+**Revision note (2026-09-14, post-implementation-start):** this section
+originally specified that `sa` is never persisted and that `MyMoneyAdmin`
+could detect *why* a connection failed (disabled vs. bad password) and
+show a targeted "enable sa and retry" prompt. Both of those have changed,
+in two separate corrections made during implementation:
+
+- **Disabled-account detection was found to be technically impossible**
+  and removed before Task 8 was built: SQL Server does not expose the
+  specific reason for a login failure to the connecting client by
+  default (this is deliberate server-side security hardening — a
+  non-sysadmin remote connection always sees generic error 18456
+  regardless of cause). `MyMoneyAdmin` instead shows one generic
+  failure message and a plain **Retry/Cancel** prompt on any connection
+  failure (see `RetryLoop`/`SaBootstrapConnection`, Tasks 4 and 8 of
+  the implementation plan).
+- **`sa` persistence was deliberately reversed** at the developer's
+  explicit request, for this dev-network prototype specifically: `sa`'s
+  username and password are now stored in the same
+  `%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json` file as
+  the three app-account credentials, under the key `"sa"`. The
+  developer made this call knowingly, after being told the tradeoff:
+  storing `sa` widens the credentials file's blast radius from "three
+  scoped, purpose-limited accounts" to "full control of the SQL Server
+  instance" if that file is ever exposed. Acceptable for a throwaway
+  dev-network database; would need revisiting before this pattern is
+  used anywhere with real stakes.
+
+Current behavior:
 
 1. The developer manually enables the `sa` login on the target SQL
-   Server instance, out of band (SSMS or `sp_configure`), for the few
-   minutes the bootstrap takes.
-2. `MyMoneyAdmin` prompts for the `sa` password interactively. It is
-   held in memory only for the duration of the bootstrap connection
-   and never written to disk.
-3. `MyMoneyAdmin` attempts a SQL-authentication connection as `sa`:
-   - **Success** → proceed to bootstrap (step 4 below).
-   - **Fails, reason = account disabled** (SQL Server reports this as
-     a distinct login-failure reason from "bad password") → show a
-     Yes/No dialog: "The `sa` login appears to be disabled. Enable it
-     and click Yes to retry." Loops on retry.
-   - **Fails, any other reason** (bad password, login doesn't exist,
-     network/firewall issue) → surface as a distinct, specific error;
-     do not show the enable-`sa` prompt.
-4. Once connected as `sa`, the developer disables `sa` again
-   afterward, out of band. `MyMoneyAdmin` does not manage this
-   lifecycle — it only checks/reports status at connection time.
+   Server instance, out of band (SSMS or `sp_configure`).
+2. `MyMoneyAdmin` checks the credentials file for a stored `"sa"`
+   entry first. If present, it uses that password directly — no
+   prompt. If absent, it prompts for the `sa` password interactively
+   (this path is still supported, e.g. for a fresh machine with no
+   credentials file yet).
+3. `MyMoneyAdmin` attempts a SQL-authentication connection as `sa`. On
+   failure (any reason — the client cannot distinguish "disabled" from
+   "wrong password" from "login doesn't exist"), it shows a generic
+   failure message and a Retry/Cancel prompt. Retry re-attempts;
+   Cancel aborts the bootstrap.
+4. On a successful connection where the password came from an
+   interactive prompt (not already in the credentials file),
+   `MyMoneyAdmin` saves it to the credentials file under `"sa"` so
+   subsequent bootstraps on this machine don't need to re-prompt.
+5. The developer is responsible for disabling `sa` again afterward,
+   out of band, if they want it disabled between sessions.
+   `MyMoneyAdmin` does not manage that lifecycle.
 
 ## Bootstrap Sequence
 
