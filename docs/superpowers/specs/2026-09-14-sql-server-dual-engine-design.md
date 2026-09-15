@@ -368,15 +368,39 @@ crashed (a different `DatabasePath`-dependent call site than the first
 crash fix covered), and found a narrower residual on the re-bootstrap
 password-handling fix. Both were fixed (synthetic `DatabasePath` on
 `SqlServerStoredProcDatabase`; credential reuse on re-bootstrap instead of
-always rotating passwords) — **Round 2** verification, specifically
-targeting the previously-unexercised payee-selection gesture, is recorded
-below once complete.
+always rotating passwords) and build clean with no test regressions.
 
-**Still not exercised by any live run:** a deployment-step failure during
-an actual re-bootstrap (the password-reuse fix's correctness rests on
-code review, not a reproduced failure); multi-user/concurrent access;
-anything beyond the single-table `Payees` vertical slice, per this spec's
-own Non-Goals.
+**Round 2 (attempted, incomplete):** re-running the live app against the
+bootstrapped database to confirm those two fixes surfaced a separate,
+unrelated problem: `Microsoft.Data.SqlClient` connections from inside
+`MyMoney.exe` itself succeed only *intermittently* (roughly half the
+launches in this session hit `PlatformNotSupportedException` before ever
+attempting a connection; the rest connected and loaded real data
+correctly, with no crash) — tracked as its own issue, since it's a
+connectivity/hosting problem unrelated to anything this spec's code
+changes. On one of the launches that did connect successfully, the loaded
+payee data was confirmed present in the UI Automation tree (proving the
+data reached the UI), but selecting/clicking the row specifically was not
+completed — repeated attempts at automating that click in this
+environment (simulated mouse input, then UI Automation invoke patterns)
+did not reliably work, and were abandoned rather than continuing
+indefinitely. **The `DatabasePath` fix's correctness at the specific
+`UpdateCaption` call site the second review flagged has not been directly
+observed via a live click** — it rests on code review (the fix is the
+same pattern already used successfully elsewhere in the file) plus the
+logical argument that the synthetic path is a valid, non-null, well-formed
+string wherever it's consumed.
+
+A follow-up whole-branch re-review of these two fixes was intentionally
+**not run** in this session (suspended by the developer) — the fixes are
+committed and build/test clean, but have not received the same review
+scrutiny as the rest of this branch.
+
+**Still not exercised by any live run:** the payee-click gesture
+specifically (see above); a deployment-step failure during an actual
+re-bootstrap (the password-reuse fix's correctness rests on code review,
+not a reproduced failure); multi-user/concurrent access; anything beyond
+the single-table `Payees` vertical slice, per this spec's own Non-Goals.
 
 ## Sequencing / Dependencies
 
