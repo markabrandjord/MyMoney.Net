@@ -509,7 +509,8 @@ namespace Walkabout.Attachments
             Thread.Sleep(1000); // give app time to startup...
 
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.ScanAttachments)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.ScanAttachments))
+            {
 #endif
             try
             {
@@ -548,6 +549,9 @@ namespace Walkabout.Attachments
             }
             this.threadRunning = false;
             this.threadStopEvent.Set();
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private void BatchUpdate(List<Tuple<Transaction, bool>> toUpdate)

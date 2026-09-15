@@ -51,7 +51,7 @@ namespace Walkabout.Views.Controls
         public CategoriesControl()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.CategoriesControlInitialize)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.CategoriesControlInitialize))
 #endif
             this.InitializeComponent();
 

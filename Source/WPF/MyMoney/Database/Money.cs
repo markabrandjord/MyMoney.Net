@@ -12972,7 +12972,8 @@ namespace Walkabout.Data
         internal void Reload()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.Indexing)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.Indexing))
+            {
 #endif
             // now we can build the payee index, only need to do non-closed accounts
             // since we don't care about old stale data in this index.
@@ -13001,6 +13002,9 @@ namespace Walkabout.Data
                     }
                 }
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         public void GetOrCreate(string payeeOrTransferCaption, Account owner)

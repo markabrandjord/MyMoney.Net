@@ -1131,7 +1131,8 @@ namespace Walkabout.StockQuotes
                 {
 
 #if PerformanceBlocks
-                    using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.DownloadStockQuoteHistory)) ;
+                    using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.DownloadStockQuoteHistory))
+                    {
 #endif
                     StockQuoteHistory history = null;
                     var info = this._downloadLog.GetInfo(symbol);
@@ -1174,6 +1175,9 @@ namespace Walkabout.StockQuotes
                     {
                         this.OnHistoryAvailable(history);
                     }
+#if PerformanceBlocks
+                    }
+#endif
                 }
             }
             this._downloadingHistory = false;

@@ -82,7 +82,7 @@ namespace Walkabout.Views.Controls
         public PayeesControl()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.PayeesControlInitialize)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.PayeesControlInitialize))
 #endif
             this.InitializeComponent();
             MouseUp += new MouseButtonEventHandler(this.OnMouseUp);

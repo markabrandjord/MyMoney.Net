@@ -347,62 +347,63 @@ namespace Walkabout.StockQuotes
                             }
                             if (data != null && data.Data != null && data.Data.Count > 0)
                             {
-                                using (var scope = splits.CreateUpdateScope()) ;
-
-                                var earliestSplit = data.Data[0].Date;
-
-                                foreach (var quote in data.Data)
+                                using (var scope = splits.CreateUpdateScope())
                                 {
-                                    if (quote.SplitFactor.HasValue)
+                                    var earliestSplit = data.Data[0].Date;
+
+                                    foreach (var quote in data.Data)
                                     {
-                                        var (numerator, denominator) = FractionHelper.ToFraction(quote.SplitFactor.Value);
-                                        var found = false;
-                                        foreach (var e in existing)
+                                        if (quote.SplitFactor.HasValue)
                                         {
-                                            if (e.Date.Date == quote.Date.Date)
+                                            var (numerator, denominator) = FractionHelper.ToFraction(quote.SplitFactor.Value);
+                                            var found = false;
+                                            foreach (var e in existing)
                                             {
-                                                // then we already have it, make sure factor matches.
-                                                // double check the numbers match!
-                                                found = true;
-                                                if (e.Numerator != numerator || e.Denominator != denominator)
+                                                if (e.Date.Date == quote.Date.Date)
                                                 {
-                                                    Debug.WriteLine($"Correcting {symbol} split on {e.Date.Date} ");
-                                                    Debug.WriteLine($"Old split data is {e.Numerator} / {e.Denominator} ");
-                                                    Debug.WriteLine($"New split data is {numerator} / {denominator} ");
-                                                    e.Numerator = numerator;
-                                                    e.Denominator = denominator;
+                                                    // then we already have it, make sure factor matches.
+                                                    // double check the numbers match!
+                                                    found = true;
+                                                    if (e.Numerator != numerator || e.Denominator != denominator)
+                                                    {
+                                                        Debug.WriteLine($"Correcting {symbol} split on {e.Date.Date} ");
+                                                        Debug.WriteLine($"Old split data is {e.Numerator} / {e.Denominator} ");
+                                                        Debug.WriteLine($"New split data is {numerator} / {denominator} ");
+                                                        e.Numerator = numerator;
+                                                        e.Denominator = denominator;
+                                                    }
+                                                    break;
                                                 }
+                                            }
+                                            if (!found)
+                                            {
+                                                var s = new StockSplit();
+                                                s.Date = quote.Date.Date;
+                                                s.Numerator = numerator;
+                                                s.Denominator = denominator;
+                                                s.Security = security;
+                                                splits.AddStockSplit(s);
+                                            }
+                                        }
+                                    }
+
+                                    // Remove existing splits that were not found in the given list.
+                                    foreach (var e in existing.ToArray())
+                                    {
+                                        bool found = false;
+                                        foreach (var quote in data.Data)
+                                        {
+                                            if (quote.Date.Date == e.Date.Date)
+                                            {
+                                                found = true;
                                                 break;
                                             }
                                         }
                                         if (!found)
                                         {
-                                            var s = new StockSplit();
-                                            s.Date = quote.Date.Date;
-                                            s.Numerator = numerator;
-                                            s.Denominator = denominator;
-                                            s.Security = security;
-                                            splits.AddStockSplit(s);
+                                            Debug.WriteLine($"Removing incorrect {symbol} split on {e.Date.Date}");
+                                            splits.Remove(e);
                                         }
-                                    }
-                                }
-
-                                // Remove existing splits that were not found in the given list.
-                                foreach (var e in existing.ToArray())
-                                {
-                                    bool found = false;
-                                    foreach (var quote in data.Data)
-                                    {
-                                        if (quote.Date.Date == e.Date.Date)
-                                        {
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found)
-                                    {
-                                        Debug.WriteLine($"Removing incorrect {symbol} split on {e.Date.Date}");
-                                        splits.Remove(e);
                                     }
                                 }
                             }

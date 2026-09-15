@@ -75,7 +75,7 @@ namespace Walkabout.Views.Controls
         public SecuritiesControl()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.SecuritiesControlInitialize)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.SecuritiesControlInitialize))
 #endif
             this.InitializeComponent();
             MouseUp += new MouseButtonEventHandler(this.OnMouseUp);

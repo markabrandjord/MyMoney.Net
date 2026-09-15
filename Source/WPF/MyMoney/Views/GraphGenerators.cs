@@ -46,7 +46,8 @@ namespace Walkabout.Views
         public IEnumerable<TrendValue> Generate()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate))
+            {
 #endif
             if (this.data != null)
             {
@@ -88,6 +89,9 @@ namespace Walkabout.Views
                     }
                 }
             }
+#if PerformanceBlocks
+            }
+#endif
         }
     }
 
@@ -125,7 +129,8 @@ namespace Walkabout.Views
         public async Task Prepare(IStatusService status)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphPrepare)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphPrepare))
+            {
 #endif
             // the lock locks out any change to the cache from background downloading of stock quotes
             // while we are generating this graph.
@@ -155,13 +160,17 @@ namespace Walkabout.Views
                     this.pendingSplits[symbol] = splits;
                 }
             }
+#if PerformanceBlocks
+            }
+#endif
 
             status.ShowProgress(0, 0, 0);
 
 
             this.graph = new List<TrendValue>();
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate))
+            {
 #endif
             // the lock locks out any change to the cache from background downloading of stock quotes.
             using (var cacheLock = this.cache.BeginLock())
@@ -275,6 +284,9 @@ namespace Walkabout.Views
                     }
                 }
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         public bool IsFlipped => false;
@@ -391,7 +403,8 @@ namespace Walkabout.Views
         public IEnumerable<TrendValue> Generate()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.GraphGenerate))
+            {
 #endif
             string symbol = this.history.Symbol;
             foreach (var item in this.history.History)
@@ -403,6 +416,9 @@ namespace Walkabout.Views
                     UserData = symbol
                 };
             }
+#if PerformanceBlocks
+            }
+#endif
         }
     }
 
