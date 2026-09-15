@@ -131,7 +131,24 @@ namespace Walkabout.Data
                 // method's contract, every such failure falls through to
                 // MainWindow's normal SQLite/File-menu-driven behavior
                 // instead of crashing app startup.
-                LogFailure(log, $"DataEngineStartup: {ex.Message}");
+                //
+                // TEMP DIAGNOSTIC for MyMoney.Net issue #5 (intermittent
+                // Microsoft.Data.SqlClient PlatformNotSupportedException
+                // under the WPF host): logging full exception detail and
+                // runtime identity, since ex.Message alone doesn't say
+                // where in the call stack this originates or what runtime
+                // this process actually resolved to. Remove once root-caused.
+                LogFailure(log, $"DataEngineStartup: {ex.GetType().FullName}: {ex.Message}");
+                LogFailure(log, $"DataEngineStartup DIAG: FrameworkDescription={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}, " +
+                    $"RuntimeIdentifier={System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}, " +
+                    $"ProcessArchitecture={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}, " +
+                    $"OSDescription={System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+                LogFailure(log, $"DataEngineStartup DIAG: StackTrace={ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    LogFailure(log, $"DataEngineStartup DIAG: InnerException={ex.InnerException.GetType().FullName}: {ex.InnerException.Message}");
+                    LogFailure(log, $"DataEngineStartup DIAG: InnerStackTrace={ex.InnerException.StackTrace}");
+                }
                 database = null;
                 money = null;
                 return false;
