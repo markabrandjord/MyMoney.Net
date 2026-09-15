@@ -67,6 +67,24 @@ scenario tests, project dependency diagram). Quick reference:
 
 ## Things that have been gotten wrong before
 
-(Empty so far — this fork was just created. Add entries here as real mistakes
-happen, with enough concrete detail — file, symptom, actual cause — to avoid
-repeating them. Don't pre-fill with speculative gotchas.)
+- **Merging long-lived branches can hit false "whole-file" conflicts from
+  `core.autocrlf=true` + `.gitattributes`' `*.cs text eol=crlf` fighting each
+  other.** Symptom: `git merge` reports a conflict where the *entire* file is
+  one `<<<<<<<`/`=======`/`>>>>>>>` block, even though the real edits on each
+  side are small. Cause: some files' blobs are stored with literal CRLF
+  (never renormalized — the repo uses an *incremental* normalization
+  strategy per issue #10, so old/untouched files can still be CRLF-native in
+  the object store) while others are properly LF-native (git's normal form,
+  smudged to CRLF on checkout). When one side of a merge is LF-native and the
+  other is CRLF-native, git's diff3 can't align a single line and gives up on
+  the whole file. `git merge --abort` can also fail here ("Entry not
+  uptodate") because checkout itself re-triggers a clean/smudge mismatch on
+  the affected files. Fix: verify with `git cat-file -p <blob> | file -`
+  (raw stored bytes, bypassing smudge) which side is inconsistent; extract
+  base/ours/theirs via `git cat-file -p <blob-sha>` (get shas from
+  `git ls-files -u`), normalize all three to LF, run `git merge-file` on the
+  normalized copies to get the real 3-way merge, then copy that result back
+  into the working file (git's `eol=crlf` will smudge it back to CRLF on
+  checkout as usual). Confirmed via `dotnet build`/`dotnet test` giving
+  identical results before and after — the fix only touched line endings and
+  genuinely merged content, not behavior.
