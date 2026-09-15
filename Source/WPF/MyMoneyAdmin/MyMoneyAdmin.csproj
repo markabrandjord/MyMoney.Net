@@ -38,7 +38,12 @@
        MyMoney.exe after a normal `dotnet build MyMoney.sln`. MyMoney.csproj
        hardcodes RuntimeIdentifier=win-x64, so its output always lands under
        .../net10.0-windows7.0/win-x64/ regardless of $(Platform). -->
-  <Target Name="CopyMyMoneyAdminOutputToMyMoney" AfterTargets="Build">
+  <!-- Debug-only: Release builds must stay completely unaffected by this
+       tool (no MyMoneyAdmin.exe, no SQL scripts next to MyMoney.exe);
+       see the design spec's "Keep Release builds completely unaffected"
+       goal. Without this condition, a Release build of MyMoney.sln would
+       still copy MyMoneyAdmin's Release output alongside MyMoney.exe. -->
+  <Target Name="CopyMyMoneyAdminOutputToMyMoney" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
     <ItemGroup>
       <MyMoneyAdminOutput Include="$(OutDir)**\*.*" />
     </ItemGroup>
