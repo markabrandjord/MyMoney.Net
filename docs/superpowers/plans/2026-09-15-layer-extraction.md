@@ -599,6 +599,10 @@ Find every caller of `SqlServerDatabase.Restore(...)` (`grep -rn "SqlServerDatab
 
 Task 1 changed `DatabaseSettings.MigrateSettings` (now in `MyMoney.Business`) to take `Walkabout.Data.ISettingsMigrationSource` instead of the concrete `Walkabout.Configuration.Settings` type, and created that interface in `Source/WPF/MyMoney.Business/ISettingsMigrationSource.cs`. Now that this task's Step 2 has added the `MyMoney.Business` project reference, edit `Source/WPF/MyMoney/Utilities/Settings.cs`'s class declaration to add `: Walkabout.Data.ISettingsMigrationSource` (add a `using Walkabout.Data;` if not already present). No other change should be needed — `MigrateFiscalYearStart()`/`MigrateRentalManagement()` already exist on the class with the signatures the interface declares; this just makes the existing implicit shape explicit. Build after this change and confirm no new errors at any `MigrateSettings(...)` call site (implicit reference conversion should make them compile unchanged).
 
+- [ ] **Step 6b: Make DownloadLog implement IStockDownloadLog (same pattern, from Task 1's amendment)**
+
+While resolving Task 1's Blocker B, the implementer found `StockQuoteCache.cs` (moved to `MyMoney.Business`) needs `DownloadLog.Folder`/`DownloadLog.GetHistory(symbol)` — `DownloadLog` itself stays in `StockQuotes/StockQuoteManager.cs` (genuinely WPF-heavy, out of scope). Resolved with the same interface pattern as Step 6a: `Source/WPF/MyMoney.Business/StockQuotes/IStockDownloadLog.cs` (declaring `Folder`/`GetHistory`), and `StockQuoteCache`'s field/constructor parameter now typed as `IStockDownloadLog` instead of the concrete `DownloadLog`. Edit `StockQuotes/StockQuoteManager.cs`'s `DownloadLog` class declaration to add `: Walkabout.StockQuotes.IStockDownloadLog` (check the exact namespace the interface landed in against the actual file — it may be `Walkabout.Data` or `Walkabout.StockQuotes`, follow what's there). Verify every existing construction of `StockQuoteCache(...)` still compiles (implicit reference conversion, same as Step 6a).
+
 - [ ] **Step 7: Full solution build**
 
 Run: `dotnet build Source/WPF/MyMoney.sln`
