@@ -43,13 +43,11 @@ namespace Walkabout.Data
             Console.WriteLine("Creating database and logins as 'sa'...");
             ExecuteBatchScript(saBuilder.ConnectionString, bootstrapScript);
 
-            var credentials = new Dictionary<string, DataEngineCredential>
-            {
-                ["MyMoneyAdmin"] = new DataEngineCredential { UserId = "MyMoneyAdmin", Password = adminPassword },
-                ["MyMoneyUser"] = new DataEngineCredential { UserId = "MyMoneyUser", Password = userPassword },
-                ["MyMoneyTest"] = new DataEngineCredential { UserId = "MyMoneyTest", Password = testPassword }
-            };
             var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            var credentials = credentialStore.Load();
+            credentials["MyMoneyAdmin"] = new DataEngineCredential { UserId = "MyMoneyAdmin", Password = adminPassword };
+            credentials["MyMoneyUser"] = new DataEngineCredential { UserId = "MyMoneyUser", Password = userPassword };
+            credentials["MyMoneyTest"] = new DataEngineCredential { UserId = "MyMoneyTest", Password = testPassword };
             credentialStore.Save(credentials);
             Console.WriteLine($"Wrote generated credentials to {DataEngineCredentialStore.GetDefaultPath()}");
 
