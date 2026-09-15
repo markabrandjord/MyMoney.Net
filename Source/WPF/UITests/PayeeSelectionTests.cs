@@ -53,6 +53,11 @@ namespace Walkabout.UITests
             AutomationElement payeesHeader = mainWindow.FindFirstDescendant(cf => cf.ByName("PAYEES"));
             Assert.That(payeesHeader, Is.Not.Null, "PAYEES section header not found.");
             AutomationElement expander = payeesHeader.Parent;
+            Assert.That(expander, Is.Not.Null,
+                "PAYEES header has no parent element; expected an expander/toggle button here.");
+            Assert.That(expander.Patterns.Toggle.IsSupported, Is.True,
+                "PAYEES header's parent element does not support the Toggle pattern - " +
+                "expected it to be the section's expander button.");
             var togglePattern = expander.Patterns.Toggle.Pattern;
             if (togglePattern.ToggleState.Value == ToggleState.Off)
             {
