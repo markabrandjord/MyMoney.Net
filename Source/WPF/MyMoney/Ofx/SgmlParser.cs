@@ -3,6 +3,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Xml;
 
@@ -187,24 +188,32 @@ namespace Walkabout.Sgml
                         break;
                     default:
                         //Console.WriteLine("Fetching:" + ResolvedUri.AbsoluteUri);
-                        HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(this.ResolvedUri);
-                        wr.Timeout = 10000; // in case this is running in an ASPX page.
+                        HttpClientHandler handler = new HttpClientHandler
+                        {
+                            PreAuthenticate = false,
+                            // Pass the credentials of the process.
+                            UseDefaultCredentials = true
+                        };
                         if (this.Proxy != null)
                         {
-                            wr.Proxy = new WebProxy(this.Proxy);
+                            handler.Proxy = new WebProxy(this.Proxy);
+                            handler.UseProxy = true;
                         }
 
-                        wr.PreAuthenticate = false;
-                        // Pass the credentials of the process. 
-                        wr.Credentials = CredentialCache.DefaultCredentials;
-
-                        WebResponse resp = wr.GetResponse();
-                        Uri actual = resp.ResponseUri;
+                        // Not disposed here (matching the old HttpWebResponse-based code, which never
+                        // disposed the WebResponse either): the response stream is handed off to the
+                        // parser below and read well after this method returns.
+                        HttpClient client = new HttpClient(handler)
+                        {
+                            Timeout = TimeSpan.FromMilliseconds(10000) // in case this is running in an ASPX page.
+                        };
+                        HttpResponseMessage resp = client.Send(new HttpRequestMessage(HttpMethod.Get, this.ResolvedUri));
+                        Uri actual = resp.RequestMessage.RequestUri;
                         if (actual.AbsoluteUri != this._resolvedUri.AbsoluteUri)
                         {
                             this._resolvedUri = actual;
                         }
-                        string contentType = resp.ContentType.ToLower();
+                        string contentType = resp.Content.Headers.ContentType?.ToString().ToLower() ?? string.Empty;
                         int i = contentType.IndexOf("charset");
                         Encoding e = Encoding.Default;
                         if (i >= 0)
@@ -229,7 +238,7 @@ namespace Walkabout.Sgml
                                 }
                             }
                         }
-                        this._stm = new StreamReader(resp.GetResponseStream(),
+                        this._stm = new StreamReader(resp.Content.ReadAsStream(),
                             e, true);
                         this._weOwnTheStream = true;
                         break;
