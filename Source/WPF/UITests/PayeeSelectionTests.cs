@@ -38,11 +38,18 @@ namespace Walkabout.UITests
             Assert.That(File.Exists(fixturePath), Is.True,
                 $"Fixture not found at {fixturePath}. Run Task 2's FixtureGenerator first.");
 
-            app = Application.Launch(LaunchSmokeTests.MyMoneyExePath);
+            // /nosettings prevents the app from auto-loading the developer's real,
+            // persisted database on launch and from writing its settings back out
+            // on close. Without it, this test would (a) overwrite the developer's
+            // actual application settings file with the fixture's path, and (b) on
+            // subsequent runs, start with the fixture already loaded from the prior
+            // run's saved settings - defeating the point of exercising the File->Open
+            // dialog below.
+            app = Application.Launch(LaunchSmokeTests.MyMoneyExePath, "/nosettings");
             automation = new UIA3Automation();
             Window mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
 
-            OpenFileViaFileMenu(mainWindow, fixturePath);
+            OpenFileViaFileMenu(app, mainWindow, fixturePath);
 
             // The window title reflects the opened file once loading completes.
             Retry.WhileFalse(
@@ -82,7 +89,7 @@ namespace Walkabout.UITests
             Assert.That(errorDialogPresent, Is.False, "An unhandled-exception dialog appeared after selecting the payee.");
         }
 
-        private static void OpenFileViaFileMenu(Window mainWindow, string filePath)
+        private static void OpenFileViaFileMenu(Application app, Window mainWindow, string filePath)
         {
             AutomationElement fileMenu = mainWindow.FindFirstDescendant(cf => cf.ByName("File"));
             fileMenu.Patterns.ExpandCollapse.Pattern.Expand();
@@ -92,15 +99,21 @@ namespace Walkabout.UITests
             openItem.Patterns.Invoke.Pattern.Invoke();
 
             // The dialog is a separate top-level window belonging to the same
-            // process, not a descendant of mainWindow.
+            // process, not a descendant of mainWindow. The fallback below is
+            // scoped to this app's own process ID and the dialog's known
+            // AutomationId, so it can never match an unrelated window on the
+            // developer's desktop.
             Window openDialog = Retry.WhileNull(() =>
                 mainWindow.ModalWindows.FirstOrDefault() ??
                 mainWindow.Automation.GetDesktop()
-                    .FindAllChildren(cf => cf.ByControlType(ControlType.Window))
-                    .Select(w => w.AsWindow())
-                    .FirstOrDefault(w => w.Title.IndexOf("Open", StringComparison.OrdinalIgnoreCase) >= 0),
+                    .FindFirstChild(cf => cf.ByProcessId(app.ProcessId).And(cf.ByAutomationId("CreateDatabaseDialog")))
+                    ?.AsWindow(),
                 TimeSpan.FromSeconds(5)).Result;
             Assert.That(openDialog, Is.Not.Null, "Open file dialog did not appear.");
+            Assert.That(openDialog.AutomationId, Is.EqualTo("CreateDatabaseDialog"),
+                "Expected the app's 'Connect Database' dialog (AutomationId 'CreateDatabaseDialog') to appear, " +
+                $"but found a different modal window instead (Name: '{openDialog.Name}', AutomationId: '{openDialog.AutomationId}'). " +
+                "This may be an unexpected dialog, e.g. a 'Save Changes?' confirmation.");
 
             // "Open..." does not launch the native Windows common file dialog -
             // confirmed by dumping the actual automation tree during development.
