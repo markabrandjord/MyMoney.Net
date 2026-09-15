@@ -17,4 +17,11 @@
     <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\MyMoney\Database\SqlScripts\**\*.sql">
+      <Link>SqlScripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
