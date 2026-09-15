@@ -57,7 +57,10 @@ namespace Walkabout.Data
             using (MemoryStream stream = new MemoryStream(this.snapshot))
             using (XmlReader reader = XmlReader.Create(stream))
             {
-                return (MyMoney)serializer.ReadObject(reader);
+                MyMoney money = (MyMoney)serializer.ReadObject(reader);
+                money.PostDeserializeFixup();
+                money.OnLoaded();
+                return money;
             }
         }
 
