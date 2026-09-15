@@ -22,7 +22,7 @@ namespace Walkabout.Utilities
                 if (!File.Exists(path))
                 {
                     // extract the resource
-                    if (!ProcessHelper.ExtractEmbeddedResourceAsFile(name, path))
+                    if (!ProcessHelper.ExtractEmbeddedResourceAsFile(System.Reflection.Assembly.GetExecutingAssembly(), name, path))
                     {
                         return;
                     }

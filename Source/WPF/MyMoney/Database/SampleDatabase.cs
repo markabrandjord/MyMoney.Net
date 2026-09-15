@@ -41,7 +41,7 @@ namespace Walkabout.Assistance
             Directory.CreateDirectory(temp);
 
             string path = Path.Combine(temp, "SampleData.xml");
-            ProcessHelper.ExtractEmbeddedResourceAsFile("Walkabout.Database.SampleData.xml", path);
+            ProcessHelper.ExtractEmbeddedResourceAsFile(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Database.SampleData.xml", path);
 
             SampleDatabaseOptions options = new SampleDatabaseOptions();
             options.Owner = Application.Current.MainWindow;
@@ -52,7 +52,7 @@ namespace Walkabout.Assistance
             }
 
             string zipPath = Path.Combine(temp, "SampleStockQuotes.zip");
-            ProcessHelper.ExtractEmbeddedResourceAsFile("Walkabout.Database.SampleStockQuotes.zip", zipPath);
+            ProcessHelper.ExtractEmbeddedResourceAsFile(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Database.SampleStockQuotes.zip", zipPath);
 
             string quoteFolder = Path.Combine(temp, "StockQuotes");
             if (Directory.Exists(quoteFolder))

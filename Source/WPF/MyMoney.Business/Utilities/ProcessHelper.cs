@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Xml.Linq;
 
 namespace Walkabout.Utilities
@@ -61,18 +62,28 @@ namespace Walkabout.Utilities
         }
 
 
-        public static string GetEmbeddedResource(string name)
+        /// <summary>
+        /// The embedded resource being looked up almost always lives in the caller's
+        /// assembly, not this one -- ProcessHelper moved to MyMoney.Business in the
+        /// layer-extraction split, but the resources these methods look for (sample
+        /// data, OFX templates, tax specs, sounds, ...) stayed declared as
+        /// &lt;EmbeddedResource&gt; items in MyMoney.csproj. Resolving against
+        /// typeof(ProcessHelper).Assembly (i.e. this assembly) would silently return
+        /// null/empty for every real caller, so the assembly to search is required
+        /// from the caller instead of assumed.
+        /// </summary>
+        public static string GetEmbeddedResource(Assembly assembly, string name)
         {
-            using (Stream s = typeof(ProcessHelper).Assembly.GetManifestResourceStream(name))
+            using (Stream s = assembly.GetManifestResourceStream(name))
             {
                 StreamReader reader = new StreamReader(s);
                 return reader.ReadToEnd();
             }
         }
 
-        public static XDocument GetEmbeddedResourceAsXml(string name)
+        public static XDocument GetEmbeddedResourceAsXml(Assembly assembly, string name)
         {
-            using (Stream s = typeof(ProcessHelper).Assembly.GetManifestResourceStream(name))
+            using (Stream s = assembly.GetManifestResourceStream(name))
             {
                 if (s == null)
                 {
@@ -82,9 +93,9 @@ namespace Walkabout.Utilities
             }
         }
 
-        public static bool ExtractEmbeddedResourceAsFile(string name, string path)
+        public static bool ExtractEmbeddedResourceAsFile(Assembly assembly, string name, string path)
         {
-            using (Stream s = typeof(ProcessHelper).Assembly.GetManifestResourceStream(name))
+            using (Stream s = assembly.GetManifestResourceStream(name))
             {
                 if (s == null)
                 {

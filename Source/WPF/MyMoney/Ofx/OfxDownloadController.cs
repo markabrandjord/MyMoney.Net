@@ -61,7 +61,7 @@ namespace Walkabout.Ofx
                 }
 
 
-                string template = ProcessHelper.GetEmbeddedResource("Walkabout.Ofx.OfxErrorTemplate.htm");
+                string template = ProcessHelper.GetEmbeddedResource(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Ofx.OfxErrorTemplate.htm");
                 // css uses curly brackets, so it must be substituted.
                 string css = @"body, th, td { font-family: Verdana; font-size:10pt; }
 h2 { font-size: 12pt; }";

@@ -115,7 +115,8 @@ namespace Walkabout.Data
                     // those call sites working without special-casing this
                     // engine at each one individually (see MyMoney.Net
                     // issue #3 and its second review's C1 finding).
-                    DatabasePath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "SqlServer", config.Database + ".sqlserver")
+                    DatabasePath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "SqlServer", config.Database + ".sqlserver"),
+                    UiCallback = new WpfDataLayerUiCallback()
                 };
                 money = sqlServerDatabase.Load(null);
                 database = sqlServerDatabase;

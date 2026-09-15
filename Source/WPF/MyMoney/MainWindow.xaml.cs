@@ -4782,7 +4782,7 @@ namespace Walkabout
             if (firstRun || lastWrite > this.settings.LastExeTimestamp)
             {
                 string previous = this.settings.ExeVersion;
-                this.settings.ExeVersion = NativeMethods.GetFileVersion(exe);
+                this.settings.ExeVersion = NativeMethods.GetFileVersion(exe, System.Reflection.Assembly.GetExecutingAssembly());
                 this.settings.LastExeTimestamp = lastWrite;
                 this.ShowChangeInfo(previous, changes, e.NewVersionAvailable);
             }

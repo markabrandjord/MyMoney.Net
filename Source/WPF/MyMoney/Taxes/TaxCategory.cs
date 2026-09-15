@@ -244,7 +244,7 @@ namespace Walkabout.Taxes
 
                 TaxForm form = null;
                 bool started = false;
-                string spec = ProcessHelper.GetEmbeddedResource("Walkabout.Taxes.TxfSpec.txt");
+                string spec = ProcessHelper.GetEmbeddedResource(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Taxes.TxfSpec.txt");
                 using (StringReader reader = new StringReader(spec))
                 {
                     int linenumber = 0;

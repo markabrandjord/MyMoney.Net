@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
@@ -262,7 +263,14 @@ namespace Walkabout.Utilities
             return (double)pixels * 96 / DPI;
         }
 
-        public static string GetFileVersion(string filename)
+        /// <summary>
+        /// The fallback below used to read this assembly's own version, which was
+        /// correct when NativeMethods lived in the app's own assembly. After the
+        /// layer-extraction split, "this assembly" is MyMoney.Business.dll, not the
+        /// app -- so the fallback needs the caller's assembly (the app) supplied
+        /// explicitly rather than self-discovered.
+        /// </summary>
+        public static string GetFileVersion(string filename, Assembly fallbackAssembly)
         {
             string version = null;
             string manifest = Path.Combine(ProcessHelper.StartupPath, "MyMoney.exe.manifest");
@@ -284,7 +292,7 @@ namespace Walkabout.Utilities
             }
             if (version == null)
             {
-                version = typeof(NativeMethods).Assembly.GetName().Version.ToString();
+                version = fallbackAssembly.GetName().Version.ToString();
             }
             return version;
         }
