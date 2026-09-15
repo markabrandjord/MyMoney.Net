@@ -2,7 +2,15 @@
 using System.Resources;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Windows;
+
+// GenerateAssemblyInfo is false (this file replaces it), which also suppresses the SDK's
+// usual auto-generated [assembly: SupportedOSPlatform] for a windows-versioned TargetFramework.
+// Without it, the platform-compatibility analyzer treats this whole assembly as having no
+// declared OS support, so every call to a Windows-only API (WinForms, PerformanceProvider, etc.)
+// gets flagged with CA1416 even though the project is Windows-only end to end.
+[assembly: SupportedOSPlatform("windows7.0")]
 
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
