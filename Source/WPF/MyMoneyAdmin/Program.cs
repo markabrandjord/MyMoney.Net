@@ -10,8 +10,8 @@ namespace Walkabout.Data
             string server = args.Length > 0 ? args[0] : "localhost";
             string databaseName = args.Length > 1 ? args[1] : "MyMoney";
 
-            // SqlScripts ships alongside the MyMoney assembly it's committed
-            // under (Source/WPF/MyMoney/Database/SqlScripts); locate it
+            // SqlScripts ships alongside the MyMoney.Data assembly it's
+            // committed under (Source/WPF/MyMoney.Data/SqlScripts); locate it
             // relative to this executable's own build output.
             string sqlScriptsRoot = Path.Combine(AppContext.BaseDirectory, "SqlScripts");
             if (!Directory.Exists(sqlScriptsRoot))

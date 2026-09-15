@@ -214,7 +214,7 @@ namespace Walkabout.Data
         }
 
 
-        internal static void WriteLoanPayment(StreamWriter writer, LoanPaymentAggregation l)
+        public static void WriteLoanPayment(StreamWriter writer, LoanPaymentAggregation l)
         {
             writer.WriteLine("\"{0}\",\"{1}\",\"{2}\",\"{3}%\",\"{4}\",\"{5}\",\"{6}\"",
                 CsvSafeString(l.Date.ToShortDateString()),
