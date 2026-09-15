@@ -133,6 +133,18 @@ namespace Walkabout
 
             this.InitializeComponent();
 
+#if DEBUG
+            {
+                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
+                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney))
+                {
+                    this.database = autoDatabase;
+                    this.DataContext = autoMoney;
+                    this.canSave = true;
+                }
+            }
+#endif
+
             //-----------------------------------------------------------------
             // ACCOUNTS CONTROL
             this.accountsControl = new AccountsControl();
