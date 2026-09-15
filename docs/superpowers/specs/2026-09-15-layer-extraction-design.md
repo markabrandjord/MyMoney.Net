@@ -64,9 +64,14 @@ that happen to share the `Database/` folder.
   work, not ignored and not expanded into unrelated cleanup.
 - Preserve behavior exactly. This is a refactor: the full existing
   test suite must keep passing, unchanged, throughout.
-- Prove the resulting layers are genuinely portable (no WPF assembly
-  references in either new DLL), since that portability is the entire
-  reason item #5 depends on this item existing.
+- Prove the resulting layers are genuinely portable: no true
+  UI-rendering assembly (`PresentationFramework`/`PresentationCore`)
+  in either new DLL. `MyMoney.Data` additionally has zero WPF-family
+  references at all; `MyMoney.Business` may reference `WindowsBase`
+  for its event-marshaling backbone (discovered during implementation
+  to be load-bearing — see the plan's Global Constraints and ledger).
+  Full portability, including dropping `WindowsBase`, stays deferred
+  to item #5, the entire reason item #5 depends on this item existing.
 
 ## Non-Goals
 
@@ -98,7 +103,8 @@ that happen to share the `Database/` folder.
 ## Architecture
 
 ```
-MyMoney.Business.csproj  (net10.0-windows7.0, no WPF assembly refs)
+MyMoney.Business.csproj  (net10.0-windows7.0, WindowsBase allowed, no
+                          PresentationFramework/PresentationCore)
   Database/Money.cs           -- MyMoney, Accounts, Transactions, Categories,
                                   Securities, Payees, Splits, RentBuildings,
                                   PersistentObject/PersistentContainer

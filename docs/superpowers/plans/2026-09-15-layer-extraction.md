@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - Both new projects target `net10.0-windows7.0`, matching `MyMoney.csproj` (spec: TargetFramework).
-- `MyMoney.Business.csproj` has zero project references and zero references to any WPF assembly (`PresentationFramework`/`PresentationCore`/`WindowsBase`).
-- `MyMoney.Data.csproj` references only `MyMoney.Business.csproj`, plus its own package references; zero WPF assembly references.
+- `MyMoney.Business.csproj` has zero project references and forbids `PresentationFramework`/`PresentationCore` (true UI-rendering assemblies). It MAY reference `WindowsBase` — Task 1 discovered the domain model's change-notification backbone (`EventHandlerCollection<T>`/`UiDispatcher`) has a load-bearing dependency on `System.Windows.Threading.Dispatcher`/`DependencyObject` for cross-thread event marshaling, used throughout `PersistentObject`/`PersistentContainer` including background-thread paths. Rewriting that plumbing to drop the dependency entirely was rejected as a real behavioral risk to production financial-data threading code, not a mechanical move (Ruling, 2026-09-15 — see ledger). True cross-platform portability (dropping `WindowsBase` too) stays deferred to item #5, consistent with the spec's existing `SqlCeDatabase` precedent.
+- `MyMoney.Data.csproj` references only `MyMoney.Business.csproj`, plus its own package references; zero direct WPF assembly references of its own (including `WindowsBase` — nothing in `MyMoney.Data`'s own file list needs it; it only reaches `MyMoney.Business`'s `WindowsBase` dependency transitively through the `ProjectReference`).
 - Namespaces are preserved exactly as they exist today (`Walkabout.Data`, `Walkabout.Utilities`, `Walkabout.StockQuotes`) — this is a project-boundary move, not a rename.
 - File moves use `git mv` so history is preserved.
 - The full existing test suite (currently 29 passed, 1 skipped, 0 failed) must keep passing, unchanged, after every task that touches build output.
@@ -38,6 +38,60 @@
 
 **Interfaces:**
 - Produces: every public type in `Walkabout.Data` currently defined in the moved files (`MyMoney`, `Accounts`, `Account`, `Transactions`, `Transaction`, `Categories`, `Category`, `Securities`, `Security`, `Payees`, `Payee`, `Splits`, `RentBuildings`, `PersistentObject`, `PersistentContainer`, `IDatabase`, `CostBasisCalculator`, etc.) plus `Walkabout.StockQuotes.StockQuoteCache`/`IStockQuoteService`/`StockQuoteHistory`/`StockQuote`/`DateRange`/`DownloadCompleteEventArgs` and `Walkabout.Utilities.UsHolidays` — these are what Task 2, Task 3, and Task 4 build against.
+
+> **Amendment (2026-09-15, mid-execution):** Steps 1-5 below are already committed (`887605c`). The implementer's standalone build (Step 6) then failed on 9 errors from 3 transitive-dependency gaps the design's per-file grep missed. The implementer independently found and fixed several clean transitive dependencies (moved `Hashset.cs`, `KNearestNeighbor.cs`, `IStatusService.cs`, `QuickFilterParser.cs`, `FilteredObservableCollection.cs`, `SimpleGraph.cs` into a new `MyMoney.Business/Utilities/` subfolder; extracted the `DbFlavor` enum out of `SqlDatabase.cs` into `IDatabase.cs`; added a `Microsoft.Data.SqlClient` `PackageReference` for `AsyncSqlQuery.cs`) — all already committed in `887605c` too, and all correct, no further action needed on those. Two real blockers remained and are resolved by Ruling (ledger, 2026-09-15): **Steps 2a and 2b below are the remaining work for this task.**
+
+- [ ] **Step 2a: Move the event-marshaling backbone, allow WindowsBase (Ruling A)**
+
+`Money.cs`/`AsyncSqlQuery.cs` need `Walkabout.Utilities.EventHandlerCollection<T>` (`Utilities/EventHandlerCollection.cs`), which has a load-bearing dependency on `System.Windows.Threading.Dispatcher`/`DependencyObject` via `Utilities/Dispatcher.cs`'s `UiDispatcher`. `StockQuoteCache.cs` needs `DownloadLog` (stays in the WPF-heavy `StockQuoteManager.cs`, out of scope per Non-Goals) only for its constructor parameter — change `StockQuoteCache`'s constructor to accept `DownloadLog log` by keeping the parameter typed as-is is NOT possible without moving `DownloadLog`; instead, verify what `StockQuoteCache` actually does with `log` (store as a field, or call methods on it) — if it only stores and forwards it opaquely without calling `DownloadLog`-specific members outside what's already portable, this may resolve itself once `EventHandlerCollection`/`UiDispatcher` move (since `DownloadLog`'s own blocker was the same `UiDispatcher` dependency via `DelayedAction.cs`, not something in `StockQuoteCache` itself) — re-check the actual error after Step 2a's moves; if `DownloadLog` itself is still needed by `StockQuoteCache`'s own code (not just as an opaque field type), that's a separate, narrower problem than Blocker A and needs its own resolution (do not move `StockQuoteManager.cs` — out of scope; consider whether `StockQuoteCache` can take a narrower callback/interface instead of the concrete `DownloadLog`, following this same task's Step 2b pattern).
+
+```bash
+mkdir -p Source/WPF/MyMoney.Business/Utilities
+git mv Source/WPF/MyMoney/Utilities/EventHandlerCollection.cs Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs
+git mv Source/WPF/MyMoney/Utilities/Dispatcher.cs Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs
+```
+
+(Re-verify both files' actual current content and dependencies before moving — the report's investigation is a strong signal, not a substitute for your own check, per this task's standing re-verification instruction.)
+
+Update `Source/WPF/MyMoney.Business/MyMoney.Business.csproj` to allow `WindowsBase` without pulling in `PresentationCore`/`PresentationFramework`. Determine the minimal correct MSBuild mechanism by iteration (there is more than one plausible approach — e.g. `<ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>` paired with a plain `<Reference Include="WindowsBase" />` and neither `<UseWPF>` nor `<UseWindowsForms>` set to `true`; or another mechanism entirely) — build, read the actual error/success, adjust. Confirm the result with:
+```bash
+dotnet build Source/WPF/MyMoney.Business/MyMoney.Business.csproj -v:d 2>&1 | grep -i "PresentationFramework\|PresentationCore"
+```
+Expected: no output (these two must never appear). A `WindowsBase` reference appearing is expected and fine.
+
+- [ ] **Step 2b: Decouple DatabaseSettings.MigrateSettings from the concrete WPF Settings class (Ruling C)**
+
+`DatabaseSettings.cs`'s `internal bool MigrateSettings(Settings settings)` calls `settings.MigrateFiscalYearStart()` and `settings.MigrateRentalManagement()` on `Walkabout.Configuration.Settings` (`Utilities/Settings.cs`, ~1200 lines, genuinely WPF-coupled, correctly not on any move list). Read `Utilities/Settings.cs` to find `MigrateFiscalYearStart`'s and `MigrateRentalManagement`'s exact return types, then create `Source/WPF/MyMoney.Business/ISettingsMigrationSource.cs`:
+
+```csharp
+namespace Walkabout.Data
+{
+    /// <summary>
+    /// DatabaseSettings.MigrateSettings needs two values from the
+    /// application-wide (WPF) Settings object for a one-time migration.
+    /// This interface lets it depend on the shape it needs instead of the
+    /// concrete Walkabout.Configuration.Settings type, which stays in
+    /// MyMoney.csproj. The real Settings class implements this in
+    /// MyMoney.csproj (Task 4).
+    /// </summary>
+    public interface ISettingsMigrationSource
+    {
+        // exact method signatures: match MigrateFiscalYearStart()'s and
+        // MigrateRentalManagement()'s actual return types from
+        // Utilities/Settings.cs verbatim -- do not guess them.
+    }
+}
+```
+
+Change `DatabaseSettings.cs`'s method signature from `MigrateSettings(Settings settings)` to `MigrateSettings(ISettingsMigrationSource settings)` — the body's two call sites (`settings.MigrateFiscalYearStart()`, `settings.MigrateRentalManagement()`) are unchanged, since the interface exposes the same members. Note for Task 4 (do not do this now — `MyMoney.csproj` can't reference `Walkabout.Data.ISettingsMigrationSource` until its `ProjectReference` to `MyMoney.Business` exists): `Utilities/Settings.cs`'s `Settings` class will need `: Walkabout.Data.ISettingsMigrationSource` added to its class declaration, and every caller of `MigrateSettings(...)` will keep compiling unchanged once that's in place (implicit reference conversion, no call-site changes needed) — added as an explicit new step in Task 4 below.
+
+- [ ] **Step 2c: Re-verify the standalone build and the relaxed WPF check**
+
+Run: `dotnet build Source/WPF/MyMoney.Business/MyMoney.Business.csproj`
+
+Expected: 0 errors. If new unresolved-type errors surface, apply the same standing instruction as the original Step 6/brief: investigate, and either move a genuinely WPF-free dependency or escalate a genuine new blocker rather than guessing.
+
+Then run the original Step 7 check exactly as the brief specifies, and commit (original Step 9), amending the commit message to describe both this task's original file-move work and this amendment's `EventHandlerCollection`/`Dispatcher`/`ISettingsMigrationSource` changes.
 
 - [ ] **Step 1: Create the project file**
 
@@ -541,6 +595,10 @@ namespace Walkabout.Data
 
 Find every caller of `SqlServerDatabase.Restore(...)` (`grep -rn "SqlServerDatabase.Restore(" Source/WPF/MyMoney --include=*.cs`). For each one, add `.SecurityService = new SecurityService()` on the returned object if that call site's flow needs directory-permission writes (matches the pattern already used at the two `new SqlServerDatabase()` sites) — check what the caller does with the restored database immediately afterward to judge whether this matters for that specific path, and set it if there's any doubt, since a null `SecurityService` only matters if `AddWritePermission` is actually invoked down that path.
 
+- [ ] **Step 6a: Make Settings implement ISettingsMigrationSource (Ruling C, from Task 1's amendment)**
+
+Task 1 changed `DatabaseSettings.MigrateSettings` (now in `MyMoney.Business`) to take `Walkabout.Data.ISettingsMigrationSource` instead of the concrete `Walkabout.Configuration.Settings` type, and created that interface in `Source/WPF/MyMoney.Business/ISettingsMigrationSource.cs`. Now that this task's Step 2 has added the `MyMoney.Business` project reference, edit `Source/WPF/MyMoney/Utilities/Settings.cs`'s class declaration to add `: Walkabout.Data.ISettingsMigrationSource` (add a `using Walkabout.Data;` if not already present). No other change should be needed — `MigrateFiscalYearStart()`/`MigrateRentalManagement()` already exist on the class with the signatures the interface declares; this just makes the existing implicit shape explicit. Build after this change and confirm no new errors at any `MigrateSettings(...)` call site (implicit reference conversion should make them compile unchanged).
+
 - [ ] **Step 7: Full solution build**
 
 Run: `dotnet build Source/WPF/MyMoney.sln`
@@ -650,19 +708,34 @@ namespace Walkabout.UnitTests
     [TestFixture]
     public class LayerBoundaryTests
     {
-        private static readonly string[] WpfAssemblyNames =
+        // MyMoney.Business is allowed WindowsBase (the domain model's
+        // event-marshaling backbone has a load-bearing dependency on
+        // System.Windows.Threading.Dispatcher/DependencyObject -- Ruling,
+        // 2026-09-15, see the plan's Global Constraints) but never the two
+        // true UI-rendering assemblies. MyMoney.Data forbids all three --
+        // nothing in it needs WindowsBase even transitively through its own
+        // direct references (it only reaches MyMoney.Business's WindowsBase
+        // dependency via the ProjectReference, which GetReferencedAssemblies
+        // does not surface -- that method returns only an assembly's own
+        // direct references).
+        private static readonly string[] UiRenderingAssemblyNames =
+        {
+            "PresentationFramework", "PresentationCore"
+        };
+
+        private static readonly string[] AllWpfAssemblyNames =
         {
             "PresentationFramework", "PresentationCore", "WindowsBase"
         };
 
         [Test]
-        public void MyMoneyBusiness_HasNoWpfAssemblyReference()
+        public void MyMoneyBusiness_HasNoUiRenderingAssemblyReference()
         {
             var assembly = typeof(Walkabout.Data.MyMoney).Assembly;
             var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
             CollectionAssert.IsEmpty(
-                referenced.Where(n => WpfAssemblyNames.Contains(n)).ToList(),
-                $"MyMoney.Business referenced a WPF assembly: {string.Join(", ", referenced)}");
+                referenced.Where(n => UiRenderingAssemblyNames.Contains(n)).ToList(),
+                $"MyMoney.Business referenced a UI-rendering assembly: {string.Join(", ", referenced)}");
         }
 
         [Test]
@@ -671,7 +744,7 @@ namespace Walkabout.UnitTests
             var assembly = typeof(Walkabout.Data.SqliteDatabase).Assembly;
             var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
             CollectionAssert.IsEmpty(
-                referenced.Where(n => WpfAssemblyNames.Contains(n)).ToList(),
+                referenced.Where(n => AllWpfAssemblyNames.Contains(n)).ToList(),
                 $"MyMoney.Data referenced a WPF assembly: {string.Join(", ", referenced)}");
         }
 
