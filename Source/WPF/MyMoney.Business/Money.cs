@@ -373,7 +373,7 @@ namespace Walkabout.Data
             return this.InternalGetEnumerator();
         }
 
-        internal virtual void MarkAllNew()
+        public virtual void MarkAllNew()
         {
             foreach (PersistentObject o in this)
             {
@@ -1087,7 +1087,7 @@ namespace Walkabout.Data
         /// Get list of all Payees that are actually referenced from a Transaction or a Split.
         /// </summary>
         /// <returns></returns>
-        internal HashSet<Payee> GetUsedPayees()
+        public HashSet<Payee> GetUsedPayees()
         {
             HashSet<Payee> used = new HashSet<Payee>();
             foreach (Transaction t in this.Transactions.GetAllTransactions())
@@ -1881,7 +1881,7 @@ namespace Walkabout.Data
 
         #endregion
 
-        internal int RemoveDuplicateSecurities()
+        public int RemoveDuplicateSecurities()
         {
             List<Security> toRemove = new List<Security>();
             Hashtable<string, Security> index = new Hashtable<string, Security>();
@@ -1929,7 +1929,7 @@ namespace Walkabout.Data
             return toRemove.Count;
         }
 
-        internal int RemoveDuplicatePayees()
+        public int RemoveDuplicatePayees()
         {
             List<Payee> toRemove = new List<Payee>();
             Hashtable<string, Payee> index = new Hashtable<string, Payee>();
@@ -2064,7 +2064,7 @@ namespace Walkabout.Data
             this.EndUpdate();
         }
 
-        internal void MarkAllNew()
+        public void MarkAllNew()
         {
             this.BeginUpdate(this);
 
@@ -2088,7 +2088,7 @@ namespace Walkabout.Data
         /// Return list of securities that are currently still owned.
         /// </summary>
         /// <returns></returns>
-        internal List<Security> GetOwnedSecurities()
+        public List<Security> GetOwnedSecurities()
         {
             HashSet<Security> unique = new HashSet<Security>();
 
@@ -2217,7 +2217,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal void SwitchSecurities(Security fromSecurity, Security moveToSecurity)
+        public void SwitchSecurities(Security fromSecurity, Security moveToSecurity)
         {
             foreach (Transaction t in this.transactions.GetTransactionsBySecurity(fromSecurity, null))
             {
@@ -2271,7 +2271,7 @@ namespace Walkabout.Data
             this.ClearDownloadedState();
         }
 
-        internal void ResetCategoryFrequencies()
+        public void ResetCategoryFrequencies()
         {
             this.BeginUpdate(this);
             foreach (var c in this.Categories.GetCategories())
@@ -2560,7 +2560,7 @@ namespace Walkabout.Data
             return this.GetEnumerator();
         }
 
-        internal void OnDefaultCurrencyChanged()
+        public void OnDefaultCurrencyChanged()
         {
             foreach (Account a in this.accounts.Values)
             {
@@ -2568,7 +2568,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal List<Account> GetAccountsByType(AccountType type, bool filterOutClosedAccount)
+        public List<Account> GetAccountsByType(AccountType type, bool filterOutClosedAccount)
         {
             List<Account> list = new List<Account>();
             foreach (Account a in this.GetAccounts())
@@ -3184,7 +3184,7 @@ namespace Walkabout.Data
             set { this.categoryForInterestName = value; }
         }
 
-        internal void PostDeserializeFixup(MyMoney myMoney)
+        public void PostDeserializeFixup(MyMoney myMoney)
         {
             this.OnlineAccount = myMoney.OnlineAccounts.FindOnlineAccountAt(this.OnlineAccountId);
 
@@ -5389,7 +5389,7 @@ namespace Walkabout.Data
             return match;
         }
 
-        internal void PostDeserializeFixup(MyMoney myMoney)
+        public void PostDeserializeFixup(MyMoney myMoney)
         {
             this.Payee = myMoney.Payees.FindPayeeAt(this.PayeeId);
         }
@@ -5463,7 +5463,7 @@ namespace Walkabout.Data
             set { this.accountId = value; }
         }
 
-        internal void PostDeserializeFixup(MyMoney myMoney)
+        public void PostDeserializeFixup(MyMoney myMoney)
         {
         }
 
@@ -5548,7 +5548,7 @@ namespace Walkabout.Data
         // Update this if we add any more extra properties to this object.
         public bool IsEmpty => this.taxDate == null;
 
-        internal void PostDeserializeFixup(MyMoney myMoney)
+        public void PostDeserializeFixup(MyMoney myMoney)
         {
         }
     }
@@ -5765,7 +5765,7 @@ namespace Walkabout.Data
             return a;
         }
 
-        internal void MigrateTaxYears(MyMoney parent, int fiscalYearStart)
+        public void MigrateTaxYears(MyMoney parent, int fiscalYearStart)
         {
             List<TransactionExtra> dangling = new List<TransactionExtra>();
             foreach (var id in this.byTransactionId.Keys)
@@ -9055,7 +9055,7 @@ namespace Walkabout.Data
             return caption;
         }
 
-        internal bool Merge(Security s2)
+        public bool Merge(Security s2)
         {
             if (!string.IsNullOrEmpty(this.symbol) && !string.IsNullOrEmpty(s2.symbol) && this.symbol != s2.symbol)
             {
@@ -10629,7 +10629,7 @@ namespace Walkabout.Data
         #endregion
 
 
-        internal override void MarkAllNew()
+        public override void MarkAllNew()
         {
             foreach (Transaction t in this)
             {
@@ -10772,7 +10772,7 @@ namespace Walkabout.Data
         private long id = -1;
         private Account account; // that this transaction originated.
         private DateTime date;
-        internal decimal amount;
+        public decimal amount;
         private decimal salesTax;
         private TransactionStatus status;
         private string memo;
@@ -10782,7 +10782,7 @@ namespace Walkabout.Data
         private Investment investment;
         private Transfer transfer;
         private string fitid;
-        internal Account to; // for debugging only.        
+        public Account to; // for debugging only.        
         private decimal balance;
         private decimal runningUnits;
         private decimal runningBalance;
@@ -11429,7 +11429,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal MyMoney MyMoney
+        public MyMoney MyMoney
         {
             get
             {
@@ -12860,7 +12860,7 @@ namespace Walkabout.Data
 
         [XmlIgnore]
         [IgnoreDataMember]
-        public TransactionExtra Extra { get; internal set; }
+        public TransactionExtra Extra { get; set; }
 
         [XmlIgnore]
         [IgnoreDataMember]
@@ -12874,7 +12874,7 @@ namespace Walkabout.Data
         public bool IsDownloaded
         {
             get => this.downloaded;
-            internal set
+            set
             {
                 if (this.downloaded != value)
                 {
@@ -12893,7 +12893,7 @@ namespace Walkabout.Data
             this.RaisePropertyChanged("Categories");
         }
 
-        internal bool CategoryMatches(Predicate<Category> matches)
+        public bool CategoryMatches(Predicate<Category> matches)
         {
             if (this.IsSplit)
             {
@@ -12919,7 +12919,7 @@ namespace Walkabout.Data
             return matches(this.Category);
         }
 
-        internal bool SplitMatchesCategory(Predicate<Category> matches, out Split match)
+        public bool SplitMatchesCategory(Predicate<Category> matches, out Split match)
         {
             if (this.IsSplit)
             {
@@ -13625,7 +13625,7 @@ namespace Walkabout.Data
         /// <summary>
         /// Cleanup any splits that looks really empty
         /// </summary>
-        internal void RemoveEmptySplits()
+        public void RemoveEmptySplits()
         {
             foreach (Split s in new List<Split>(this.splits.Values))
             {
@@ -13639,7 +13639,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal bool Merge(MyMoney money, Splits other)
+        public bool Merge(MyMoney money, Splits other)
         {
             bool changed = false;
             foreach (Split o in other)
@@ -13745,10 +13745,10 @@ namespace Walkabout.Data
         private int id = -1;
         private Category category;
         private Payee payee;
-        internal decimal amount; // so we can keep transfer's in sync
+        public decimal amount; // so we can keep transfer's in sync
         private Transfer transfer;
         private string memo;
-        internal Account to; // for debugging only
+        public Account to; // for debugging only
         private string pendingTransfer;
         private SplitFlags flags;
         private DateTime? budgetBalanceDate;
@@ -14607,7 +14607,7 @@ namespace Walkabout.Data
             this.currentUnitPrice = this.UnitPrice;
         }
 
-        internal void Merge(Investment i)
+        public void Merge(Investment i)
         {
             this.security = i.security;
             this.Price = i.Price;
@@ -14789,7 +14789,7 @@ namespace Walkabout.Data
         /// <summary>
         /// Cleanup any splits that looks really empty
         /// </summary>
-        internal void RemoveEmptySplits()
+        public void RemoveEmptySplits()
         {
             try
             {

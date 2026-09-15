@@ -316,7 +316,12 @@ namespace Walkabout.Data
         /// </summary>
         public void LazyCreateTables()
         {
-            foreach (Type t in this.GetType().Assembly.GetTypes())
+            // The [TableMapping]-decorated domain model classes (Account,
+            // Transaction, Payee, ...) live in MyMoney.Business, not in this
+            // (MyMoney.Data) assembly -- this used to be "this.GetType().Assembly"
+            // back when everything was one assembly, which silently found zero
+            // mapped types after the Money.cs extraction (Task 1) split them out.
+            foreach (Type t in typeof(MyMoney).Assembly.GetTypes())
             {
                 object[] attrs = t.GetCustomAttributes(typeof(TableMapping), false);
                 if (attrs != null && attrs.Length > 0)
@@ -2967,7 +2972,7 @@ namespace Walkabout.Data
             this.ExecuteNonQuery("backup database [" + this.DatabaseName + "] to disk = '" + backupPath + "' with init");
         }
 
-        public static SqlServerDatabase Restore(string server, string databasePath, string userId, string password, string backupPath)
+        public static SqlServerDatabase Restore(string server, string databasePath, string userId, string password, string backupPath, IDirectorySecurity securityService)
         {
             SqlServerDatabase database = new SqlServerDatabase()
             {
@@ -2975,7 +2980,8 @@ namespace Walkabout.Data
                 Server = server,
                 UserId = userId,
                 Password = password,
-                BackupPath = backupPath
+                BackupPath = backupPath,
+                SecurityService = securityService
             };
             database.Restore();
             return database;

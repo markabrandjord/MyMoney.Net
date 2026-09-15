@@ -28,7 +28,7 @@ namespace Walkabout.Data
             return Path.Combine(Path.GetDirectoryName(path), Path.GetFileName(path) + ".settings");
         }
 
-        internal static DatabaseSettings LoadFrom(IDatabase database)
+        public static DatabaseSettings LoadFrom(IDatabase database)
         {
             var result = new DatabaseSettings();
             var settingsPath = GetSettingsFileName(database);

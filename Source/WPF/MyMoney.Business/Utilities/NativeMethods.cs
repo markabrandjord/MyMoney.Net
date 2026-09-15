@@ -130,10 +130,10 @@ namespace Walkabout.Utilities
         /// <summary>
         /// http://msdn2.microsoft.com/en-us/library/aa251511.aspx
         /// </summary>
-        internal const int GWL_EXSTYLE = -20;
+        public const int GWL_EXSTYLE = -20;
 
-        internal const uint WS_EX_LAYERED = 0x00080000;
-        internal const uint WS_EX_TRANSPARENT = 0x00000020;
+        public const uint WS_EX_LAYERED = 0x00080000;
+        public const uint WS_EX_TRANSPARENT = 0x00000020;
         internal const uint WS_EX_CONTEXTHELP = 0x00000400;
         internal const uint WS_EX_DLGMODALFRAME = 0x00000001;
         internal const uint WS_MINIMIZEBOX = 0x00020000;
@@ -218,7 +218,7 @@ namespace Walkabout.Utilities
             public int Y;
         }
 
-        internal static System.Windows.Point GetMousePosition()
+        public static System.Windows.Point GetMousePosition()
         {
             NativeMethods.POINT p;
             if (!NativeMethods.GetCursorPos(out p))
@@ -262,7 +262,7 @@ namespace Walkabout.Utilities
             return (double)pixels * 96 / DPI;
         }
 
-        internal static string GetFileVersion(string filename)
+        public static string GetFileVersion(string filename)
         {
             string version = null;
             string manifest = Path.Combine(ProcessHelper.StartupPath, "MyMoney.exe.manifest");
@@ -291,7 +291,7 @@ namespace Walkabout.Utilities
 
         private static char[] badChars = null;
 
-        internal static string GetValidFileName(string name)
+        public static string GetValidFileName(string name)
         {
             if (badChars == null)
             {

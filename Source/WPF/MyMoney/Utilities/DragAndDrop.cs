@@ -377,8 +377,8 @@ namespace Walkabout.Utilities
                     PresentationSource windowSource = PresentationSource.FromVisual(this.dragdropWindow);
                     IntPtr handle = ((System.Windows.Interop.HwndSource)windowSource).Handle;
 
-                    uint styles = NativeMethods.GetWindowLong(handle, NativeMethods.GWL_EXSTYLE);
-                    uint hr = NativeMethods.SetWindowLong(handle, NativeMethods.GWL_EXSTYLE, styles | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT);
+                    uint styles = NativeMethods.GetWindowLong(handle, NativeMethods.GWL.EXSTYLE);
+                    uint hr = NativeMethods.SetWindowLong(handle, NativeMethods.GWL.EXSTYLE, styles | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT);
                     if (hr == 0) // failure for SetWindowLong is zero!
                     {
                         System.Runtime.InteropServices.Marshal.GetLastWin32Error();

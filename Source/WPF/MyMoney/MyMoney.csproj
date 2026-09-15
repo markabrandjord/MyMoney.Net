@@ -637,8 +637,6 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageReference Include="ModernWpfUI" Version="0.9.7-preview.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="System.Data.SQLite" Version="2.0.4" />
     <PackageReference Include="System.IO.FileSystem.AccessControl" Version="5.0.0" />
     <PackageReference Include="System.ServiceModel.Http" Version="10.0.652802" />
     <PackageReference Include="System.ServiceModel.Primitives" Version="10.0.652802" />
@@ -648,6 +646,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PerformanceProvider\PerformanceProvider.csproj" />
+    <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
+    <ProjectReference Include="..\MyMoney.Data\MyMoney.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
     <WCFMetadata Include="Service References\" />

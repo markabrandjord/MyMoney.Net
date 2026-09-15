@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:local="clr-namespace:Walkabout.Views.Controls"
-             xmlns:localData="clr-namespace:Walkabout.Data"   
+             xmlns:localData="clr-namespace:Walkabout.Data;assembly=MyMoney.Business"   
              xmlns:help="clr-namespace:Walkabout.Help"
              help:HelpService.HelpKeyword="Basics/Securities/"
              mc:Ignorable="d" 

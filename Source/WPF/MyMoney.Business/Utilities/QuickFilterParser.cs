@@ -530,7 +530,7 @@ namespace Walkabout.Utilities
             return rc;
         }
 
-        internal bool MatchSubstring(string s)
+        public bool MatchSubstring(string s)
         {
             bool rc = s != null && s.IndexOf(this._keyword, StringComparison.OrdinalIgnoreCase) >= 0;
             return rc;

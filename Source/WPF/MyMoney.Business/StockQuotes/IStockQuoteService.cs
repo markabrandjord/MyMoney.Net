@@ -305,7 +305,7 @@ namespace Walkabout.StockQuotes
             return new List<StockQuote>(result.Values);
         }
 
-        internal void UpdateHistory(List<StockQuote> quotes, DateRange range)
+        public void UpdateHistory(List<StockQuote> quotes, DateRange range)
         {
             DateTime start = range.Start;
             int pos = 0;
@@ -407,7 +407,7 @@ namespace Walkabout.StockQuotes
             return System.IO.Path.Combine(logFolder, symbol + ".xml");
         }
 
-        internal void Merge(StockQuoteHistory newHistory)
+        public void Merge(StockQuoteHistory newHistory)
         {
             int pos = 0;
             foreach (var item in newHistory.History)
@@ -466,7 +466,7 @@ namespace Walkabout.StockQuotes
             return workDay;
         }
 
-        internal void AddMissingDateRange(DateRange range)
+        public void AddMissingDateRange(DateRange range)
         {
             if (!this.EarliestTime.HasValue)
             {                
@@ -487,7 +487,7 @@ namespace Walkabout.StockQuotes
         /// </summary>
         /// <param name="yearsToCheck">How far to go back in time to find missing data.</param>
         /// <returns></returns>
-        internal IEnumerable<DateRange> GetMissingDataRanges(int yearsToCheck)
+        public IEnumerable<DateRange> GetMissingDataRanges(int yearsToCheck)
         {           
             var workDay = this.GetPreviousMarketOpenDate(this.holidays.MostRecentWorkDay);
             DateTime stopDate = workDay.AddYears(-yearsToCheck);
@@ -578,7 +578,7 @@ namespace Walkabout.StockQuotes
             }
         }
 
-        internal bool RemoveDuplicates()
+        public bool RemoveDuplicates()
         {
             if (this.History != null)
             {

@@ -24,7 +24,7 @@ namespace Walkabout.Configuration
     /// This class encapsulates the bag of settings used by various components in this application
     /// and knows how to serialize and deserialize them between application sessions.
     /// </summary>
-    public class Settings : IXmlSerializable, INotifyPropertyChanged
+    public class Settings : IXmlSerializable, INotifyPropertyChanged, ISettingsMigrationSource
     {
         public event PropertyChangedEventHandler PropertyChanged;
         //
@@ -172,13 +172,13 @@ namespace Walkabout.Configuration
             }
         }
 
-        internal int MigrateFiscalYearStart()
+        public int MigrateFiscalYearStart()
         {
             object value = this.MigrateSetting("FiscalYearStart");
             return value is int i ? i : 0;
         }
 
-        internal bool MigrateRentalManagement()
+        public bool MigrateRentalManagement()
         {
             object value = this.MigrateSetting("RentalManagement");
             return value is bool i ? i : false;

@@ -40,7 +40,7 @@ namespace Walkabout.Utilities
             }
         }
 
-        internal static bool IsFileQIF(string fileName)
+        public static bool IsFileQIF(string fileName)
         {
             string extension = Path.GetExtension(fileName).ToLower();
             if (extension == ".qif")
@@ -50,7 +50,7 @@ namespace Walkabout.Utilities
             return false;
         }
 
-        internal static bool IsFileOFX(string fileName)
+        public static bool IsFileOFX(string fileName)
         {
             string extension = Path.GetExtension(fileName).ToLower();
             if (extension == ".qfx" || extension == ".ofx")

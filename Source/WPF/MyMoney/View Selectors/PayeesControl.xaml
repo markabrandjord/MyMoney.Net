@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:c="clr-namespace:Walkabout.WpfConverters"
-             xmlns:localData="clr-namespace:Walkabout.Data"
+             xmlns:localData="clr-namespace:Walkabout.Data;assembly=MyMoney.Business"
              xmlns:help="clr-namespace:Walkabout.Help" d:DataContext="{d:DesignInstance Type=localData:Payees}"
              help:HelpService.HelpKeyword="Basics/Payees/"
              mc:Ignorable="d"              

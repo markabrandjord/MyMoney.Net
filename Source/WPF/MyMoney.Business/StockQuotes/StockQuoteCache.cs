@@ -122,7 +122,7 @@ namespace Walkabout.StockQuotes
             return price;
         }
 
-        internal async Task<StockQuoteIndex> LoadIndexFromHistory(Security s)
+        public async Task<StockQuoteIndex> LoadIndexFromHistory(Security s)
         {
             StockQuoteIndex index = null;
             if (s != null && !string.IsNullOrEmpty(s.Symbol) && !this.quoteIndex.TryGetValue(s, out index))
@@ -169,7 +169,7 @@ namespace Walkabout.StockQuotes
         /// <summary>
         /// Provides optimized access to stock quotes
         /// </summary>
-        internal class StockQuoteIndex
+        public class StockQuoteIndex
         {
             private readonly Dictionary<DateTime, StockQuote> index = new Dictionary<DateTime, StockQuote>();
             private readonly IList<StockSplit> splits;

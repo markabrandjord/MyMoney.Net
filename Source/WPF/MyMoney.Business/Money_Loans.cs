@@ -45,7 +45,7 @@ namespace Walkabout.Data
     {
         public Account Account { get; set; }
 
-        internal void Rebalance()
+        public void Rebalance()
         {
             // cannot carry a credit on a loan account, so if the balance is > 0 make it 0.
             this.Account.Balance = this.ComputeLoanAccountBalance(DateTime.Today);
@@ -138,7 +138,7 @@ namespace Walkabout.Data
             return new ObservableCollection<LoanPaymentAggregation>(sorted);
         }
 
-        internal decimal ComputeLoanAccountBalance(DateTime date)
+        public decimal ComputeLoanAccountBalance(DateTime date)
         {
             decimal runningBalance = 0;
 

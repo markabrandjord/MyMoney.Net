@@ -1996,7 +1996,8 @@ namespace Walkabout
                         UserId = userId,
                         Password = password,
                         BackupPath = backupPath,
-                        SecurityService = new SecurityService()
+                        SecurityService = new SecurityService(),
+                        UiCallback = new WpfDataLayerUiCallback()
                     };
                     database.Create();
                 }
@@ -2205,7 +2206,8 @@ namespace Walkabout
                     {
                         Server = ".\\SQLEXPRESS",
                         DatabasePath = databaseName,
-                        SecurityService = new SecurityService()
+                        SecurityService = new SecurityService(),
+                        UiCallback = new WpfDataLayerUiCallback()
                     };
                     this.database.Create();
                 }
@@ -2448,7 +2450,10 @@ namespace Walkabout
 
         private void ExportCsv(string filename)
         {
-            CsvStore csv = new CsvStore(filename, this.TransactionView.Rows);
+            CsvStore csv = new CsvStore(filename, this.TransactionView.Rows)
+            {
+                UiCallback = new WpfDataLayerUiCallback()
+            };
             csv.Save(this.myMoney);
         }
 

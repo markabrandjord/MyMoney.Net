@@ -105,7 +105,7 @@ namespace Walkabout.Data
         /// <param name="unitSalePrice">The price per unit we received at date of sale</param>
         /// <returns>The SecuritySale containing the number of units we are selling from this lot or null
         /// if this lot is empty</returns>
-        internal SecuritySale Sell(DateTime date, decimal units, decimal unitSalePrice)
+        public SecuritySale Sell(DateTime date, decimal units, decimal unitSalePrice)
         {
             if (this.UnitsRemaining == 0)
             {
@@ -196,7 +196,7 @@ namespace Walkabout.Data
         /// as "unknown".
         /// </summary>
         /// <param name="cg">The other sale to consolidate</param>
-        internal void Consolidate(SecuritySale cg)
+        public void Consolidate(SecuritySale cg)
         {
             this.UnitsSold += cg.UnitsSold;
 
@@ -225,7 +225,7 @@ namespace Walkabout.Data
         public SecurityType Type { get; set; }
         public IList<SecurityPurchase> Purchases { get; set; }
         public TaxStatus TaxStatus { get; set; }
-        public Predicate<Account> Filter { get; internal set; }
+        public Predicate<Account> Filter { get; set; }
     }
 
 
@@ -329,12 +329,12 @@ namespace Walkabout.Data
             return result;
         }
 
-        internal IEnumerable<SecuritySale> GetPendingSales()
+        public IEnumerable<SecuritySale> GetPendingSales()
         {
             return this.pending;
         }
 
-        internal IEnumerable<SecuritySale> ProcessPendingSales()
+        public IEnumerable<SecuritySale> ProcessPendingSales()
         {
             // now that more has arrived, time to see if we can process those pending sales.
             List<SecuritySale> copy = new List<SecuritySale>(this.pending);
@@ -462,7 +462,7 @@ namespace Walkabout.Data
         }
 
 
-        internal IEnumerable<SecuritySale> ProcessPendingSales(Security s)
+        public IEnumerable<SecuritySale> ProcessPendingSales(Security s)
         {
             SecurityFifoQueue queue;
             if (this.queues.TryGetValue(s, out queue))
@@ -472,7 +472,7 @@ namespace Walkabout.Data
             return new SecuritySale[0];
         }
 
-        internal IEnumerable<SecuritySale> GetPendingSales()
+        public IEnumerable<SecuritySale> GetPendingSales()
         {
             List<SecuritySale> result = new List<SecuritySale>();
             foreach (var queue in this.queues.Values)
@@ -485,7 +485,7 @@ namespace Walkabout.Data
             return result;
         }
 
-        internal IEnumerable<SecuritySale> GetPendingSalesForSecurity(Security s)
+        public IEnumerable<SecuritySale> GetPendingSalesForSecurity(Security s)
         {
             List<SecuritySale> result = new List<SecuritySale>();
             SecurityFifoQueue queue;
@@ -773,7 +773,7 @@ namespace Walkabout.Data
             return result;
         }
 
-        internal void ComputeEstimateDividendYield(List<SecurityPurchase> holdings)
+        public void ComputeEstimateDividendYield(List<SecurityPurchase> holdings)
         {
             if (holdings.Count == 0)
             {
@@ -845,7 +845,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal decimal ComputeEstimatedAnnualDividends(List<SecurityPurchase> holdings)
+        public decimal ComputeEstimatedAnnualDividends(List<SecurityPurchase> holdings)
         {
             // how many shares do we still hold of each security
             Dictionary<Security, decimal> shares = new Dictionary<Security, decimal>();
