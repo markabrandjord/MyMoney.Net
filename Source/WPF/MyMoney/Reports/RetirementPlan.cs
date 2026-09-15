@@ -473,7 +473,8 @@ namespace Walkabout.Reports
 
 
 #if PerformanceBlocks
-                using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.ReportGenerate)) ;
+                using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.ReportGenerate))
+                {
 #endif
                 decimal futureIncome = this.state.DesiredAnnualIncome;
                 var funds = this.funds.Copy(); // make a modifiable copy.
@@ -650,6 +651,9 @@ namespace Walkabout.Reports
                 }
 
                 this.totalAssets = funds.Taxable + funds.TaxDeferred + funds.TaxFree;
+#if PerformanceBlocks
+                }
+#endif
             }
 
             private decimal ComputeSpousalSocialSecurity()

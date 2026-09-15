@@ -105,7 +105,8 @@ namespace Walkabout
         public MainWindow(Settings settings)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.MainWindowInitialize));
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.MainWindowInitialize))
+            {
 #endif
             UiDispatcher.CurrentDispatcher = this.Dispatcher;
             this.settings = settings;
@@ -300,6 +301,9 @@ namespace Walkabout
                     this.emptyWindow = true;
                     this.ApplyDisplayCurrency();
                 }
+            }
+#endif
+#if PerformanceBlocks
             }
 #endif
         }
@@ -529,7 +533,8 @@ namespace Walkabout
                 clipboardMonitor.ClipboardUpdate += this.OnClipboardChanged;
             }
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.Loaded));
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.Loaded))
+            {
 #endif
             if (!string.IsNullOrEmpty(this.newDatabaseName))
             {
@@ -538,10 +543,13 @@ namespace Walkabout
             }
             else if (!this.emptyWindow)
             {
-                // windows 11 has a weird behavior where main window does not appear before the 
+                // windows 11 has a weird behavior where main window does not appear before the
                 // Open Database dialog unless we do this delay here.
                 this.delayedActions.StartDelayedAction("loaddata", this.BeginLoadDatabase, TimeSpan.FromMilliseconds(1));
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private void OnClipboardChanged(object sender, EventArgs e)
@@ -1932,7 +1940,8 @@ namespace Walkabout
             Stopwatch watch = new Stopwatch();
 
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.Load)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.Model, MeasurementId.Load))
+            {
 #endif
             try
             {
@@ -2070,6 +2079,9 @@ namespace Walkabout
                     this.recentFilesMenu.AddRecentFile(database.DatabasePath);
                 }));
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private void UpdateDatabaseSettings(DatabaseSettings settings)
@@ -2873,7 +2885,8 @@ namespace Walkabout
         private async void FillInMissingUnitPrices(TransactionsView view, Security security, IEnumerable<Transaction> transactions)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateStockQuoteHistory)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateStockQuoteHistory))
+            {
 #endif
             StockQuoteManager manager = (StockQuoteManager)this.quotes;
             StockQuoteHistory history = await manager.GetCachedHistory(security.Symbol);
@@ -2943,6 +2956,9 @@ namespace Walkabout
                     view.UpdateView(TransactionSelection.Current, view.SelectedRowId);
                 }
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private void RestorePreviouslySavedSelection(IView view, long selectedRowId)
@@ -3085,7 +3101,8 @@ namespace Walkabout
             }
 
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateCharts)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateCharts))
+            {
 #endif
             this.myMoney.BeginUpdate(this);
             try
@@ -3254,7 +3271,9 @@ namespace Walkabout
             {
                 this.myMoney.EndUpdate();
             }
-
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private Category FindCommonParent(IList<Transaction> rows)

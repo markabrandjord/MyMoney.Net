@@ -412,7 +412,8 @@ namespace Walkabout.Views
         public TransactionsView()
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.TransactionViewInitialize)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.TransactionViewInitialize))
+            {
 #endif
 
             this.InitializeComponent();
@@ -464,6 +465,9 @@ namespace Walkabout.Views
 
             this.viewStateLock--;
             Unloaded += this.OnTransactionViewUnloaded;
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private void OnCustomBeginEdit(object sender, DataGridCustomEditEventArgs e)
@@ -1519,7 +1523,8 @@ namespace Walkabout.Views
         public void UpdateView(TransactionSelection selection, long selectedRowId)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateView));            
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.UpdateView))
+            {
 #endif
             // Back/Forwards navigation has happened so we are restoring a new view state, which may also involve
             // switching the layout type, query panel, and transaction filter.
@@ -1662,10 +1667,13 @@ namespace Walkabout.Views
             this.Display(data, this.currentDisplayName, caption, selectedRowId);
             this.FireAfterViewStateChanged(selectedRowId);
             this.ShowBalance();
-            if (this.currentDisplayName == TransactionViewName.Portfolio) 
+            if (this.currentDisplayName == TransactionViewName.Portfolio)
             {
                 this.GenerateInvestmentPortfolio(this.activeAccount);
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private long GetSelectedRowIndex(TransactionSelection selection, long selectedRowId, TransactionCollection data)
@@ -2013,7 +2021,8 @@ namespace Walkabout.Views
             if (a != null)
             {
 #if PerformanceBlocks
-                using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions));
+                using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+                {
 #endif
                 this.Commit();
                 this.FireBeforeViewStateChanged(); // Must come first.
@@ -2022,6 +2031,9 @@ namespace Walkabout.Views
                 this.SetTransactionFilterNoUpdate(filter);
                 this.SetActiveAccount(a, null, null, null, null);
                 this.UpdateView(selection, selectedRowId);
+#if PerformanceBlocks
+                }
+#endif
             }
         }
 
@@ -2029,7 +2041,8 @@ namespace Walkabout.Views
         internal void ViewTransactions(IEnumerable<Transaction> toView, string filter = "")
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+            {
 #endif
             this.Commit();
             this.FireBeforeViewStateChanged(); // Must come first.
@@ -2071,12 +2084,16 @@ namespace Walkabout.Views
             }
             this.SetActiveAccount(lastAccount, null, null, null, null);
             this.UpdateView(TransactionSelection.Last, this.SelectedRowId);
+#if PerformanceBlocks
+            }
+#endif
         }
 
         internal void ViewTransactionsForPayee(Payee p, long selectedRowId)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+            {
 #endif
             this.Commit();
             this.FireBeforeViewStateChanged(); // Must come first.
@@ -2086,13 +2103,16 @@ namespace Walkabout.Views
             this.currentDisplayName = TransactionViewName.ByPayee;
             this.SetActiveAccount(null, null, p, null, null);
             this.UpdateView(TransactionSelection.Last, selectedRowId);
-
+#if PerformanceBlocks
+            }
+#endif
         }
 
         internal void ViewTransactionsForSecurity(Security s, long selectedRowId)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+            {
 #endif
             if (s != null)
             {
@@ -2104,12 +2124,16 @@ namespace Walkabout.Views
                 this.selector = new TransactionSecuritySelector(null, s.Name);
                 this.UpdateView(TransactionSelection.Last, selectedRowId);
             }
+#if PerformanceBlocks
+            }
+#endif
         }
 
         internal void ViewTransactionsForCategory(Category c, long selectedRowId)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+            {
 #endif
             this.Commit();
             this.FireBeforeViewStateChanged(); // Must come first.
@@ -2117,12 +2141,16 @@ namespace Walkabout.Views
             this.selector = new TransactionCategorySelector(null, c?.Name);
             this.SetActiveAccount(null, c, null, null, null);
             this.UpdateView(TransactionSelection.Last, selectedRowId);
+#if PerformanceBlocks
+            }
+#endif
         }
 
         internal void ViewTransactionsForAdvancedQuery(QueryRow[] query)
         {
 #if PerformanceBlocks
-            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions)) ;
+            using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.ViewTransactions))
+            {
 #endif
             this.Commit();
             this.FireBeforeViewStateChanged(); // Must come first.
@@ -2130,6 +2158,9 @@ namespace Walkabout.Views
             this.currentDisplayName = TransactionViewName.ByQuery;
             this.selector = new TransactionQuerySelector(query);
             this.UpdateView(TransactionSelection.Last, this.SelectedRowId);
+#if PerformanceBlocks
+            }
+#endif
         }
 
         private PortfolioReport portfolioReport;
@@ -4233,7 +4264,7 @@ namespace Walkabout.Views
                     case 0:
                         {
                             days *= 2;
-                            var rc = MessageBoxEx.Show($"No matching transaction found, would you like to try a wider search with ± {days} days?",
+                            var rc = MessageBoxEx.Show($"No matching transaction found, would you like to try a wider search with ï¿½ {days} days?",
                                 "Transfer Search Failed", MessageBoxButton.YesNo, MessageBoxImage.Question);
                             if (rc == MessageBoxResult.No)
                             {
