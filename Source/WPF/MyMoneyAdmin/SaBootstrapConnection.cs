@@ -63,6 +63,7 @@ namespace Walkabout.Data
                 UserID = SaAccountName,
                 Password = password,
                 InitialCatalog = "master",
+                TrustServerCertificate = true,
                 ConnectTimeout = 10
             };
 

@@ -54,19 +54,12 @@ namespace Walkabout.Data
                 UserID = "sa",
                 Password = saPassword,
                 InitialCatalog = "master",
+                TrustServerCertificate = true,
                 ConnectTimeout = 10
             };
 
             Console.WriteLine("Creating database and logins as 'sa'...");
             ExecuteBatchScript(saBuilder.ConnectionString, bootstrapScript);
-
-            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
-            var credentials = credentialStore.Load();
-            credentials["MyMoneyAdmin"] = new DataEngineCredential { UserId = "MyMoneyAdmin", Password = adminPassword };
-            credentials["MyMoneyUser"] = new DataEngineCredential { UserId = "MyMoneyUser", Password = userPassword };
-            credentials["MyMoneyTest"] = new DataEngineCredential { UserId = "MyMoneyTest", Password = testPassword };
-            credentialStore.Save(credentials);
-            Console.WriteLine($"Wrote generated credentials to {DataEngineCredentialStore.GetDefaultPath()}");
 
             var adminBuilder = new SqlConnectionStringBuilder
             {
@@ -74,6 +67,7 @@ namespace Walkabout.Data
                 UserID = "MyMoneyAdmin",
                 Password = adminPassword,
                 InitialCatalog = databaseName,
+                TrustServerCertificate = true,
                 ConnectTimeout = 10
             };
 
@@ -81,6 +75,19 @@ namespace Walkabout.Data
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Schema", "001_CreatePayeesTable.sql")));
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Payees_AccessProcs.sql")));
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
+
+            // Credentials are written only after every deployment step has
+            // succeeded -- writing them earlier (e.g. right after the sa-run
+            // bootstrap script) would let DataEngineStartup.DatabaseExists
+            // see a "MyMoneyUser" entry for a bootstrap that actually failed
+            // partway through, permanently blocking retry (see WI #4).
+            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            var credentials = credentialStore.Load();
+            credentials["MyMoneyAdmin"] = new DataEngineCredential { UserId = "MyMoneyAdmin", Password = adminPassword };
+            credentials["MyMoneyUser"] = new DataEngineCredential { UserId = "MyMoneyUser", Password = userPassword };
+            credentials["MyMoneyTest"] = new DataEngineCredential { UserId = "MyMoneyTest", Password = testPassword };
+            credentialStore.Save(credentials);
+            Console.WriteLine($"Wrote generated credentials to {DataEngineCredentialStore.GetDefaultPath()}");
 
             Console.WriteLine("Bootstrap complete.");
             return true;

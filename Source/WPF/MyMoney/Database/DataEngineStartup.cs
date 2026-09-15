@@ -98,7 +98,8 @@ namespace Walkabout.Data
                     DataSource = config.Server,
                     InitialCatalog = config.Database,
                     UserID = userCredential.UserId,
-                    Password = userCredential.Password
+                    Password = userCredential.Password,
+                    TrustServerCertificate = true
                 };
 
                 var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
