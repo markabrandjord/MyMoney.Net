@@ -285,6 +285,20 @@ output folder. `MyMoney.TestSupport`'s own tests are run by pointing
 plan does - see Task 4, Step 5 for this distinction spelled out again at the
 point it matters for the final verification pass.
 
+Considered (during plan review) and rejected: moving the fixture classes
+into `UnitTests.csproj` itself so one `dotnet test UnitTests.csproj`
+invocation covers everything. Rejected because `MyMoney.TestSupport` would
+then need to reference `UnitTests.csproj` back to reach those fixtures (or
+duplicate them), and `UnitTests.csproj` already references
+`MyMoney.TestSupport` for `MockDatabase` - a circular project reference,
+which MSBuild rejects outright. **Resolution: run tests at the solution
+level** (`dotnet test Source/WPF/MyMoney.sln`) when "everything" needs to
+run in one command - this invokes every test project in the solution as one
+aggregated run, with no circular reference and no code movement. Test
+*coverage* is identical either way; only the command used to run "all of
+it" differs. This plan still uses the per-project commands in each task's
+own steps, since each task only needs to verify what it just changed.
+
 In `Source/WPF/UnitTests/UnitTests.csproj`, find:
 
 ```xml
@@ -659,6 +673,14 @@ not duplicated into `UnitTests.csproj`'s count, since `UnitTests.csproj`'s
 available for future use there without NUnit re-discovering
 `MyMoney.TestSupport`'s own `[TestFixture]` classes a second time under a
 different test host).
+
+Optionally, confirm both surfaces run together in one command:
+Run: `dotnet test Source/WPF/MyMoney.sln -v:q`
+Expected: a combined result covering every test project in the solution,
+including both `UnitTests.csproj` (32/1/0) and `MyMoney.TestSupport.csproj`
+(10/0/0) - this is the "run everything in one command" answer going forward,
+without moving any code between projects (see the ruling recorded in Task 1,
+Step 8).
 
 - [ ] **Step 6: Report final state**
 
