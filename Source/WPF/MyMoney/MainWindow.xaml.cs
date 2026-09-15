@@ -1581,7 +1581,7 @@ namespace Walkabout
             s.DisplayClosedAccounts = this.accountsControl.DisplayClosedAccounts;
             s.RecentFiles = this.recentFilesMenu.ToArray();
 
-            if (this.database != null)
+            if (this.database != null && this.database is not SqlServerStoredProcDatabase)
             {
                 s.Database = this.database.DatabasePath;
                 s.UserId = this.database.UserId;
