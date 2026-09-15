@@ -587,7 +587,7 @@ namespace Walkabout.Data
         }
 
 
-        internal void FlushUpdates()
+        public void FlushUpdates()
         {
             this.changePending = false;
             this.changeSource = null;
@@ -855,7 +855,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal void OnLoaded()
+        public void OnLoaded()
         {
             this.LazyInitialize();
             this.payeeAccountIndex.Reload();
@@ -1999,7 +1999,7 @@ namespace Walkabout.Data
         /// <summary>
         /// Add all the parent pointers we need for events to work properly.
         /// </summary>
-        internal void PostDeserializeFixup()
+        public void PostDeserializeFixup()
         {
             this.BeginUpdate(this);
 
@@ -2266,7 +2266,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal void OnSaved()
+        public void OnSaved()
         {
             this.ClearDownloadedState();
         }

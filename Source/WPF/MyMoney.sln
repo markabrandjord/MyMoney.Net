@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UITests", "UITests\UITests.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Business", "MyMoney.Business\MyMoney.Business.csproj", "{419D683B-349D-4DBB-84FC-4AA73017D29E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Data", "MyMoney.Data\MyMoney.Data.csproj", "{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -335,6 +337,30 @@ Global
 		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x64.Build.0 = Release|Any CPU
 		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x86.ActiveCfg = Release|Any CPU
 		{419D683B-349D-4DBB-84FC-4AA73017D29E}.Release|x86.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|ARM.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|ARM.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|x64.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Debug|x86.Build.0 = Debug|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|ARM.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|ARM.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|ARM64.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|x64.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|x64.Build.0 = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|x86.ActiveCfg = Release|Any CPU
+		{F3B09BCC-8C0F-44D3-BA1C-3035CB02C442}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

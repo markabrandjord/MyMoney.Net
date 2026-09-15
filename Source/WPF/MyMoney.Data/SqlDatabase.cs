@@ -11,7 +11,6 @@ using System.IO;
 using System.Linq;
 using System.Security.Principal;
 using System.Text;
-using System.Windows;
 using Walkabout.Utilities;
 
 namespace Walkabout.Data
@@ -83,6 +82,8 @@ namespace Walkabout.Data
 
         // this is used to give SQL Server access to the database directory.
         public IDirectorySecurity SecurityService { get; set; }
+
+        public IDataLayerUiCallback UiCallback { get; set; }
 
         public string DatabasePath
         {
@@ -928,8 +929,7 @@ namespace Walkabout.Data
                         // Must be set to 2 for mixed mode to work.
                         reg.SetValue("LoginMode", 2);
 
-                        // TODO - we need to remove any UI from the DataBase model lower layer
-                        MessageBoxEx.Show("Please restart your SQL Service in order for mixed mode logins to work", "Mixed Mode Enabled", MessageBoxButton.OK, MessageBoxImage.Information);
+                        this.UiCallback?.ShowWarning("Please restart your SQL Service in order for mixed mode logins to work", "Mixed Mode Enabled");
                     }
                 }
             }
@@ -2975,8 +2975,7 @@ namespace Walkabout.Data
                 Server = server,
                 UserId = userId,
                 Password = password,
-                BackupPath = backupPath,
-                SecurityService = new SecurityService()
+                BackupPath = backupPath
             };
             database.Restore();
             return database;

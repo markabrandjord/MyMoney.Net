@@ -19,6 +19,8 @@ namespace Walkabout.Data
             this.rows = rows;
         }
 
+        public IDataLayerUiCallback UiCallback { get; set; }
+
         public virtual bool SupportsUserLogin => false;
 
         public virtual string Server { get; set; }
@@ -227,7 +229,7 @@ namespace Walkabout.Data
 
         public virtual void Backup(string path)
         {
-            MessageBoxEx.Show("XML Backup is not implemented");
+            this.UiCallback?.ShowWarning("XML Backup is not implemented", null);
         }
 
         public static string CsvSafeString(string s)
