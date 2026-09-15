@@ -19,7 +19,11 @@ namespace Walkabout.UITests
             Assert.That(File.Exists(MyMoneyExePath), Is.True,
                 $"MyMoney.exe not found at {MyMoneyExePath}. Build Source/WPF/MyMoney.csproj first.");
 
-            using var app = Application.Launch(MyMoneyExePath);
+            // /nosettings prevents the app from auto-loading the developer's real,
+            // persisted database on launch and from writing its settings back out
+            // on close - without it this test would overwrite the developer's
+            // actual application settings file with the test run's state.
+            using var app = Application.Launch(MyMoneyExePath, "/nosettings");
             using var automation = new UIA3Automation();
 
             var mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
