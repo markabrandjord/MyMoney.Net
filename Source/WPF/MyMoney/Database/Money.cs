@@ -538,7 +538,6 @@ namespace Walkabout.Data
             this.change = ChangeType.Changed;
         }
 
-        private bool removing;
         private BatchSync batched;
         private bool changePending;
         private ChangeEventArgs head;

@@ -29,7 +29,6 @@ namespace Walkabout
     {
         private ILogger rootLog;
         private Log appLog;
-        private string logsLocation;
 #if PerformanceBlocks
         private PerformanceClient perfClient;
 #endif

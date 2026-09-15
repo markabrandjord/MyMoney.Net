@@ -87,14 +87,20 @@ namespace Walkabout.Reports
 
         private void OnNormalizedCurrencyChanged(object sender, string e)
         {
-            this.normalizedCurrency = e;
-            this.Regenerate();
+            if (!this.generating)
+            {
+                this.normalizedCurrency = e;
+                this.Regenerate();
+            }
         }
 
         private void OnReportDateChanged(object sender, DateTime e)
         {
-            this.ReportDate = e;
-            this.Regenerate();
+            if (!this.generating)
+            {
+                this.ReportDate = e;
+                this.Regenerate();
+            }
         }
 
         public override void OnSiteChanged()

@@ -25,8 +25,6 @@ namespace LovettSoftware.Charts
         private readonly DelayedActions actions = new DelayedActions();
         private ChartDataValue tipColumn;
         private Point movePos;
-        private ColumnInfo inside;
-        private bool mouseOverAnimationCompleted = false;
         private readonly Random rand = new Random(Environment.TickCount);
 
         private class ColumnInfo
@@ -233,8 +231,6 @@ namespace LovettSoftware.Charts
             this.ChartCanvas.Children.Clear();
             this.bars.Clear();
             this.tipColumn = null;
-            this.inside = null;
-            this.mouseOverAnimationCompleted = false;
         }
 
         internal void OnDelayedUpdate()

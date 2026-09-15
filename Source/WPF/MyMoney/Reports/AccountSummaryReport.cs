@@ -37,14 +37,20 @@ namespace Walkabout.Reports
 
         private void OnReportDateChanged(object sender, DateTime e)
         {
-            this.ReportDate = e;
-            this.Regenerate();
+            if (!this.generating)
+            {
+                this.ReportDate = e;
+                this.Regenerate();
+            }
         }
 
         private void OnNormalizedCurrencyChanged(object sender, string e)
         {
-            this.normalizeCurrency = e;
-            this.Regenerate();
+            if (!this.generating)
+            {
+                this.normalizeCurrency = e;
+                this.Regenerate();
+            }
         }
 
         public event EventHandler<Account> SelectAccount;
