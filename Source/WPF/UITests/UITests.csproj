@@ -22,4 +22,14 @@
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\PayeeSmokeTest.mmdb" Condition="Exists('Fixtures\PayeeSmokeTest.mmdb')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
