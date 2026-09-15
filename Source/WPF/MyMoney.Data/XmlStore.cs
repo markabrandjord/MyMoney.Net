@@ -144,7 +144,7 @@ namespace Walkabout.Data
             Debug.WriteLine("Saved XML store in " + watch.Elapsed.TotalSeconds + " seconds");
         }
 
-        internal static void PrepareSave(MyMoney money)
+        public static void PrepareSave(MyMoney money)
         {
             // time to cleanup deleted items
             money.Accounts.RemoveDeleted();

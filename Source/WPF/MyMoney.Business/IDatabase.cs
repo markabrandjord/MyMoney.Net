@@ -16,7 +16,8 @@ namespace Walkabout.Data
         SqlCE,
         Sqlite,
         Xml,
-        BinaryXml
+        BinaryXml,
+        Mock
     }
 
     /// <summary>
