@@ -37,7 +37,7 @@
 - Produces: `Walkabout.Data.DbFlavor.Mock` (new enum value).
 - Produces: `Walkabout.Data.XmlStore.PrepareSave(MyMoney money)` now public — Task 1's own `MockDatabase.Save()` calls it; no other task needs to call it directly.
 
-- [ ] **Step 1: Promote `XmlStore.PrepareSave` to public**
+- [x] **Step 1: Promote `XmlStore.PrepareSave` to public**
 
 In `Source/WPF/MyMoney.Data/XmlStore.cs`, find:
 
@@ -53,7 +53,7 @@ Change to:
 
 No other change to the method body.
 
-- [ ] **Step 2: Add `DbFlavor.Mock`**
+- [x] **Step 2: Add `DbFlavor.Mock`**
 
 In `Source/WPF/MyMoney.Business/IDatabase.cs`, find:
 
@@ -84,12 +84,12 @@ Change to:
     }
 ```
 
-- [ ] **Step 3: Build to confirm the two changes above compile with no other effect**
+- [x] **Step 3: Build to confirm the two changes above compile with no other effect**
 
 Run: `dotnet build Source/WPF/MyMoney.sln -v:q`
 Expected: `Build succeeded.`, `0 Error(s)`, same warning count as before this task (these are pure additive/visibility changes — no new warnings, no new errors).
 
-- [ ] **Step 4: Create the `MyMoney.TestSupport` project file**
+- [x] **Step 4: Create the `MyMoney.TestSupport` project file**
 
 Create `Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj`:
 
@@ -120,7 +120,7 @@ every later step in this plan runs `dotnet test` against
 `MyMoney.TestSupport.csproj` directly, so this project must be independently
 test-runnable, not just referenced by another test project.
 
-- [ ] **Step 5: Implement `MockDatabase`**
+- [x] **Step 5: Implement `MockDatabase`**
 
 Create `Source/WPF/MyMoney.TestSupport/MockDatabase.cs`:
 
@@ -222,7 +222,7 @@ namespace Walkabout.Data
 }
 ```
 
-- [ ] **Step 6: Write a smoke test proving the round-trip mechanics work**
+- [x] **Step 6: Write a smoke test proving the round-trip mechanics work**
 
 Create `Source/WPF/MyMoney.TestSupport/MockDatabaseSmokeTests.cs`:
 
@@ -268,11 +268,11 @@ namespace Walkabout.TestSupport
 }
 ```
 
-- [ ] **Step 7: Add the new project to the solution**
+- [x] **Step 7: Add the new project to the solution**
 
 Run: `dotnet sln Source/WPF/MyMoney.sln add Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj`
 
-- [ ] **Step 8: Reference the new project from `UnitTests.csproj`**
+- [x] **Step 8: Reference the new project from `UnitTests.csproj`**
 
 This makes `MockDatabase` available for any test written directly in
 `UnitTests.csproj` in the future. It does **not** make `dotnet test
@@ -322,7 +322,7 @@ Change to:
   </ItemGroup>
 ```
 
-- [ ] **Step 9: Build and run the new smoke tests**
+- [x] **Step 9: Build and run the new smoke tests**
 
 Run: `dotnet build Source/WPF/MyMoney.sln -v:q`
 Expected: `Build succeeded.`, `0 Error(s)`.
@@ -330,12 +330,12 @@ Expected: `Build succeeded.`, `0 Error(s)`.
 Run: `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -v:q`
 Expected: `Passed!  - Failed: 0, Passed: 2, Skipped: 0, Total: 2`
 
-- [ ] **Step 10: Run the full existing suite to confirm no regressions**
+- [x] **Step 10: Run the full existing suite to confirm no regressions**
 
 Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj -v:q`
 Expected: `Passed!` with the same 32 passed / 1 skipped / 0 failed baseline (the new project isn't referenced by any existing test, so nothing should change here yet).
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add Source/WPF/MyMoney.Data/XmlStore.cs Source/WPF/MyMoney.Business/IDatabase.cs Source/WPF/MyMoney.TestSupport Source/WPF/MyMoney.sln Source/WPF/UnitTests/UnitTests.csproj
@@ -354,7 +354,7 @@ git commit -m "Add MyMoney.TestSupport project with MockDatabase (item #3 slice 
 - Consumes: `Walkabout.Data.MockDatabase` (Task 1, parameterless constructor), `IDatabase.Create()/Save()/Load()/Disconnect()` (existing interface).
 - Produces: `Walkabout.TestSupport.DatabaseContractTests` (abstract, `protected abstract IDatabase CreateDatabase()`) — Task 3's `SqliteDatabaseContractTests` subclasses this.
 
-- [ ] **Step 1: Write the abstract base class with all four shared tests**
+- [x] **Step 1: Write the abstract base class with all four shared tests**
 
 Create `Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs`:
 
@@ -484,7 +484,7 @@ namespace Walkabout.TestSupport
 }
 ```
 
-- [ ] **Step 2: Write the concrete mock fixture**
+- [x] **Step 2: Write the concrete mock fixture**
 
 Create `Source/WPF/MyMoney.TestSupport/MockDatabaseContractTests.cs`:
 
@@ -505,19 +505,19 @@ namespace Walkabout.TestSupport
 }
 ```
 
-- [ ] **Step 3: Run the new fixture**
+- [x] **Step 3: Run the new fixture**
 
 Run: `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -v:q`
 Expected: `Passed!  - Failed: 0, Passed: 6, Skipped: 0, Total: 6` (2 smoke tests from Task 1 + 4 new contract tests).
 
 If any test fails, read the failure message before changing anything - the most likely causes are: (a) a factory method name mismatch (double check `GetOrCreateCategory`, `FindPayee`, `AddAccount`, `NewTransaction`, `AddTransaction`, `RemoveCategory`, `FindAccount`, `FindCategory`, `GetTransactionsFrom` against `Source/WPF/MyMoney.Business/Money.cs`), or (b) `CategoryType`/`Account`/`Category`/`Payee`/`Transaction` needing an explicit `using Walkabout.Data;` if IntelliSense/the compiler reports them unresolved (all of Money.cs's domain types live in that namespace).
 
-- [ ] **Step 4: Run the full existing suite to confirm no regressions**
+- [x] **Step 4: Run the full existing suite to confirm no regressions**
 
 Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj -v:q`
 Expected: unchanged baseline, 32 passed / 1 skipped / 0 failed (still nothing in `UnitTests.csproj` itself references the new fixtures yet - that's fine, this task's own project runs them directly).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs Source/WPF/MyMoney.TestSupport/MockDatabaseContractTests.cs
@@ -534,7 +534,7 @@ git commit -m "Add shared DatabaseContractTests suite, run against MockDatabase 
 **Interfaces:**
 - Consumes: `Walkabout.TestSupport.DatabaseContractTests` (Task 2, abstract base — this task's entire job is subclassing it), `Walkabout.Data.SqliteDatabase` (existing, in `MyMoney.Data`, `DatabasePath` settable property + `Create()`).
 
-- [ ] **Step 1: Write the concrete SQLite fixture**
+- [x] **Step 1: Write the concrete SQLite fixture**
 
 Create `Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs`:
 
@@ -574,24 +574,24 @@ Note `SetUp()` (inherited, unchanged from the base class) already calls
 actually creates the `.mmdb` file and its schema on disk, matching how
 `SqlMappingTests.cs` uses `SqliteDatabase` today.
 
-- [ ] **Step 2: Run the new fixture**
+- [x] **Step 2: Run the new fixture**
 
 Run: `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -v:q`
 Expected: `Passed!  - Failed: 0, Passed: 10, Skipped: 0, Total: 10` (6 from Tasks 1-2 + 4 new contract tests, now proven against a second engine).
 
-- [ ] **Step 3: Confirm the temp files are actually being cleaned up**
+- [x] **Step 3: Confirm the temp files are actually being cleaned up**
 
 Run (before the test run, note the count; after, confirm it's unchanged):
 `ls $env:TEMP\ContractTest_*.mmdb 2>$null | Measure-Object | Select-Object -ExpandProperty Count` (PowerShell) or
 `ls /tmp/ContractTest_*.mmdb 2>/dev/null | wc -l` if running under the Bash tool's environment.
 Expected: `0` after the test run completes (each fixture instance's own file is deleted in `TearDown`).
 
-- [ ] **Step 4: Run the full existing suite to confirm no regressions**
+- [x] **Step 4: Run the full existing suite to confirm no regressions**
 
 Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj -v:q`
 Expected: unchanged baseline, 32 passed / 1 skipped / 0 failed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs
@@ -609,58 +609,76 @@ git commit -m "Add SqliteDatabaseContractTests, prove the shared suite is engine
 **Interfaces:**
 - Consumes: everything from Tasks 1-3. Produces nothing new - this is the plan's closing verification task.
 
-- [ ] **Step 1: Temporarily misconfigure the serializer to prove the suite depends on real serialization correctness**
+- [x] **Step 1: Temporarily misconfigure `MockDatabase.Load()` to prove the suite depends on real reconnection/fixup behavior**
 
-In `Source/WPF/MyMoney.TestSupport/MockDatabase.cs`, find both occurrences of:
+The original plan for this step proposed omitting `MyMoney.GetKnownTypes()`
+from the `DataContractSerializer` constructor calls, on the theory that
+`Account`, `Category`, `Payee`, `Transaction`, etc. are polymorphic members
+reachable from `MyMoney` and require that registration to serialize/deserialize
+correctly. That theory was disproven during execution (see Task 4's report,
+"Round 1"): every `[DataMember]` reachable from `MyMoney` in this data model
+has a concrete, non-polymorphic declared type, there are no `[KnownType]`
+attributes anywhere in the source, and the custom collection containers
+(`Accounts`, `Payees`, `Categories`, `Transactions`, etc.) resolve their item
+types unambiguously via their concrete `ICollection<T>`/`Add(T)` signatures.
+Removing `GetKnownTypes()` produced **zero** test failures - it isn't
+load-bearing for this codebase's serialization shape, so it wasn't a real
+tripwire.
+
+The actual tripwire used instead: temporarily remove the
+`money.PostDeserializeFixup();` call from `Load()` in
+`Source/WPF/MyMoney.TestSupport/MockDatabase.cs`. This is load-bearing because
+`Transaction.Category`/`Payee`/`Account` are serialized only as
+`CategoryName`/`PayeeName`/`AccountName` string fields and are reconnected to
+real object references solely inside `PostDeserializeFixup()`; that method
+also clears dirty-tracking flags via its own internal `MarkAllUpToDate()`
+call. Change `Load()` from:
 
 ```csharp
-            DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
+                MyMoney money = (MyMoney)serializer.ReadObject(reader);
+                money.PostDeserializeFixup();
+                money.OnLoaded();
+                return money;
 ```
 
-Temporarily change **both** to (omitting known-types registration - a realistic
-misconfiguration bug a naive implementation might make, since `Account`,
-`Category`, `Payee`, `Transaction`, etc. are polymorphic members reachable
-from `MyMoney` and require this registration to serialize/deserialize
-correctly):
+to:
 
 ```csharp
-            DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney));
+                MyMoney money = (MyMoney)serializer.ReadObject(reader);
+                money.OnLoaded();
+                return money;
 ```
 
-- [ ] **Step 2: Run the contract suite and confirm it fails**
+- [x] **Step 2: Run the contract suite and confirm it fails**
 
 Run: `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -v:q`
-Expected: at least one of the 4 shared `DatabaseContractTests` fails for
-`MockDatabaseContractTests` specifically (the `SqliteDatabaseContractTests`
-instances are unaffected, since `SqliteDatabase` doesn't use this serializer
-at all - only the mock's tests should regress). This proves the suite
-actually exercises meaningful serialization correctness rather than passing
-regardless of how `MockDatabase` is implemented.
+Expected and observed: 2 of the 4 shared `DatabaseContractTests` fail for
+`MockDatabaseContractTests` specifically -
+`SaveAndReload_PreservesAccountAndTransactionData` (transaction-to-account
+reconnection via name lookup never happens, so the reloaded account has 0
+transactions instead of 1) and `Insert_ThenReload_ItemAppearsWithCleanState`
+(without `MarkAllUpToDate()`, the freshly-deserialized `Account` retains
+`IsInserted == true` instead of being marked clean). `SqliteDatabaseContractTests`
+is fully unaffected (4/4 green), confirmed separately via
+`--filter "FullyQualifiedName~SqliteDatabaseContractTests"`, since
+`SqliteDatabase` never goes through `MockDatabase.Load()`'s code path. This
+proves the suite depends on real, correct `MockDatabase` reconnection/fixup
+behavior rather than passing coincidentally.
 
-If nothing fails: STOP. Do not proceed or revert yet - this means the
-contract suite isn't actually testing what it's supposed to, which is a real
-problem with Task 2's test bodies, not with this step. Re-examine which
-assertions in `DatabaseContractTests.cs` should have caught a serialization
-failure and why they didn't.
+- [x] **Step 3: Revert the temporary misconfiguration**
 
-- [ ] **Step 3: Revert the temporary misconfiguration**
-
-In `Source/WPF/MyMoney.TestSupport/MockDatabase.cs`, change both occurrences
-back to:
-
-```csharp
-            DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
-```
+In `Source/WPF/MyMoney.TestSupport/MockDatabase.cs`, restore the
+`money.PostDeserializeFixup();` line in `Load()`.
 
 Run: `git diff Source/WPF/MyMoney.TestSupport/MockDatabase.cs`
-Expected: no output (file identical to the last commit - confirms the revert is complete and clean, nothing accidentally left half-changed).
+Expected and observed: no output (file identical to the last commit - confirms the revert is complete and clean, nothing accidentally left half-changed).
 
-- [ ] **Step 4: Run the contract suite again to confirm it's back to green**
+- [x] **Step 4: Run the contract suite again to confirm it's back to green**
 
 Run: `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -v:q`
-Expected: `Passed!  - Failed: 0, Passed: 10, Skipped: 0, Total: 10`
+Expected and observed: `Passed!  - Failed: 0, Passed: 10, Skipped: 0, Total: 10`
 
-- [ ] **Step 5: Full solution rebuild and full existing test suite**
+- [x] **Step 5: Full solution rebuild and full existing test suite**
 
 Run: `dotnet build Source/WPF/MyMoney.sln -v:q -t:Rebuild`
 Expected: `Build succeeded.`, `0 Error(s)`, no new warnings versus this plan's baseline.
@@ -682,7 +700,7 @@ including both `UnitTests.csproj` (32/1/0) and `MyMoney.TestSupport.csproj`
 without moving any code between projects (see the ruling recorded in Task 1,
 Step 8).
 
-- [ ] **Step 6: Report final state**
+- [x] **Step 6: Report final state**
 
 No commit needed if Step 3's `git diff` was clean (nothing changed since
 Task 3's commit). Confirm and state plainly: full rebuild 0 errors, all three
@@ -690,7 +708,7 @@ test surfaces green (`MyMoney.TestSupport.csproj` 10/10, `UnitTests.csproj`
 32/1/0 unchanged), the tripwire in Steps 1-2 proved the suite depends on
 real, correctly-configured serialization rather than passing coincidentally.
 
-- [ ] **Step 7: Update GitHub issue #20 and close it**
+- [x] **Step 7: Update GitHub issue #20 and close it**
 
 ```bash
 gh issue comment 20 --repo markabrandjord/MyMoney.Net --body "Implemented (Tasks 1-4, commits <list them>). MyMoney.TestSupport project holds MockDatabase (real DataContractSerializer/MemoryStream round-trip) and the shared DatabaseContractTests suite, run against both MockDatabase and SqliteDatabase. Verified the suite is a real tripwire (temporarily broke serialization, confirmed a test failed, reverted). Full rebuild 0 errors, MyMoney.TestSupport 10/10, UnitTests.csproj unchanged at 32/1/0."

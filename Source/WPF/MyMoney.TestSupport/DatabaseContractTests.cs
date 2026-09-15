@@ -31,6 +31,21 @@ namespace Walkabout.TestSupport
 
         protected abstract IDatabase CreateDatabase();
 
+        [Test]
+        public void Load_BeforeAnySave_ReturnsEmptyGraph()
+        {
+            MyMoney money = this.Database.Load(null);
+
+            Assert.That(money, Is.Not.Null);
+            Assert.That(money.Accounts.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Create_ThenCheckExists_ReturnsTrue()
+        {
+            Assert.That(this.Database.Exists, Is.True);
+        }
+
         private static MyMoney BuildSampleMoney()
         {
             MyMoney money = new MyMoney();

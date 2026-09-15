@@ -30,10 +30,19 @@ namespace Walkabout.Data
 
         public void Create()
         {
-            this.snapshot = null;
+            // Real engines (e.g. SqliteDatabase) create their on-disk store as
+            // part of Create(), so Exists is true immediately afterward, even
+            // before any explicit Save(). Match that here by establishing an
+            // initial saved, empty snapshot.
+            this.Save(new MyMoney());
         }
 
         public void Save(MyMoney money)
+        {
+            this.snapshot = Serialize(money);
+        }
+
+        private static byte[] Serialize(MyMoney money)
         {
             XmlStore.PrepareSave(money);
             DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
@@ -43,7 +52,7 @@ namespace Walkabout.Data
                 {
                     serializer.WriteObject(writer, money);
                 }
-                this.snapshot = stream.ToArray();
+                return stream.ToArray();
             }
         }
 

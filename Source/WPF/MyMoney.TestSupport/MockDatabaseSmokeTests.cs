@@ -7,18 +7,6 @@ namespace Walkabout.TestSupport
     public class MockDatabaseSmokeTests
     {
         [Test]
-        public void Load_BeforeAnySave_ReturnsEmptyMyMoney()
-        {
-            MockDatabase db = new MockDatabase();
-            db.Create();
-
-            MyMoney money = db.Load(null);
-
-            Assert.That(money, Is.Not.Null);
-            Assert.That(money.Accounts.Count, Is.EqualTo(0));
-        }
-
-        [Test]
         public void SaveThenLoad_ReturnsADifferentObjectInstance()
         {
             MockDatabase db = new MockDatabase();
