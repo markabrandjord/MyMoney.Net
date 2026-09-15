@@ -15,7 +15,7 @@
 - Independent of `ScenarioTest` — no files under `Source/WPF/ScenarioTest` are touched by this plan.
 - No custom test-framework/page-object abstraction layer — direct, straightforward FlaUI calls in the test files themselves.
 - The SQL Server engine path is out of scope — every test in this plan uses the SQLite fixture only.
-- `UITests.csproj` is not referenced by `MyMoney.sln`'s Release configuration build (DEBUG-only dev tooling, consistent with the rest of this initiative).
+- `UITests.csproj` is DEBUG-only dev tooling in the sense that nobody runs it as part of shipping the product — same as the pre-existing `UnitTests.csproj`, which (confirmed by inspecting `MyMoney.sln`) is also technically buildable under the solution's Release configuration and always has been, without that being treated as a problem. **Revised (caught in Task 1's review):** unlike item #2's `MyMoneyAdmin` — whose Release-exclusion mattered because its *build output* gets physically copied into `MyMoney.exe`'s own shipped output folder, a real contamination risk — `UITests.csproj` has no such relationship to `MyMoney.csproj`'s output at all. There is nothing to exclude. Do not add a task to strip `UITests`'s Release config lines from `MyMoney.sln`; that would be inconsistent with `UnitTests`'s own established, unremarkable convention.
 - FlaUI's exact API surface (method/property names) should be verified against the actually-installed 5.0.0 package if any code below doesn't compile — treat the code in this plan as a strong, well-researched starting point, not a guarantee; note and explain any deviation in the task's report, the same way earlier plans in this initiative handled MSBuild syntax that needed adjusting once tested for real.
 
 ---
