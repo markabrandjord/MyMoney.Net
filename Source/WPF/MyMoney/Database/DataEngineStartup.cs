@@ -39,18 +39,35 @@ namespace Walkabout.Data
                 return false;
             }
 
-            var builder = new SqlConnectionStringBuilder
+            try
             {
-                DataSource = config.Server,
-                InitialCatalog = config.Database,
-                UserID = userCredential.UserId,
-                Password = userCredential.Password
-            };
+                var builder = new SqlConnectionStringBuilder
+                {
+                    DataSource = config.Server,
+                    InitialCatalog = config.Database,
+                    UserID = userCredential.UserId,
+                    Password = userCredential.Password
+                };
 
-            var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
-            money = sqlServerDatabase.Load(null);
-            database = sqlServerDatabase;
-            return true;
+                var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
+                money = sqlServerDatabase.Load(null);
+                database = sqlServerDatabase;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // The server may be unreachable, MyMoneyUser's login may
+                // have been revoked, or the database may have been dropped
+                // since the credentials file was written -- any of these
+                // throw out of SqlServerStoredProcDatabase.Load(). Per this
+                // method's contract, every such failure falls through to
+                // MainWindow's normal SQLite/File-menu-driven behavior
+                // instead of crashing app startup.
+                Debug.WriteLine($"DataEngineStartup: {ex.Message}");
+                database = null;
+                money = null;
+                return false;
+            }
         }
 
         private static bool DatabaseExists(string server, string databaseName)
