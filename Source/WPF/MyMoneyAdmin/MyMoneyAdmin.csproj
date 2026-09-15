@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
+    <ProjectReference Include="..\MyMoney.Data\MyMoney.Data.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,20 +24,6 @@
     </None>
   </ItemGroup>
 
-  <!-- MyMoney.csproj cannot add a ProjectReference back to this project to
-       pull in this build, because this project already references
-       MyMoney.csproj (it needs MyMoney's IDatabase/DataEngineConfig types);
-       a reference in both directions is a circular project reference and
-       MSBuild's restore rejects it (MSB4006, circular dependency in
-       "_GenerateRestoreProjectPathWalk"). Since this project already
-       depends on, and therefore always builds after, MyMoney.csproj within
-       the solution's build order, copy this project's own output into
-       MyMoney's output directory as a post-build step here instead, so
-       MyMoneyAdmin.exe (and its dependency DLLs, e.g.
-       Microsoft.Data.SqlClient.dll, Newtonsoft.Json.dll) end up next to
-       MyMoney.exe after a normal `dotnet build MyMoney.sln`. MyMoney.csproj
-       hardcodes RuntimeIdentifier=win-x64, so its output always lands under
-       .../net10.0-windows7.0/win-x64/ regardless of $(Platform). -->
   <!-- Debug-only: Release builds must stay completely unaffected by this
        tool (no MyMoneyAdmin.exe, no SQL scripts next to MyMoney.exe);
        see the design spec's "Keep Release builds completely unaffected"
