@@ -544,5 +544,270 @@ namespace Walkabout.Tests
             db.ReadAccounts(afterDelete.Accounts, afterDelete);
             Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Investment Account"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteOnlineAccount_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var onlineAccount = money.OnlineAccounts.AddOnlineAccount(999003);
+            onlineAccount.Name = "SqlServerStoredProcDatabaseTests OnlineAccount";
+            onlineAccount.Institution = "Test Bank";
+            onlineAccount.FID = "12345";
+            onlineAccount.OnInserted();
+
+            db.UpdateOnlineAccounts(money.OnlineAccounts);
+
+            var reloaded = new MyMoney();
+            db.ReadOnlineAccounts(reloaded.OnlineAccounts, reloaded);
+            var found = reloaded.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Institution, Is.EqualTo("Test Bank"));
+            Assert.That(found.FID, Is.EqualTo("12345"));
+
+            found.Institution = "Updated Bank";
+            db.UpdateOnlineAccounts(reloaded.OnlineAccounts);
+
+            var afterUpdate = new MyMoney();
+            db.ReadOnlineAccounts(afterUpdate.OnlineAccounts, afterUpdate);
+            var updated = afterUpdate.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount");
+            Assert.That(updated.Institution, Is.EqualTo("Updated Bank"));
+
+            updated.OnDelete();
+            var toDelete = new OnlineAccounts(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateOnlineAccounts(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadOnlineAccounts(afterDelete.OnlineAccounts, afterDelete);
+            Assert.That(afterDelete.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount"), Is.Null);
+        }
+
+        [Test]
+        public void InsertUpdateDeleteAccountAlias_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var alias = money.AccountAliases.AddAlias(999004);
+            alias.Pattern = "SqlServerStoredProcDatabaseTests AccountAlias Pattern";
+            alias.AccountId = "ACCT12345";
+            alias.AliasType = AliasType.None;
+            alias.OnInserted();
+
+            db.UpdateAccountAliases(money.AccountAliases);
+
+            var reloaded = new MyMoney();
+            db.ReadAccountAliases(reloaded.AccountAliases, reloaded);
+            var found = reloaded.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.AccountId, Is.EqualTo("ACCT12345"));
+
+            found.AliasType = AliasType.Regex;
+            db.UpdateAccountAliases(reloaded.AccountAliases);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccountAliases(afterUpdate.AccountAliases, afterUpdate);
+            var updated = afterUpdate.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern");
+            Assert.That(updated.AliasType, Is.EqualTo(AliasType.Regex));
+
+            updated.OnDelete();
+            var toDelete = new AccountAliases(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateAccountAliases(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccountAliases(afterDelete.AccountAliases, afterDelete);
+            Assert.That(afterDelete.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern"), Is.Null);
+        }
+
+        [Test]
+        public void InsertUpdateDeleteTransactionExtra_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests TransactionExtra Account");
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -10.00m;
+            money.Transactions.AddTransaction(transaction);
+            db.UpdateTransactions(money.Transactions);
+
+            var extra = money.TransactionExtras.AddExtra(999005);
+            extra.Transaction = transaction.Id;
+            extra.TaxYear = 2026;
+            extra.TaxDate = new DateTime(2026, 4, 15);
+            extra.OnInserted();
+            db.UpdateTransactionExtras(money.TransactionExtras);
+
+            var reloaded = new MyMoney();
+            db.ReadTransactionExtras(reloaded.TransactionExtras, reloaded);
+            var found = reloaded.TransactionExtras.FindByTransaction(transaction.Id);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.TaxYear, Is.EqualTo(2026));
+
+            found.TaxYear = 2027;
+            db.UpdateTransactionExtras(reloaded.TransactionExtras);
+
+            var afterUpdate = new MyMoney();
+            db.ReadTransactionExtras(afterUpdate.TransactionExtras, afterUpdate);
+            var updated = afterUpdate.TransactionExtras.FindByTransaction(transaction.Id);
+            Assert.That(updated.TaxYear, Is.EqualTo(2027));
+
+            updated.OnDelete();
+            var toDelete = new TransactionExtras(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateTransactionExtras(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadTransactionExtras(afterDelete.TransactionExtras, afterDelete);
+            Assert.That(afterDelete.TransactionExtras.FindByTransaction(transaction.Id), Is.Null);
+
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            db.ReadTransactions(afterDelete.Transactions, afterDelete);
+            var cleanupAccount = afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests TransactionExtra Account");
+            var cleanupTransaction = afterDelete.Transactions.GetTransactionsFrom(cleanupAccount).FirstOrDefault();
+            cleanupTransaction.OnDelete();
+            var transactionsToDelete = new Transactions(afterDelete);
+            transactionsToDelete.AddTransaction(cleanupTransaction);
+            db.UpdateTransactions(transactionsToDelete);
+
+            cleanupAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterDelete);
+            accountsToDelete.Add(cleanupAccount);
+            db.UpdateAccounts(accountsToDelete);
+        }
+
+        [Test]
+        public void InsertUpdateDeleteLoanPayment_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests LoanPayment Account");
+            account.Type = AccountType.Loan;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var loanPayment = new LoanPayment(money.LoanPayments)
+            {
+                Id = 999006,
+                AccountId = account.Id,
+                Date = new DateTime(2026, 1, 1),
+                Principal = 100.00m,
+                Interest = 25.00m,
+                Memo = "SqlServerStoredProcDatabaseTests LoanPayment"
+            };
+            money.LoanPayments.AddLoan(loanPayment);
+            loanPayment.OnInserted();
+            db.UpdateLoanPayments(money.LoanPayments);
+
+            var reloaded = new MyMoney();
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadLoanPayments(reloaded.LoanPayments, reloaded);
+            var found = reloaded.LoanPayments.GetList().FirstOrDefault(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Principal, Is.EqualTo(100.00m));
+
+            found.Principal = 150.00m;
+            db.UpdateLoanPayments(reloaded.LoanPayments);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadLoanPayments(afterUpdate.LoanPayments, afterUpdate);
+            var updated = afterUpdate.LoanPayments.GetList().FirstOrDefault(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment");
+            Assert.That(updated.Principal, Is.EqualTo(150.00m));
+
+            updated.OnDelete();
+            var toDelete = new LoanPayments(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateLoanPayments(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadLoanPayments(afterDelete.LoanPayments, afterDelete);
+            Assert.That(afterDelete.LoanPayments.GetList().Any(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment"), Is.False);
+
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            var cleanupAccount = afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests LoanPayment Account");
+            cleanupAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterDelete);
+            accountsToDelete.Add(cleanupAccount);
+            db.UpdateAccounts(accountsToDelete);
+        }
+
+        [Test]
+        public void InsertUpdateDeleteRentBuildingAndUnit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var building = new RentBuilding(money.Buildings)
+            {
+                Id = -1,
+                Name = "SqlServerStoredProcDatabaseTests Building",
+                Address = "123 Test St",
+                PurchasedDate = new DateTime(2020, 1, 1),
+                PurchasedPrice = 200000m,
+                LandValue = 50000m,
+                EstimatedValue = 250000m
+            };
+            money.Buildings.AddRentBuilding(building);
+            building.OnInserted();
+
+            var unit = new RentUnit(money.Buildings.Units) { Id = 999007, Building = building.Id, Name = "Unit A", Renter = "Test Renter" };
+            money.Buildings.Units.AddRentUnit(unit);
+            unit.OnInserted();
+
+            db.UpdateRentUnits(money.Buildings.Units);
+            db.UpdateRentBuildings(money.Buildings);
+
+            var reloaded = new MyMoney();
+            db.ReadRentBuildings(reloaded.Buildings, reloaded);
+            var foundBuilding = reloaded.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building");
+            Assert.That(foundBuilding, Is.Not.Null);
+            Assert.That(foundBuilding.Address, Is.EqualTo("123 Test St"));
+            Assert.That(foundBuilding.Units.Count, Is.EqualTo(1));
+            var foundUnit = reloaded.Buildings.Units.Get(999007);
+            Assert.That(foundUnit, Is.Not.Null);
+            Assert.That(foundUnit.Name, Is.EqualTo("Unit A"));
+
+            foundBuilding.Address = "456 Updated Ave";
+            foundUnit.Renter = "Updated Renter";
+            db.UpdateRentUnits(reloaded.Buildings.Units);
+            db.UpdateRentBuildings(reloaded.Buildings);
+
+            var afterUpdate = new MyMoney();
+            db.ReadRentBuildings(afterUpdate.Buildings, afterUpdate);
+            var updatedBuilding = afterUpdate.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building");
+            Assert.That(updatedBuilding.Address, Is.EqualTo("456 Updated Ave"));
+            var updatedUnit = afterUpdate.Buildings.Units.Get(999007);
+            Assert.That(updatedUnit.Renter, Is.EqualTo("Updated Renter"));
+
+            updatedUnit.OnDelete();
+            var unitsToDelete = new RentUnits(afterUpdate);
+            unitsToDelete.Add(updatedUnit);
+            db.UpdateRentUnits(unitsToDelete);
+
+            updatedBuilding.OnDelete();
+            var buildingsToDelete = new RentBuildings(afterUpdate);
+            buildingsToDelete.AddRentBuilding(updatedBuilding);
+            db.UpdateRentBuildings(buildingsToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadRentBuildings(afterDelete.Buildings, afterDelete);
+            Assert.That(afterDelete.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building"), Is.Null);
+            Assert.That(afterDelete.Buildings.Units.Get(999007), Is.Null);
+        }
     }
 }

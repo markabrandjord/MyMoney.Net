@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Data;
 using System.Data.SqlTypes;
+using System.Linq;
 using Microsoft.Data.SqlClient;
 using Walkabout.Utilities;
 
@@ -11,11 +12,11 @@ namespace Walkabout.Data
     /// A SqlServerDatabase variant that performs CRUD exclusively through
     /// stored procedures, matching the grants given to the MyMoneyUser
     /// login (see Database/SqlScripts/Access/*_AccessProcs.sql). Covers
-    /// Payees, Accounts, Categories, Currencies, Securities, StockSplits,
-    /// Aliases, Transactions, Splits, and Investment -- the entities
-    /// scoped to issue #22. OnlineAccounts, AccountAliases,
-    /// TransactionExtras, RentBuildings, RentUnits, and LoanPayments are
-    /// tracked separately as issue #23.
+    /// every [TableMapping] entity: Payees, Accounts, Categories,
+    /// Currencies, Securities, StockSplits, Aliases, Transactions,
+    /// Splits, and Investment (issue #22), plus OnlineAccounts,
+    /// AccountAliases, TransactionExtras, RentBuildings, RentUnits, and
+    /// LoanPayments (issue #23).
     /// </summary>
     public class SqlServerStoredProcDatabase : SqlServerDatabase
     {
@@ -37,6 +38,493 @@ namespace Walkabout.Data
             return base.GetConnectionString(includeDatabase);
         }
 
+        public override void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
+        {
+            onlineAccounts.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.OnlineAccounts_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    onlineAccounts.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        OnlineAccount i = onlineAccounts.AddOnlineAccount(id);
+                        i.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        i.Institution = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        i.Ofx = reader.IsDBNull(3) ? null : reader.GetString(3);
+                        i.FID = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        i.UserId = reader.IsDBNull(5) ? null : reader.GetString(5).TrimEnd();
+                        i.Password = reader.IsDBNull(6) ? null : reader.GetString(6);
+                        i.BankId = reader.IsDBNull(7) ? null : reader.GetString(7);
+                        i.BranchId = reader.IsDBNull(8) ? null : reader.GetString(8);
+                        i.BrokerId = reader.IsDBNull(9) ? null : reader.GetString(9);
+                        i.OfxVersion = reader.IsDBNull(10) ? null : reader.GetString(10).TrimEnd();
+                        i.LogoUrl = reader.IsDBNull(11) ? null : reader.GetString(11);
+                        i.AppId = reader.IsDBNull(12) ? null : reader.GetString(12).TrimEnd();
+                        i.AppVersion = reader.IsDBNull(13) ? null : reader.GetString(13).TrimEnd();
+                        i.ClientUid = reader.IsDBNull(14) ? null : reader.GetString(14).TrimEnd();
+                        i.UserCred1 = reader.IsDBNull(15) ? null : reader.GetString(15);
+                        i.UserCred2 = reader.IsDBNull(16) ? null : reader.GetString(16);
+                        i.AuthToken = reader.IsDBNull(17) ? null : reader.GetString(17);
+                        i.AccessKey = reader.IsDBNull(18) ? null : reader.GetString(18).TrimEnd();
+                        i.UserKey = reader.IsDBNull(19) ? null : reader.GetString(19);
+                        if (!reader.IsDBNull(20))
+                        {
+                            i.UserKeyExpireDate = reader.GetDateTime(20);
+                        }
+                        i.OnUpdated();
+                    }
+                    onlineAccounts.EndUpdate();
+                }
+            }
+            onlineAccounts.FireChangeEvent(onlineAccounts, onlineAccounts, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateOnlineAccounts(OnlineAccounts accounts)
+        {
+            if (accounts.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (OnlineAccount i in accounts)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", i.Id), ("@Name", (object)i.Name ?? DBNull.Value), ("@Institution", (object)i.Institution ?? DBNull.Value),
+                        ("@OFX", (object)i.Ofx ?? DBNull.Value), ("@FID", (object)i.FID ?? DBNull.Value),
+                        ("@UserId", (object)i.UserId ?? DBNull.Value), ("@Password", (object)i.Password ?? DBNull.Value),
+                        ("@BankId", (object)i.BankId ?? DBNull.Value), ("@BranchId", (object)i.BranchId ?? DBNull.Value),
+                        ("@BrokerId", (object)i.BrokerId ?? DBNull.Value), ("@OfxVersion", (object)i.OfxVersion ?? DBNull.Value),
+                        ("@LogoUrl", (object)i.LogoUrl ?? DBNull.Value), ("@AppId", (object)i.AppId ?? DBNull.Value),
+                        ("@AppVersion", (object)i.AppVersion ?? DBNull.Value), ("@ClientUid", (object)i.ClientUid ?? DBNull.Value),
+                        ("@UserCred1", (object)i.UserCred1 ?? DBNull.Value), ("@UserCred2", (object)i.UserCred2 ?? DBNull.Value),
+                        ("@AuthToken", (object)i.AuthToken ?? DBNull.Value), ("@AccessKey", (object)i.AccessKey ?? DBNull.Value),
+                        ("@UserKey", (object)i.UserKey ?? DBNull.Value),
+                        ("@UserKeyExpireDate", SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate))
+                    };
+
+                    if (i.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Update", parameters);
+                    }
+                    else if (i.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Insert", parameters);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Delete", ("@Id", i.Id));
+                    }
+                }
+            }
+
+            foreach (OnlineAccount i in accounts)
+            {
+                if (!i.IsDeleted)
+                {
+                    i.OnUpdated();
+                }
+            }
+            accounts.RemoveDeleted();
+        }
+
+        public override void ReadAccountAliases(AccountAliases accountAliases, MyMoney money)
+        {
+            accountAliases.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.AccountAliases_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    accountAliases.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        AccountAlias a = accountAliases.AddAlias(id);
+                        a.Pattern = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        a.AccountId = reader.IsDBNull(2) ? null : reader.GetString(2).TrimEnd();
+                        if (!reader.IsDBNull(3))
+                        {
+                            a.AliasType = (AliasType)reader.GetInt32(3);
+                        }
+                        a.OnUpdated();
+                    }
+                    accountAliases.EndUpdate();
+                }
+            }
+            accountAliases.FireChangeEvent(accountAliases, accountAliases, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateAccountAliases(AccountAliases accountAliases)
+        {
+            if (accountAliases.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (AccountAlias a in accountAliases)
+                {
+                    if (a.IsChanged || a.IsInserted)
+                    {
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", a.Id), ("@Pattern", (object)a.Pattern ?? DBNull.Value),
+                            ("@AccountId", (object)a.AccountId ?? DBNull.Value), ("@Flags", (int)a.AliasType)
+                        };
+
+                        if (a.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.AccountAliases_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.AccountAliases_Insert", parameters);
+                        }
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.AccountAliases_Delete", ("@Id", a.Id));
+                    }
+                }
+            }
+
+            foreach (AccountAlias a in accountAliases)
+            {
+                a.OnUpdated();
+            }
+            accountAliases.RemoveDeleted();
+        }
+
+        public override void ReadTransactionExtras(TransactionExtras extras, MyMoney money)
+        {
+            extras.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.TransactionExtras_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    extras.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        TransactionExtra a = extras.AddExtra(id);
+                        a.Transaction = reader.GetInt64(1);
+                        a.TaxYear = reader.GetInt32(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            DateTime taxDate = reader.GetDateTime(3);
+                            if (taxDate.Year > 1)
+                            {
+                                a.TaxDate = taxDate;
+                            }
+                        }
+                        a.OnUpdated();
+                    }
+                    extras.EndUpdate();
+                }
+            }
+            extras.FireChangeEvent(extras, extras, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateTransactionExtras(TransactionExtras extras)
+        {
+            if (extras.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (TransactionExtra e in extras)
+                {
+                    if (e.IsChanged || e.IsInserted)
+                    {
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", e.Id), ("@Transaction", e.Transaction), ("@TaxYear", e.TaxYear),
+                            ("@TaxDate", SqlServerDatabase.DBNullableDateTimeParam(e.TaxDate))
+                        };
+
+                        if (e.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.TransactionExtras_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.TransactionExtras_Insert", parameters);
+                        }
+                    }
+                    else if (e.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.TransactionExtras_Delete", ("@Id", e.Id));
+                    }
+                }
+            }
+
+            foreach (TransactionExtra e in extras)
+            {
+                e.OnUpdated();
+            }
+            extras.RemoveDeleted();
+        }
+
+        public override void ReadLoanPayments(LoanPayments collection, MyMoney money)
+        {
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.LoanPayments_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        LoanPayment x = new LoanPayment(collection);
+                        x.BatchMode = true;
+                        x.Id = reader.GetInt32(0);
+                        x.AccountId = reader.GetInt32(1);
+                        if (!reader.IsDBNull(2))
+                        {
+                            x.Date = reader.GetDateTime(2);
+                        }
+                        x.Principal = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        x.Interest = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        x.Memo = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        x.BatchMode = false;
+                        collection.AddLoan(x);
+                        x.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+            collection.FireChangeEvent(collection, collection, null, ChangeType.Reloaded);
+
+            foreach (Account a in money.Accounts)
+            {
+                if (a.Type == AccountType.Loan)
+                {
+                    money.GetOrCreateLoanAccount(a);
+                }
+            }
+        }
+
+        public override void UpdateLoanPayments(LoanPayments loans)
+        {
+            if (loans.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (LoanPayment i in loans)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", i.Id), ("@AccountId", i.AccountId), ("@Date", SqlServerDatabase.DBDateTimeParam(i.Date)),
+                        ("@Principal", i.Principal), ("@Interest", i.Interest), ("@Memo", (object)i.Memo ?? DBNull.Value)
+                    };
+
+                    if (i.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Update", parameters);
+                    }
+                    else if (i.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Insert", parameters);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Delete", ("@Id", i.Id));
+                    }
+                }
+            }
+
+            foreach (LoanPayment i in loans)
+            {
+                i.OnUpdated();
+            }
+            loans.RemoveDeleted();
+        }
+
+        public override void ReadRentUnits(RentUnits collection, MyMoney money)
+        {
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.RentUnits_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        RentUnit r = new RentUnit(collection);
+                        r.Id = reader.GetInt32(0);
+                        r.Building = reader.GetInt32(1);
+                        r.Name = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        r.Renter = reader.IsDBNull(3) ? null : reader.GetString(3);
+                        r.Note = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        collection.AddRentUnit(r);
+                        r.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+        }
+
+        public override void UpdateRentUnits(RentUnits units)
+        {
+            if (units.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (RentUnit x in units)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", x.Id), ("@Building", x.Building), ("@Name", (object)x.Name ?? DBNull.Value),
+                        ("@Renter", (object)x.Renter ?? DBNull.Value), ("@Note", (object)x.Note ?? DBNull.Value)
+                    };
+
+                    if (x.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Update", parameters);
+                    }
+                    else if (x.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Insert", parameters);
+                    }
+                    else if (x.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Delete", ("@Id", x.Id), ("@Building", x.Building));
+                    }
+                }
+            }
+
+            foreach (RentUnit x in units)
+            {
+                x.OnUpdated();
+            }
+            units.RemoveDeleted();
+        }
+
+        public override void ReadRentBuildings(RentBuildings collection, MyMoney money)
+        {
+            this.ReadRentUnits(collection.Units, money);
+
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.RentBuildings_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        RentBuilding r = new RentBuilding(collection);
+                        r.Id = reader.GetInt32(0);
+                        r.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        r.Address = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            r.PurchasedDate = reader.GetDateTime(3);
+                        }
+                        r.PurchasedPrice = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        r.LandValue = reader.IsDBNull(5) ? 0 : reader.GetDecimal(5);
+                        r.EstimatedValue = reader.IsDBNull(6) ? 0 : reader.GetDecimal(6);
+                        r.CategoryForIncome = reader.IsDBNull(7) ? -1 : reader.GetInt32(7);
+                        r.CategoryForTaxes = reader.IsDBNull(8) ? -1 : reader.GetInt32(8);
+                        r.CategoryForInterest = reader.IsDBNull(9) ? -1 : reader.GetInt32(9);
+                        r.CategoryForRepairs = reader.IsDBNull(10) ? -1 : reader.GetInt32(10);
+                        r.CategoryForMaintenance = reader.IsDBNull(11) ? -1 : reader.GetInt32(11);
+                        r.CategoryForManagement = reader.IsDBNull(12) ? -1 : reader.GetInt32(12);
+                        r.OwnershipName1 = reader.IsDBNull(13) ? null : reader.GetString(13);
+                        r.OwnershipName2 = reader.IsDBNull(14) ? null : reader.GetString(14);
+                        r.OwnershipPercentage1 = reader.IsDBNull(15) ? 0 : reader.GetDecimal(15);
+                        r.OwnershipPercentage2 = reader.IsDBNull(16) ? 0 : reader.GetDecimal(16);
+                        r.Note = reader.IsDBNull(17) ? null : reader.GetString(17);
+
+                        foreach (var unit in money.Buildings.Units.GetList().Where(x => x.Building == r.Id).OrderBy(x => x.Id))
+                        {
+                            r.Units.Add(unit);
+                        }
+
+                        collection.AddRentBuilding(r);
+                        r.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+        }
+
+        public override void UpdateRentBuildings(RentBuildings buildings)
+        {
+            if (buildings.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (RentBuilding p in buildings)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value), ("@Address", (object)p.Address ?? DBNull.Value),
+                        ("@PurchasedDate", SqlServerDatabase.DBDateTimeParam(p.PurchasedDate)), ("@PurchasedPrice", p.PurchasedPrice),
+                        ("@LandValue", p.LandValue), ("@EstimatedValue", p.EstimatedValue),
+                        ("@CategoryForIncome", p.CategoryForIncome), ("@CategoryForTaxes", p.CategoryForTaxes),
+                        ("@CategoryForInterest", p.CategoryForInterest), ("@CategoryForRepairs", p.CategoryForRepairs),
+                        ("@CategoryForMaintenance", p.CategoryForMaintenance), ("@CategoryForManagement", p.CategoryForManagement),
+                        ("@OwnershipName1", (object)p.OwnershipName1 ?? DBNull.Value), ("@OwnershipName2", (object)p.OwnershipName2 ?? DBNull.Value),
+                        ("@OwnershipPercentage1", p.OwnershipPercentage1), ("@OwnershipPercentage2", p.OwnershipPercentage2),
+                        ("@Note", (object)p.Note ?? DBNull.Value)
+                    };
+
+                    if (p.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Update", parameters);
+                    }
+                    else if (p.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Insert", parameters);
+                    }
+                    else if (p.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Delete", ("@Id", p.Id));
+                    }
+                }
+            }
+
+            foreach (RentBuilding p in buildings)
+            {
+                p.OnUpdated();
+            }
+            buildings.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -44,13 +532,14 @@ namespace Walkabout.Data
         /// table grants at all -- only EXECUTE on the *_AccessProcs.sql
         /// stored procedures -- so LazyCreateTables() and the base class's
         /// generic ReadXxx() methods would fail with a SQL Server
-        /// permissions error. This override reads every entity in scope
-        /// for issue #22 (Payees, Aliases, Categories, Accounts,
-        /// Currencies, Securities, StockSplits, Transactions -- with
-        /// Splits and Investment read inline inside ReadTransactions) via
-        /// their dedicated stored procedures, in FK-safe dependency
-        /// order. OnlineAccounts and the other issue #23 entities are
-        /// still left empty.
+        /// permissions error. This override reads every [TableMapping]
+        /// entity via its dedicated stored procedures, in FK-safe
+        /// dependency order: OnlineAccounts before Accounts (Account.
+        /// OnlineAccount is resolved by lookup), Accounts before
+        /// LoanPayments (which matches loan accounts by iterating
+        /// money.Accounts), and RentUnits before RentBuildings (handled
+        /// internally by ReadRentBuildings, matching issue #22's
+        /// Splits/Investment-inside-ReadTransactions pattern).
         /// </summary>
         public override MyMoney Load(IStatusService status)
         {
@@ -58,14 +547,19 @@ namespace Walkabout.Data
             money.BeginUpdate(this);
             try
             {
+                this.ReadOnlineAccounts(money.OnlineAccounts, money);
                 this.ReadPayees(money.Payees, money);
                 this.ReadAliases(money.Aliases, money);
+                this.ReadAccountAliases(money.AccountAliases, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
                 this.ReadCurrencies(money.Currencies, money);
                 this.ReadSecurities(money.Securities, money);
                 this.ReadStockSplits(money.StockSplits, money);
                 this.ReadTransactions(money.Transactions, money);
+                this.ReadTransactionExtras(money.TransactionExtras, money);
+                this.ReadLoanPayments(money.LoanPayments, money);
+                this.ReadRentBuildings(money.Buildings, money);
             }
             finally
             {
