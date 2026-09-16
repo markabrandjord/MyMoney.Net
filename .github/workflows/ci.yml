@@ -1,0 +1,103 @@
+name: build-and-test
+
+# Runs on Genoa, a Hyper-V VM on Kirkland, registered as a second, distinct
+# self-hosted runner instance (label "mymoney") alongside HomeNetwork's
+# existing "homenetwork" runner on the same machine. Self-hosted is safe
+# here because this repository is PRIVATE -- see docs/dev/index.md and
+# HomeNetwork's own ci.yml for the same reasoning: a public repo would let
+# any fork's pull_request execute on hardware inside the house.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A second push while a run is in flight cancels the first: the older
+# result is about code nobody is looking at any more.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only. Nothing here writes to the repository, and a self-hosted
+# runner should be handed the least token that does the job.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    # Same-repository pull requests only. A fork PR is skipped rather than
+    # executed here -- see the comment above about why self-hosted is safe
+    # only because this repo is private, and this guard is the second half
+    # of that: visibility and collaborators can change.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, mymoney]
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # Pinned to a commit SHA, not a tag: a tag can be repointed at new
+      # code, and this workflow executes pull-request code on hardware in
+      # the house. persist-credentials: false because nothing here needs
+      # git write access, and leaving a token in .git/config on a
+      # self-hosted runner outlives the job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Environment
+        run: |
+          "dotnet     : $(dotnet --version)"
+          "git        : $(git --version)"
+          "runner     : $env:RUNNER_NAME on $env:COMPUTERNAME"
+
+      - name: Build (Debug)
+        run: dotnet build Source/WPF/MyMoney.sln -m:1
+
+      # Release-only compile breaks are real (conditional-compilation
+      # directives, optimization-dependent code) and the retired
+      # dotnet-desktop.yml workflow caught this config -- so verify it still
+      # builds. Not re-running the test suite against Release: the tests
+      # exercise logic, not the optimizer, and doubling every test run to
+      # catch a config-specific compile error is the wrong trade.
+      - name: Build (Release)
+        run: dotnet build Source/WPF/MyMoney.sln -c Release -m:1
+
+      # UnitTests and MyMoney.TestSupport only -- see docs/dev/index.md.
+      # ScenarioTest and UITests are excluded: both drive real Windows UI
+      # via FlaUI/DGML automation, which needs an interactive desktop
+      # session. This runner is a Windows Service (Session 0), so those
+      # projects can't work here regardless of code correctness -- the
+      # same reason ScenarioTest is documented as "not run via dotnet
+      # test" even for local development.
+      #
+      # SqlServerDatabaseContractTests/SqlServerStoredProcDatabaseTests fail
+      # fast (by design, not skip) without MYMONEY_TEST_SQLSERVER_* env vars
+      # -- see docs/dev/index.md -- so they're excluded by name. NOTE:
+      # `--filter "TestCategory!=RequiresSqlServer"` looks like it should do
+      # the same thing but does NOT actually exclude them with this
+      # NUnit3TestAdapter version (verified locally: --list-tests still
+      # shows all of SqlServerDatabaseContractTests with that filter, while
+      # `FullyQualifiedName!~SqlServerDatabaseContractTests` correctly drops
+      # them) -- a real, silent footgun for anyone tempted to "clean this up"
+      # to the category filter later. Wiring up a live SQL Server connection
+      # for CI is a separate, deliberate follow-up, not something to default
+      # into silently here.
+      - name: Test
+        run: |
+          dotnet test Source/WPF/UnitTests/UnitTests.csproj -m:1 --logger "trx;LogFileName=UnitTests.trx"
+          dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -m:1 --filter "FullyQualifiedName!~SqlServerDatabaseContractTests" --logger "trx;LogFileName=MyMoney.TestSupport.trx"
+
+      - name: Test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results
+          path: |
+            Source/WPF/UnitTests/TestResults/*.trx
+            Source/WPF/MyMoney.TestSupport/TestResults/*.trx
+          if-no-files-found: warn
