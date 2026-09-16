@@ -449,7 +449,7 @@ namespace Walkabout.Data
                 if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
                 {
                     yield return string.Format(
-                        "ALTER TABLE [{0}] ADD CONSTRAINT [FK_{0}_{1}] FOREIGN KEY ([{1}]) REFERENCES [{2}]([{3}])",
+                        "IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_{0}_{1}')\nBEGIN\n    ALTER TABLE [{0}] ADD CONSTRAINT [FK_{0}_{1}] FOREIGN KEY ([{1}]) REFERENCES [{2}]([{3}])\nEND",
                         mapping.TableName, column.ColumnName, co.ForeignKeyTable, co.KeyProperty);
                 }
             }
