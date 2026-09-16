@@ -179,5 +179,46 @@ namespace Walkabout.Tests
             db.ReadCurrencies(afterDelete.Currencies, afterDelete);
             Assert.That(afterDelete.Currencies.FindCurrency("ZZT"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteSecurity_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var security = money.Securities.AddSecurity(0);
+            security.Name = "SqlServerStoredProcDatabaseTests Security";
+            security.Symbol = "ZZS";
+            security.Price = 42.50m;
+            security.SecurityType = SecurityType.Equity;
+            security.OnInserted();
+
+            db.UpdateSecurities(money.Securities);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            var found = reloaded.Securities.FindSecurity("SqlServerStoredProcDatabaseTests Security", false);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Name, Is.EqualTo("SqlServerStoredProcDatabaseTests Security"));
+            Assert.That(found.Price, Is.EqualTo(42.50m));
+
+            found.Price = 50.00m;
+            db.UpdateSecurities(reloaded.Securities);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            var updated = afterUpdate.Securities.FindSecurity("SqlServerStoredProcDatabaseTests Security", false);
+            Assert.That(updated.Price, Is.EqualTo(50.00m));
+
+            updated.OnDelete();
+            var toDelete = new Securities(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateSecurities(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadSecurities(afterDelete.Securities, afterDelete);
+            Assert.That(afterDelete.Securities.FindSecurity("SqlServerStoredProcDatabaseTests Security", false), Is.Null);
+        }
     }
 }

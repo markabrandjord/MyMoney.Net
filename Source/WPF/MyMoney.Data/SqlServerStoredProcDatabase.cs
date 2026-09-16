@@ -58,6 +58,7 @@ namespace Walkabout.Data
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
                 this.ReadCurrencies(money.Currencies, money);
+                this.ReadSecurities(money.Securities, money);
             }
             finally
             {
@@ -417,6 +418,90 @@ namespace Walkabout.Data
                 s.OnUpdated();
             }
             currencies.RemoveDeleted();
+        }
+
+        public override void ReadSecurities(Securities securities, MyMoney money)
+        {
+            securities.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.Securities_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    securities.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Security s = securities.AddSecurity(id);
+                        s.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        s.Symbol = reader.IsDBNull(2) ? null : reader.GetString(2).TrimEnd();
+                        s.Price = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        if (!reader.IsDBNull(4))
+                        {
+                            s.LastPrice = reader.GetDecimal(4);
+                        }
+                        s.CuspId = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        if (!reader.IsDBNull(6))
+                        {
+                            s.SecurityType = (SecurityType)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            s.Taxable = (YesNo)reader.GetByte(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            s.PriceDate = reader.GetDateTime(8);
+                        }
+                        s.OnUpdated();
+                    }
+                    securities.EndUpdate();
+                }
+            }
+            securities.FireChangeEvent(securities, securities, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateSecurities(Securities securities)
+        {
+            if (securities.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Security s in securities)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", s.Id), ("@Name", (object)s.Name ?? DBNull.Value), ("@Symbol", (object)s.Symbol ?? DBNull.Value),
+                        ("@Price", s.Price), ("@LastPrice", s.LastPrice), ("@CuspId", (object)s.CuspId ?? DBNull.Value),
+                        ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                        ("@PriceDate", SqlServerDatabase.DBDateTimeParam(s.PriceDate))
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Securities_Update", parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.Securities_Insert", parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Securities_Delete", ("@Id", s.Id));
+                    }
+                }
+            }
+
+            foreach (Security s in securities)
+            {
+                s.OnUpdated();
+            }
+            securities.RemoveDeleted();
         }
 
         /// <summary>

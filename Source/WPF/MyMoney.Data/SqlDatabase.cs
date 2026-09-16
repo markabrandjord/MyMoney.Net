@@ -2487,7 +2487,7 @@ namespace Walkabout.Data
 
         #region CURRENCIES
 
-        public void ReadCurrencies(Currencies currencies, MyMoney money)
+        public virtual void ReadCurrencies(Currencies currencies, MyMoney money)
         {
             currencies.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Symbol,Name,Ratio,LastRatio,CultureCode FROM Currencies");
@@ -2527,7 +2527,7 @@ namespace Walkabout.Data
         }
 
 
-        public void UpdateCurrencies(Currencies currencies)
+        public virtual void UpdateCurrencies(Currencies currencies)
         {
             if (currencies.Count == 0)
             {
@@ -2611,7 +2611,7 @@ namespace Walkabout.Data
 
         #region TABLE SECURITIES
 
-        public void ReadSecurities(Securities securities, MyMoney money)
+        public virtual void ReadSecurities(Securities securities, MyMoney money)
         {
             securities.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Name,Symbol,Price,LastPrice,CuspId,SecurityType,Taxable,PriceDate FROM Securities");
@@ -2652,7 +2652,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateSecurities(Securities securities)
+        public virtual void UpdateSecurities(Securities securities)
         {
             if (securities.Count == 0)
             {
