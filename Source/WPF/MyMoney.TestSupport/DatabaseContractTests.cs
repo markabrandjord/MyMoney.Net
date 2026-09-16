@@ -134,5 +134,50 @@ namespace Walkabout.TestSupport
             Category shouldBeGone = reloadedAgain.Categories.FindCategory("ToDelete");
             Assert.That(shouldBeGone, Is.Null);
         }
+
+        // Regression test for the final whole-branch review's Fix 1 and Fix 2:
+        // - Fix 1: Save(MyMoney)'s call order used to write Accounts before Categories and
+        //   Transactions (which own Investment) before Securities, violating the FK dependency
+        //   order Load() already required ("Must populate the Categories before the Account").
+        // - Fix 2: Investment.Security had no AllowNulls on its ColumnObjectMapping and its write
+        //   sites wrote a -1 sentinel instead of NULL, which is incompatible with a real FK
+        //   constraint pointing at Securities(Id).
+        // This creates a new Category, an Account whose CategoryForPrincipal points at it, a new
+        // Security, and a new Transaction/Investment whose Security points at it, all in one
+        // fresh MyMoney saved once, and asserts the reload succeeds and every relationship
+        // resolves. Before Fixes 1/2 this either throws an FK-violation on Save (real SQL
+        // engines) or silently loses the CategoryForPrincipal/Investment.Security links.
+        [Test]
+        public void SaveAndReload_ResolvesAccountCategoryAndInvestmentSecurityForwardReferences()
+        {
+            MyMoney money = new MyMoney();
+            Category principalCategory = money.Categories.GetOrCreateCategory("Loan:Principal", CategoryType.Expense);
+            Account account = money.Accounts.AddAccount("Mortgage");
+            account.CategoryForPrincipal = principalCategory;
+
+            Security security = money.Securities.FindSecurity("ACME", true);
+            security.Symbol = "ACME";
+
+            Transaction t = money.Transactions.NewTransaction(account);
+            t.Date = new DateTime(2026, 1, 15);
+            t.Amount = -1000m;
+            t.GetOrCreateInvestment().Security = security;
+            money.Transactions.AddTransaction(t);
+
+            this.Database.Save(money);
+            MyMoney reloaded = this.Database.Load(null);
+
+            Account reloadedAccount = reloaded.Accounts.FindAccount("Mortgage");
+            Assert.That(reloadedAccount, Is.Not.Null);
+            Assert.That(reloadedAccount.CategoryForPrincipal, Is.Not.Null);
+            Assert.That(reloadedAccount.CategoryForPrincipal.Name, Is.EqualTo("Loan:Principal"));
+
+            var transactions = reloaded.Transactions.GetTransactionsFrom(reloadedAccount);
+            Assert.That(transactions.Count, Is.EqualTo(1));
+            Transaction reloadedTransaction = transactions[0];
+            Assert.That(reloadedTransaction.Investment, Is.Not.Null);
+            Assert.That(reloadedTransaction.Investment.Security, Is.Not.Null);
+            Assert.That(reloadedTransaction.Investment.Security.Name, Is.EqualTo("ACME"));
+        }
     }
 }

@@ -100,3 +100,100 @@ namespace Walkabout.Tests
         }
     }
 }
+
+namespace Walkabout.Data.Tests
+{
+    [TestFixture]
+    public class SchemaGenerationTests
+    {
+        [TableMapping(TableName = "MappingTestTable")]
+        private class FakeRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_SqlServer_AppendsRowVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Contain("[RowVersion] ROWVERSION NOT NULL"));
+        }
+
+        [Test]
+        public void GetCreateTableScript_Sqlite_AppendsIntegerVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.Sqlite);
+            Assert.That(script, Does.Contain("[Version] INTEGER NOT NULL DEFAULT 1"));
+            Assert.That(script, Does.Not.Contain("ROWVERSION"));
+        }
+
+        [TableMapping(TableName = "MappingTestParentTable")]
+        private class FakeParentRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [TableMapping(TableName = "MappingTestChildTable")]
+        private class FakeChildRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+
+            [ColumnObjectMapping(ColumnName = "ParentId", KeyProperty = "Id")]
+            public FakeParentRow Parent { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping()
+        {
+            // SQLite (and SQL CE) resolve FK targets at DML time, not DDL time, so they keep the
+            // FOREIGN KEY constraint inline in the CREATE TABLE statement itself.
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.Sqlite);
+            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
+        }
+
+        [Test]
+        public void GetCreateTableScript_SqlServer_OmitsInlineForeignKey()
+        {
+            // Real SQL Server is DDL-strict about FOREIGN KEY targets existing at CREATE TABLE
+            // time, and LazyCreateTables() creates tables in reflection order, which does not
+            // guarantee dependency order. So for SqlServer, FK constraints must NOT be inlined
+            // into CREATE TABLE -- they're added afterwards via GetAddForeignKeyScripts() instead
+            // (see the companion test below).
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Not.Contain("FOREIGN KEY"));
+        }
+
+        [Test]
+        public void GetAddForeignKeyScripts_DerivesForeignKeyFromColumnObjectMapping()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow), TableName = "MappingTestChildTable" };
+            var scripts = SqlServerDatabase.GetAddForeignKeyScripts(mapping).ToList();
+            Assert.That(scripts, Has.One.Matches<string>(s =>
+                s.Contains("ALTER TABLE [MappingTestChildTable]") &&
+                s.Contains("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])")));
+        }
+
+        [Test]
+        public void GetCreateIndexScripts_EmitsIndexForColumnObjectMapping()
+        {
+            // NOTE: TableName must be set explicitly here (matching the pattern used at the top
+            // of this file, e.g. `new TableMapping() { TableName = "Transactions" }`), because
+            // TableMapping.ObjectType's setter (Mapping.cs) only derives Columns from the type's
+            // reflected attributes, not TableName. TableName is only ever populated "for free"
+            // when a TableMapping is obtained directly off a type via reflection as the actual
+            // attribute instance (as SqlServerDatabase.Load does), not when constructed fresh as
+            // here or in the sibling FK test above (which didn't need TableName for its assert).
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow), TableName = "MappingTestChildTable" };
+            var scripts = SqlServerDatabase.GetCreateIndexScripts(mapping).ToList();
+            Assert.That(scripts, Has.One.Matches<string>(s =>
+                s.Contains("CREATE INDEX") && s.Contains("MappingTestChildTable") && s.Contains("ParentId")));
+        }
+    }
+}

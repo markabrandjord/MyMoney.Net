@@ -158,9 +158,9 @@ git commit -m "Document -m:1 as required for dotnet test when SQL Server env var
 ### Task 3: Add `RowVersion`/`Version` column emission to the shared schema generator
 
 **Files:**
-- Modify: `Source/WPF/MyMoney.Business/Mapping.cs:23-76` (`TableMapping`)
 - Modify: `Source/WPF/MyMoney.Data/SqlDatabase.cs:324-343` (`LazyCreateTables`), `:345-378`
   (`GetCreateTableScript`), `:380-` (`CreateOrUpdateTable`)
+- Modify: `Source/WPF/MyMoney.Data/Properties/AssemblyInfo.cs` (add `InternalsVisibleTo`)
 - Modify: `Source/WPF/MyMoney.Data/SqliteDatabase.cs:552-` (`CreateOrUpdateTable`), and its second
   call site at `:651`
 - Test: `Source/WPF/UnitTests/SqlMappingTests.cs`
@@ -330,24 +330,41 @@ git commit -m "Add per-flavor optimistic-concurrency version column to generated
 
 ---
 
-### Task 4: Add foreign-key emission and apply it to the gaps issue #24 names
+### Task 4: Derive foreign-key constraints automatically from `ColumnObjectMapping`
+
+> **Pre-flight correction (ruled before dispatch):** the original draft of this task assumed
+> issue #24's six named gaps (`Account.CategoryForPrincipal`/`CategoryForInterest`,
+> `Split.Category`/`Split.Transaction`, `Transaction.Account`/`Payee`/`Category`) were plain
+> `[ColumnMapping(ColumnName = "...")]` int columns that needed new `ForeignKeyTable`/
+> `ForeignKeyColumn` arguments hand-added. Verified against the actual code
+> (`Money.cs:3129`, `:3145`, `:11049`, `:13780`, `:13797`, and the `Transaction.Account`/`.Payee`
+> declarations) that all of them are already declared via the domain model's existing
+> `[ColumnObjectMapping(ColumnName = "...", KeyProperty = "Id")]` attribute
+> (`Mapping.cs:190-193`, `internal class ColumnObjectMapping : ColumnMapping { public string
+> KeyProperty { get; set; } }`) — a distinct, already-present attribute the original draft never
+> checked for. Deriving the FK automatically from that existing attribute (via reflection on the
+> referenced type's own `[TableMapping]`) fixes all six gaps *and* every other object-reference
+> column in the schema in one generic change, with **zero manual edits to `Money.cs`** — safer and
+> more complete than hand-flagging six properties by name.
 
 **Files:**
-- Modify: `Source/WPF/MyMoney.Business/Mapping.cs:78-183` (`ColumnMapping`)
+- Modify: `Source/WPF/MyMoney.Business/Mapping.cs:190-193` (`ColumnObjectMapping`), `:215-234`
+  (`MappingEngine.ResolveColumnType`)
 - Modify: `Source/WPF/MyMoney.Data/SqlDatabase.cs` (`GetCreateTableScript`, extended further)
-- Modify: `Source/WPF/MyMoney.Business/Money.cs` — add `ForeignKeyTable`/`ForeignKeyColumn` to the
-  specific columns issue #24 named: `Account.CategoryIdForPrincipal`/`CategoryIdForInterest` →
-  `Categories.Id`; `Split.Category` → `Categories.Id`; `Split.Transaction` → `Transactions.Id`;
-  `Transaction.Account` → `Accounts.Id`; `Transaction.Payee` → `Payees.Id`; `Transaction.Category`
-  → `Categories.Id`.
 - Test: `Source/WPF/UnitTests/SqlMappingTests.cs`
 
 **Interfaces:**
-- Consumes: `GetCreateTableScript(TableMapping, DbFlavor)` (Task 3).
-- Produces: `ColumnMapping.ForeignKeyTable`/`ForeignKeyColumn` properties — no later task in this
-  phase consumes them further, but Phase 2 (which touches insert-ordering for the new atomic
+- Consumes: `GetCreateTableScript(TableMapping, DbFlavor)` (Task 3); existing
+  `ColumnObjectMapping : ColumnMapping` and `MappingEngine.GetColumnsFromObject`/
+  `ResolveColumnType` (`Mapping.cs:190-234`) — `GetColumnsFromObject` already collects
+  `ColumnObjectMapping`-attributed properties into `TableMapping.Columns` today (confirmed:
+  `MemberInfo.GetCustomAttributes(typeof(ColumnMapping), false)` matches subclass attribute
+  instances too), so no change is needed there.
+- Produces: `ColumnObjectMapping.ForeignKeyTable` (new property, populated automatically inside
+  `ResolveColumnType` — never set by hand on any domain-model property). No later task in this
+  phase consumes it further, but Phase 2 (which touches insert ordering for the new atomic
   primitives) must respect the same FK dependency order `Load()` already uses (Categories before
-  Accounts before Transactions before Splits), since these FKs will now enforce it at the database
+  Accounts before Transactions before Splits), since these FKs now enforce it at the database
   level, not just the C# object model.
 
 - [ ] **Step 1: Write the failing test**
@@ -355,8 +372,10 @@ git commit -m "Add per-flavor optimistic-concurrency version column to generated
 Add to `Source/WPF/UnitTests/SqlMappingTests.cs`:
 
 ```csharp
+        [TableMapping(TableName = "MappingTestParentTable")]
         private class FakeParentRow
         {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
             public int Id { get; set; }
         }
 
@@ -366,31 +385,98 @@ Add to `Source/WPF/UnitTests/SqlMappingTests.cs`:
             [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
             public int Id { get; set; }
 
-            [ColumnMapping(ColumnName = "ParentId", ForeignKeyTable = "MappingTestTable", ForeignKeyColumn = "Id")]
-            public int ParentId { get; set; }
+            [ColumnObjectMapping(ColumnName = "ParentId", KeyProperty = "Id")]
+            public FakeParentRow Parent { get; set; }
         }
 
         [Test]
-        public void GetCreateTableScript_EmitsForeignKeyConstraint()
+        public void GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping()
         {
             var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
             string script = SqlDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
-            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestTable]([Id])"));
+            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
         }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_EmitsForeignKeyConstraint"`
-Expected: FAIL — `ForeignKeyTable`/`ForeignKeyColumn` don't exist on `ColumnMapping` yet.
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping"`
+Expected: FAIL — `ForeignKeyTable` doesn't exist on `ColumnObjectMapping` yet, and nothing derives it.
 
-- [ ] **Step 3: Add the properties and emission logic**
+- [ ] **Step 3: Add the property and derive it during `ResolveColumnType`**
 
-In `Source/WPF/MyMoney.Business/Mapping.cs`, add to `ColumnMapping`:
+In `Source/WPF/MyMoney.Business/Mapping.cs`, change:
 
 ```csharp
+    internal class ColumnObjectMapping : ColumnMapping
+    {
+        public string KeyProperty { get; set; }
+    }
+```
+
+to:
+
+```csharp
+    internal class ColumnObjectMapping : ColumnMapping
+    {
+        public string KeyProperty { get; set; }
         public string ForeignKeyTable { get; set; }
-        public string ForeignKeyColumn { get; set; }
+    }
+```
+
+In `MappingEngine.ResolveColumnType`, find:
+
+```csharp
+            if (mapping is ColumnObjectMapping)
+            {
+                ColumnObjectMapping co = (ColumnObjectMapping)mapping;
+                string propName = co.KeyProperty;
+                if (string.IsNullOrEmpty(propName))
+                {
+                    throw new Exception("ColumnObjectMapping must have a valid KeyProperty");
+                }
+                PropertyInfo pi = propertyType.GetProperty(propName);
+                if (pi == null)
+                {
+                    throw new Exception(string.Format("Could not find KeyProperty named '{0}' on class '{1}'", propName, propertyType.FullName));
+                }
+                // get the dereferenced type.
+                propertyType = pi.PropertyType;
+
+            }
+```
+
+and insert the FK-table derivation *before* the `propertyType = pi.PropertyType;` line (while
+`propertyType` still refers to the referenced object type, e.g. `Account`, not yet overwritten
+with the key property's type):
+
+```csharp
+            if (mapping is ColumnObjectMapping)
+            {
+                ColumnObjectMapping co = (ColumnObjectMapping)mapping;
+                string propName = co.KeyProperty;
+                if (string.IsNullOrEmpty(propName))
+                {
+                    throw new Exception("ColumnObjectMapping must have a valid KeyProperty");
+                }
+                PropertyInfo pi = propertyType.GetProperty(propName);
+                if (pi == null)
+                {
+                    throw new Exception(string.Format("Could not find KeyProperty named '{0}' on class '{1}'", propName, propertyType.FullName));
+                }
+
+                // Derive the FK target table from the referenced type's own [TableMapping] --
+                // see docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24).
+                object[] tableAttrs = propertyType.GetCustomAttributes(typeof(TableMapping), false);
+                if (tableAttrs != null && tableAttrs.Length > 0)
+                {
+                    co.ForeignKeyTable = ((TableMapping)tableAttrs[0]).TableName;
+                }
+
+                // get the dereferenced type.
+                propertyType = pi.PropertyType;
+
+            }
 ```
 
 In `Source/WPF/MyMoney.Data/SqlDatabase.cs`'s `GetCreateTableScript`, after the version-column
@@ -399,109 +485,87 @@ block added in Task 3 and before the closing `sb.AppendLine(")")`:
 ```csharp
             foreach (ColumnMapping column in mapping.Columns)
             {
-                if (!string.IsNullOrEmpty(column.ForeignKeyTable))
+                if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
                 {
                     sb.AppendLine(",");
                     sb.Append(string.Format("  FOREIGN KEY ([{0}]) REFERENCES [{1}]([{2}])",
-                        column.ColumnName, column.ForeignKeyTable, column.ForeignKeyColumn));
+                        column.ColumnName, co.ForeignKeyTable, co.KeyProperty));
                 }
             }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_EmitsForeignKeyConstraint"`
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping"`
 Expected: PASS.
 
-- [ ] **Step 5: Apply the new attributes to the real gaps issue #24 named**
-
-In `Source/WPF/MyMoney.Business/Money.cs`, update the six columns listed in this task's Files
-section. Example for `Account.CategoryIdForPrincipal` (find the existing attribute and extend it —
-do not remove `AllowNulls`/existing properties already on it):
-
-```csharp
-        [ColumnMapping(ColumnName = "CategoryIdForPrincipal", ForeignKeyTable = "Categories", ForeignKeyColumn = "Id")]
-```
-
-Repeat for `CategoryIdForInterest` (→ `Categories`/`Id`), `Split.Category` (→ `Categories`/`Id`),
-`Split.Transaction` (→ `Transactions`/`Id`), `Transaction.Account` (→ `Accounts`/`Id`),
-`Transaction.Payee` (→ `Payees`/`Id`), `Transaction.Category` (→ `Categories`/`Id`) — locate each
-by its existing `[ColumnMapping(ColumnName = "...")]` attribute and add the two new named
-arguments alongside whatever's already there.
-
-- [ ] **Step 6: Full build and regression check**
+- [ ] **Step 5: Full build and regression check**
 
 Run: `dotnet build Source/WPF/MyMoney.sln` — expect 0 errors.
-Run: `dotnet test Source/WPF/MyMoney.sln -m:1` — expect green. Pay particular attention to any
-SQLite-backed test that creates a fresh sample database — a genuinely orphaned reference (a bug, not
-this task's fault) would now surface as a real FK-constraint failure at table-creation/insert time
-instead of silently succeeding. If one fails, that's a real pre-existing data-integrity bug the new
-FK just caught — do not weaken the constraint to make the symptom disappear; report it and pause
-this task for a decision rather than silently loosening the FK.
+Run: `dotnet test Source/WPF/MyMoney.sln -m:1` — expect green. This change now emits real FK
+constraints for every existing `ColumnObjectMapping` column in the whole schema (Accounts,
+Transactions, Splits, and others) — pay particular attention to any SQLite-backed test that
+creates a fresh sample database. A genuinely orphaned reference (a pre-existing bug, not this
+task's fault) would now surface as a real FK-constraint failure at table-creation/insert time
+instead of silently succeeding. If one fails, that's a real pre-existing data-integrity bug the
+new FK just caught — do not weaken the constraint to make the symptom disappear; report it and
+pause this task for a decision rather than silently loosening the FK.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add Source/WPF/MyMoney.Business/Mapping.cs Source/WPF/MyMoney.Business/Money.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
-git commit -m "Add foreign-key emission to generated schema; apply to issue #24's named gaps"
+git add Source/WPF/MyMoney.Business/Mapping.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
+git commit -m "Derive foreign-key constraints from ColumnObjectMapping automatically (closes #24's FK gap)"
 ```
 
 ---
 
-### Task 5: Add secondary-index emission and apply it to the gaps issue #24 names
+### Task 5: Derive secondary indexes automatically from `ColumnObjectMapping`
+
+> **Pre-flight correction (ruled before dispatch):** same reasoning as Task 4 — issue #24 named
+> two specific columns (`Transaction.Account`, `Split.Transaction`) as needing indexes, but the
+> original draft's `IsIndexed` flag hand-added to those two properties would miss every other
+> object-reference column in the schema for no reason: every `ColumnObjectMapping` column is
+> exactly the kind of foreign-key/join column that benefits from an index, and Task 4 already
+> gives this task a reliable way to identify all of them generically. Auto-indexing every
+> `ColumnObjectMapping` column — not just the two issue #24 named — is strictly more complete,
+> equally low-risk (purely additive `CREATE INDEX` statements), and needs no new `IsIndexed`
+> property or any manual `Money.cs` edits at all.
 
 **Files:**
-- Modify: `Source/WPF/MyMoney.Business/Mapping.cs` (`ColumnMapping`)
 - Modify: `Source/WPF/MyMoney.Data/SqlDatabase.cs` (new method, called from `CreateOrUpdateTable`)
-- Modify: `Source/WPF/MyMoney.Business/Money.cs` — flag `Transaction.Account` and `Split.Transaction`
-  as indexed (the two issue #24 called out explicitly: "all transactions for this account", "all
-  splits for this transaction").
+- Modify: `Source/WPF/MyMoney.Data/SqliteDatabase.cs` (`CreateOrUpdateTable`, same wiring)
 - Test: `Source/WPF/UnitTests/SqlMappingTests.cs`
 
 **Interfaces:**
-- Consumes: `TableMapping`/`ColumnMapping` (Task 3/4), `this.ExecuteNonQuery` (existing, both
-  `SqlDatabase`/`SqliteDatabase` already have it).
+- Consumes: `TableMapping`/`ColumnObjectMapping.ForeignKeyTable` (Task 4), `this.ExecuteNonQuery`
+  (existing on both `SqlDatabase`/`SqliteDatabase`).
 - Produces: `SqlDatabase.GetCreateIndexScripts(TableMapping mapping)` returning
   `IEnumerable<string>` — no later task in this phase consumes it further; Phase 2 doesn't need
   to touch index scripts.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `Source/WPF/UnitTests/SqlMappingTests.cs`:
+Add to `Source/WPF/UnitTests/SqlMappingTests.cs` (reusing `FakeParentRow`/`FakeChildRow` from
+Task 4):
 
 ```csharp
-        [TableMapping(TableName = "MappingTestIndexedTable")]
-        private class FakeIndexedRow
-        {
-            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
-            public int Id { get; set; }
-
-            [ColumnMapping(ColumnName = "ParentId", IsIndexed = true)]
-            public int ParentId { get; set; }
-        }
-
         [Test]
-        public void GetCreateIndexScripts_EmitsIndexForFlaggedColumn()
+        public void GetCreateIndexScripts_EmitsIndexForColumnObjectMapping()
         {
-            var mapping = new TableMapping { ObjectType = typeof(FakeIndexedRow) };
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
             var scripts = SqlDatabase.GetCreateIndexScripts(mapping).ToList();
             Assert.That(scripts, Has.One.Matches<string>(s =>
-                s.Contains("CREATE INDEX") && s.Contains("MappingTestIndexedTable") && s.Contains("ParentId")));
+                s.Contains("CREATE INDEX") && s.Contains("MappingTestChildTable") && s.Contains("ParentId")));
         }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForFlaggedColumn"`
-Expected: FAIL — `IsIndexed` and `GetCreateIndexScripts` don't exist yet.
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForColumnObjectMapping"`
+Expected: FAIL — `GetCreateIndexScripts` doesn't exist yet.
 
-- [ ] **Step 3: Add the property and the emission method**
-
-In `Source/WPF/MyMoney.Business/Mapping.cs`, add to `ColumnMapping`:
-
-```csharp
-        public bool IsIndexed { get; set; }
-```
+- [ ] **Step 3: Add the emission method**
 
 In `Source/WPF/MyMoney.Data/SqlDatabase.cs`, add a new method near `GetCreateTableScript`:
 
@@ -510,7 +574,7 @@ In `Source/WPF/MyMoney.Data/SqlDatabase.cs`, add a new method near `GetCreateTab
         {
             foreach (ColumnMapping column in mapping.Columns)
             {
-                if (column.IsIndexed)
+                if (column is ColumnObjectMapping)
                 {
                     yield return string.Format("CREATE INDEX [IX_{0}_{1}] ON [{0}] ([{1}])",
                         mapping.TableName, column.ColumnName);
@@ -523,7 +587,7 @@ In `Source/WPF/MyMoney.Data/SqlDatabase.cs`, add a new method near `GetCreateTab
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForFlaggedColumn"`
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForColumnObjectMapping"`
 Expected: PASS.
 
 - [ ] **Step 5: Wire index creation into `CreateOrUpdateTable`'s new-table path**
@@ -543,22 +607,16 @@ Repeat the identical addition in `Source/WPF/MyMoney.Data/SqliteDatabase.cs`'s
 `CreateOrUpdateTable`, in its equivalent new-table branch (around line 557, right after its own
 `this.ExecuteNonQuery(createTable);` call).
 
-- [ ] **Step 6: Flag the two real columns issue #24 named**
-
-In `Source/WPF/MyMoney.Business/Money.cs`, add `IsIndexed = true` to the existing
-`[ColumnMapping(ColumnName = "Account", ...)]` on `Transaction.Account`, and to the existing
-`[ColumnMapping(ColumnName = "Transaction", ...)]` on `Split.Transaction`.
-
-- [ ] **Step 7: Full build and regression check**
+- [ ] **Step 6: Full build and regression check**
 
 Run: `dotnet build Source/WPF/MyMoney.sln` — expect 0 errors.
 Run: `dotnet test Source/WPF/MyMoney.sln -m:1` — expect green.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add Source/WPF/MyMoney.Business/Mapping.cs Source/WPF/MyMoney.Business/Money.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
-git commit -m "Add secondary-index emission to generated schema; apply to issue #24's named gaps"
+git add Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
+git commit -m "Derive secondary indexes from ColumnObjectMapping automatically (closes #24's index gap)"
 ```
 
 ---

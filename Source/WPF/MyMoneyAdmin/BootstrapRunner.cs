@@ -86,11 +86,15 @@ namespace Walkabout.Data
                 ConnectTimeout = 10
             };
 
-            Console.WriteLine("Deploying schema and stored procedures as 'MyMoneyAdmin'...");
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Schema", "001_CreatePayeesTable.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Payees_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
-
+            // Schema creation must run before any access-proc deployment, and Payees is not
+            // special-cased here: it is just another [TableMapping] table, picked up by the
+            // generic LazyCreateTables() reflection loop below like every other entity. An
+            // earlier revision ran a hand-written Schema/001_CreatePayeesTable.sql (a stub --
+            // only Id/Name, missing every other Payee column) before LazyCreateTables(), which
+            // meant LazyCreateTables() found Payees already existing and took the ALTER-diff
+            // path for it instead of the fresh-CREATE path -- silently skipping RowVersion/FK/
+            // index creation for Payees specifically on every fresh bootstrap. Payees_AccessProcs.sql
+            // is deployed via the same accessProcs loop as every other entity now, not separately.
             Console.WriteLine("Creating schema for every [TableMapping] table as 'MyMoneyAdmin'...");
             var adminDatabase = new SqlServerStoredProcDatabase
             {
@@ -100,12 +104,17 @@ namespace Walkabout.Data
             adminDatabase.Disconnect();
 
             Console.WriteLine("Deploying issue #22/#23 access procedures as 'MyMoneyAdmin'...");
-            string[] accessProcs = { "Accounts_AccessProcs.sql", "Categories_AccessProcs.sql", "Currencies_AccessProcs.sql", "Securities_AccessProcs.sql", "StockSplits_AccessProcs.sql", "Aliases_AccessProcs.sql", "Transactions_AccessProcs.sql", "Splits_AccessProcs.sql", "Investments_AccessProcs.sql", "OnlineAccounts_AccessProcs.sql", "AccountAliases_AccessProcs.sql", "TransactionExtras_AccessProcs.sql", "LoanPayments_AccessProcs.sql", "RentUnits_AccessProcs.sql", "RentBuildings_AccessProcs.sql" };
+            string[] accessProcs = { "Payees_AccessProcs.sql", "Accounts_AccessProcs.sql", "Categories_AccessProcs.sql", "Currencies_AccessProcs.sql", "Securities_AccessProcs.sql", "StockSplits_AccessProcs.sql", "Aliases_AccessProcs.sql", "Transactions_AccessProcs.sql", "Splits_AccessProcs.sql", "Investments_AccessProcs.sql", "OnlineAccounts_AccessProcs.sql", "AccountAliases_AccessProcs.sql", "TransactionExtras_AccessProcs.sql", "LoanPayments_AccessProcs.sql", "RentUnits_AccessProcs.sql", "RentBuildings_AccessProcs.sql" };
             foreach (var procFile in accessProcs)
             {
                 string procPath = Path.Combine(this.sqlScriptsRoot, "Access", procFile);
                 ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(procPath));
             }
+
+            // Test-support procs have no schema dependency (CREATE OR ALTER PROCEDURE uses
+            // deferred name resolution for the table it references), so ordering relative to
+            // the steps above doesn't matter -- kept here, grouped with the rest of deployment.
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
 
             // Credentials are written only after every deployment step has
             // succeeded -- writing them earlier (e.g. right after the sa-run

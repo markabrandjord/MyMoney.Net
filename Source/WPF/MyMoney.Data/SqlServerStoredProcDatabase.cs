@@ -713,13 +713,13 @@ namespace Walkabout.Data
                         ("@Id", a.Id), ("@AccountId", (object)a.AccountId ?? DBNull.Value),
                         ("@OfxAccountId", (object)a.OfxAccountId ?? DBNull.Value), ("@Name", (object)a.Name ?? DBNull.Value),
                         ("@Type", (int)a.Type), ("@Description", (object)a.Description ?? DBNull.Value),
-                        ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                        ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
                         ("@OpeningBalance", a.OpeningBalance), ("@LastSync", SqlServerDatabase.DBDateTimeParam(a.LastSync)),
                         ("@LastBalance", SqlServerDatabase.DBDateTimeParam(a.LastBalance)), ("@SyncGuid", SqlServerDatabase.DBGuidParam(a.SyncGuid)),
                         ("@Flags", (int)a.Flags), ("@Currency", (object)a.Currency ?? DBNull.Value),
                         ("@WebSite", (object)a.WebSite ?? DBNull.Value), ("@ReconcileWarning", a.ReconcileWarning),
-                        ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
-                        ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id)
+                        ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                        ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id)
                     };
 
                     if (a.IsChanged)
@@ -1023,7 +1023,7 @@ namespace Walkabout.Data
                         {
                             s.Date = reader.GetDateTime(1);
                         }
-                        s.Security = money.Securities.FindSecurityAt(reader.GetInt32(2));
+                        s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
                         s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
                         s.OnUpdated();
@@ -1048,14 +1048,14 @@ namespace Walkabout.Data
                 {
                     if (s.IsChanged || s.IsInserted)
                     {
-                        if (s.Security == null || s.Date == DateTime.MinValue)
+                        if (s.Date == DateTime.MinValue)
                         {
                             continue;
                         }
 
                         (string Name, object Value)[] parameters =
                         {
-                            ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
+                            ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
                             ("@Numerator", s.Numerator), ("@Denominator", s.Denominator)
                         };
 
@@ -1353,7 +1353,7 @@ namespace Walkabout.Data
                         }
 
                         Investment i = t.GetOrCreateInvestment();
-                        i.Security = money.Securities.FindSecurityAt(reader.GetInt32(1));
+                        i.Security = reader.IsDBNull(1) ? null : money.Securities.FindSecurityAt(reader.GetInt32(1));
                         i.UnitPrice = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
                         i.Units = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         i.Commission = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
@@ -1441,8 +1441,8 @@ namespace Walkabout.Data
                     {
                         ("@Id", t.Id), ("@Number", (object)t.Number ?? DBNull.Value), ("@Account", t.Account.Id),
                         ("@Date", SqlServerDatabase.DBDateTimeParam(t.Date)), ("@Amount", t.Amount), ("@Status", (int)t.Status),
-                        ("@Memo", (object)t.Memo ?? DBNull.Value), ("@Payee", t.Payee != null ? t.Payee.Id : -1),
-                        ("@Category", t.Category != null ? t.Category.Id : -1),
+                        ("@Memo", (object)t.Memo ?? DBNull.Value), ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value),
+                        ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
                         ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
                         ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
                         ("@FITID", (object)t.FITID ?? DBNull.Value), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
@@ -1499,9 +1499,9 @@ namespace Walkabout.Data
                     (string Name, object Value)[] parameters =
                     {
                         ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
-                        ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", (object)s.Memo ?? DBNull.Value),
+                        ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", (object)s.Memo ?? DBNull.Value),
                         ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
-                        ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                        ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
                         ("@BudgetBalanceDate", SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate))
                     };
 
@@ -1539,7 +1539,7 @@ namespace Walkabout.Data
                 connection.Open();
                 (string Name, object Value)[] parameters =
                 {
-                    ("@Id", i.Id), ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                    ("@Id", i.Id), ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice),
                     ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
                     ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
                     ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load)

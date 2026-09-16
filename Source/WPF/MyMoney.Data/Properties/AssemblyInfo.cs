@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 
 // Matches MyMoney.csproj's existing [assembly: CLSCompliant(true)] (App.xaml.cs).
 // Without this, every public type here is treated as not CLS-compliant by
@@ -6,3 +7,7 @@ using System;
 // produced the CS300x warning flood after this project was split out of
 // MyMoney.csproj (see MyMoney.Net issue #9).
 [assembly: CLSCompliant(true)]
+
+// Lets UnitTests exercise internal schema-generation logic (e.g.
+// SqlServerDatabase.GetCreateTableScript) directly, without making it public API.
+[assembly: InternalsVisibleTo("UnitTests")]

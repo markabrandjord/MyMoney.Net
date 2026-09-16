@@ -135,6 +135,10 @@ namespace Walkabout.Data
                 string constr = this.GetConnectionString(true);
                 this.sqliteConnection = new SQLiteConnection(constr);
                 this.sqliteConnection.Open();
+                using (var pragmaCommand = new SQLiteCommand("PRAGMA foreign_keys = ON;", this.sqliteConnection))
+                {
+                    pragmaCommand.ExecuteNonQuery();
+                }
             }
             return this.sqliteConnection;
         }
@@ -204,6 +208,16 @@ namespace Walkabout.Data
                             continue;
                         }
 
+                        if (!line.StartsWith("["))
+                        {
+                            // Not a column definition -- a table-level constraint clause,
+                            // e.g. the "FOREIGN KEY ([Col]) REFERENCES [Table]([Col])" lines
+                            // GetCreateTableScript now emits per ColumnObjectMapping column
+                            // (persistence-concurrency phase 1, Task 4). Every real column
+                            // definition line starts with "[ColumnName]", so this is a safe
+                            // way to skip constraint-only lines without a column to parse.
+                            continue;
+                        }
 
                         ColumnMapping c = this.ParseColumnSql(line.TrimEnd(new char[] { ' ', '\t', '\r', '\n', ',' }));
                         if (c != null)
@@ -313,7 +327,12 @@ namespace Walkabout.Data
             Type columnType = null;
             bool hasLength = false;
             bool hasPrecision = false;
-            switch (parts[0])
+            // Column types are matched case-insensitively: GetCreateTableScript emits the
+            // application-maintained version column as uppercase "INTEGER" (SqlDatabase.cs),
+            // while ColumnMapping.GetSqlDefinition emits everything else lowercase. Sqlite's
+            // sqlite_master.sql stores the CREATE TABLE text verbatim, so GetTableSchema/
+            // ParseColumnSql round-trip whatever case was originally written.
+            switch (parts[0].ToLowerInvariant())
             {
                 case "int":
                 case "integer":
@@ -554,8 +573,13 @@ namespace Walkabout.Data
             if (!this.TableExists(mapping.TableName))
             {
                 // this is the easy case, we need to create the table
-                string createTable = GetCreateTableScript(mapping);
+                string createTable = GetCreateTableScript(mapping, DbFlavor.Sqlite);
                 this.ExecuteNonQuery(createTable);
+
+                foreach (string indexScript in GetCreateIndexScripts(mapping))
+                {
+                    this.ExecuteNonQuery(indexScript);
+                }
             }
             else
             {
@@ -634,6 +658,22 @@ namespace Walkabout.Data
                     // See if any columns need to be dropped.
                     foreach (ColumnMapping c in actual.Columns)
                     {
+                        if (c.ColumnName == "Version" || c.ColumnName == "RowVersion")
+                        {
+                            // The optimistic-concurrency version column (persistence-concurrency
+                            // phase 1, Task 3) is injected by GetCreateTableScript itself, not
+                            // by MappingEngine.GetColumnsFromObject, so it's never present in
+                            // mapping.Columns even though every real table has it. Without this
+                            // guard every table looked like it needed a column dropped on every
+                            // subsequent CreateOrUpdateTable call, forcing the newTable
+                            // rename/copy/drop/rename rebuild below unconditionally. That was
+                            // harmless before Task 4 added FK constraints, but DROP TABLE on a
+                            // table that's the parent of an FK now fails outright if any other
+                            // table still has rows referencing it (e.g. dropping Accounts while
+                            // Transactions.Account still points at it).
+                            continue;
+                        }
+
                         ColumnMapping ac = mapping.FindColumn(c.ColumnName);
                         if (ac == null)
                         {
@@ -648,7 +688,7 @@ namespace Walkabout.Data
                         // invent a new name for the temporary table
                         string originalTableName = mapping.TableName;
                         mapping.TableName = "NEW_" + originalTableName;
-                        string createTable = GetCreateTableScript(mapping);
+                        string createTable = GetCreateTableScript(mapping, DbFlavor.Sqlite);
                         this.ExecuteNonQuery(createTable);
 
                         // copy the data across to this new table, taking any "renames" into account.
@@ -771,6 +811,14 @@ namespace Walkabout.Data
                         // See if any columns need to be dropped.
                         foreach (ColumnMapping c in actual.Columns)
                         {
+                            if (c.ColumnName == "Version" || c.ColumnName == "RowVersion")
+                            {
+                                // See the matching guard/comment above (Task 4): this engine-
+                                // injected column is never in mapping.Columns, so it must never
+                                // be treated as a column to drop.
+                                continue;
+                            }
+
                             ColumnMapping ac = mapping.FindColumn(c.ColumnName);
                             if (ac == null)
                             {
