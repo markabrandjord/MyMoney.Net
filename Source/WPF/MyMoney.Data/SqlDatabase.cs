@@ -387,6 +387,20 @@ namespace Walkabout.Data
                 sb.Append("  [Version] INTEGER NOT NULL DEFAULT 1");
             }
 
+            // Derive foreign-key constraints automatically from any ColumnObjectMapping column
+            // whose referenced type resolved a ForeignKeyTable (see MappingEngine.ResolveColumnType
+            // in MyMoney.Business/Mapping.cs). See
+            // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24).
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
+                {
+                    sb.AppendLine(",");
+                    sb.Append(string.Format("  FOREIGN KEY ([{0}]) REFERENCES [{1}]([{2}])",
+                        column.ColumnName, co.ForeignKeyTable, co.KeyProperty));
+                }
+            }
+
             sb.AppendLine();
             sb.AppendLine(")");
             return sb.ToString();

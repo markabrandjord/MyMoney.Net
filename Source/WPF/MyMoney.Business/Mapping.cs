@@ -190,6 +190,7 @@ namespace Walkabout.Data
     internal class ColumnObjectMapping : ColumnMapping
     {
         public string KeyProperty { get; set; }
+        public string ForeignKeyTable { get; set; }
     }
 
     internal class MappingEngine
@@ -228,6 +229,15 @@ namespace Walkabout.Data
                 {
                     throw new Exception(string.Format("Could not find KeyProperty named '{0}' on class '{1}'", propName, propertyType.FullName));
                 }
+
+                // Derive the FK target table from the referenced type's own [TableMapping] --
+                // see docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24).
+                object[] tableAttrs = propertyType.GetCustomAttributes(typeof(TableMapping), false);
+                if (tableAttrs != null && tableAttrs.Length > 0)
+                {
+                    co.ForeignKeyTable = ((TableMapping)tableAttrs[0]).TableName;
+                }
+
                 // get the dereferenced type.
                 propertyType = pi.PropertyType;
 

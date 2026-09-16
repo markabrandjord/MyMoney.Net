@@ -129,5 +129,30 @@ namespace Walkabout.Data.Tests
             Assert.That(script, Does.Contain("[Version] INTEGER NOT NULL DEFAULT 1"));
             Assert.That(script, Does.Not.Contain("ROWVERSION"));
         }
+
+        [TableMapping(TableName = "MappingTestParentTable")]
+        private class FakeParentRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [TableMapping(TableName = "MappingTestChildTable")]
+        private class FakeChildRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+
+            [ColumnObjectMapping(ColumnName = "ParentId", KeyProperty = "Id")]
+            public FakeParentRow Parent { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
+        }
     }
 }
