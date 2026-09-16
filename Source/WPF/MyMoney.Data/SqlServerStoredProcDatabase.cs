@@ -37,6 +37,103 @@ namespace Walkabout.Data
             return base.GetConnectionString(includeDatabase);
         }
 
+        public override void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
+        {
+            onlineAccounts.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.OnlineAccounts_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    onlineAccounts.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        OnlineAccount i = onlineAccounts.AddOnlineAccount(id);
+                        i.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        i.Institution = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        i.Ofx = reader.IsDBNull(3) ? null : reader.GetString(3);
+                        i.FID = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        i.UserId = reader.IsDBNull(5) ? null : reader.GetString(5).TrimEnd();
+                        i.Password = reader.IsDBNull(6) ? null : reader.GetString(6);
+                        i.BankId = reader.IsDBNull(7) ? null : reader.GetString(7);
+                        i.BranchId = reader.IsDBNull(8) ? null : reader.GetString(8);
+                        i.BrokerId = reader.IsDBNull(9) ? null : reader.GetString(9);
+                        i.OfxVersion = reader.IsDBNull(10) ? null : reader.GetString(10).TrimEnd();
+                        i.LogoUrl = reader.IsDBNull(11) ? null : reader.GetString(11);
+                        i.AppId = reader.IsDBNull(12) ? null : reader.GetString(12).TrimEnd();
+                        i.AppVersion = reader.IsDBNull(13) ? null : reader.GetString(13).TrimEnd();
+                        i.ClientUid = reader.IsDBNull(14) ? null : reader.GetString(14).TrimEnd();
+                        i.UserCred1 = reader.IsDBNull(15) ? null : reader.GetString(15);
+                        i.UserCred2 = reader.IsDBNull(16) ? null : reader.GetString(16);
+                        i.AuthToken = reader.IsDBNull(17) ? null : reader.GetString(17);
+                        i.AccessKey = reader.IsDBNull(18) ? null : reader.GetString(18).TrimEnd();
+                        i.UserKey = reader.IsDBNull(19) ? null : reader.GetString(19);
+                        if (!reader.IsDBNull(20))
+                        {
+                            i.UserKeyExpireDate = reader.GetDateTime(20);
+                        }
+                        i.OnUpdated();
+                    }
+                    onlineAccounts.EndUpdate();
+                }
+            }
+            onlineAccounts.FireChangeEvent(onlineAccounts, onlineAccounts, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateOnlineAccounts(OnlineAccounts accounts)
+        {
+            if (accounts.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (OnlineAccount i in accounts)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", i.Id), ("@Name", (object)i.Name ?? DBNull.Value), ("@Institution", (object)i.Institution ?? DBNull.Value),
+                        ("@OFX", (object)i.Ofx ?? DBNull.Value), ("@FID", (object)i.FID ?? DBNull.Value),
+                        ("@UserId", (object)i.UserId ?? DBNull.Value), ("@Password", (object)i.Password ?? DBNull.Value),
+                        ("@BankId", (object)i.BankId ?? DBNull.Value), ("@BranchId", (object)i.BranchId ?? DBNull.Value),
+                        ("@BrokerId", (object)i.BrokerId ?? DBNull.Value), ("@OfxVersion", (object)i.OfxVersion ?? DBNull.Value),
+                        ("@LogoUrl", (object)i.LogoUrl ?? DBNull.Value), ("@AppId", (object)i.AppId ?? DBNull.Value),
+                        ("@AppVersion", (object)i.AppVersion ?? DBNull.Value), ("@ClientUid", (object)i.ClientUid ?? DBNull.Value),
+                        ("@UserCred1", (object)i.UserCred1 ?? DBNull.Value), ("@UserCred2", (object)i.UserCred2 ?? DBNull.Value),
+                        ("@AuthToken", (object)i.AuthToken ?? DBNull.Value), ("@AccessKey", (object)i.AccessKey ?? DBNull.Value),
+                        ("@UserKey", (object)i.UserKey ?? DBNull.Value),
+                        ("@UserKeyExpireDate", SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate))
+                    };
+
+                    if (i.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Update", parameters);
+                    }
+                    else if (i.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Insert", parameters);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.OnlineAccounts_Delete", ("@Id", i.Id));
+                    }
+                }
+            }
+
+            foreach (OnlineAccount i in accounts)
+            {
+                if (!i.IsDeleted)
+                {
+                    i.OnUpdated();
+                }
+            }
+            accounts.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -58,6 +155,7 @@ namespace Walkabout.Data
             money.BeginUpdate(this);
             try
             {
+                this.ReadOnlineAccounts(money.OnlineAccounts, money);
                 this.ReadPayees(money.Payees, money);
                 this.ReadAliases(money.Aliases, money);
                 this.ReadCategories(money.Categories, money);

@@ -544,5 +544,45 @@ namespace Walkabout.Tests
             db.ReadAccounts(afterDelete.Accounts, afterDelete);
             Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Investment Account"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteOnlineAccount_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var onlineAccount = money.OnlineAccounts.AddOnlineAccount(999003);
+            onlineAccount.Name = "SqlServerStoredProcDatabaseTests OnlineAccount";
+            onlineAccount.Institution = "Test Bank";
+            onlineAccount.FID = "12345";
+            onlineAccount.OnInserted();
+
+            db.UpdateOnlineAccounts(money.OnlineAccounts);
+
+            var reloaded = new MyMoney();
+            db.ReadOnlineAccounts(reloaded.OnlineAccounts, reloaded);
+            var found = reloaded.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Institution, Is.EqualTo("Test Bank"));
+            Assert.That(found.FID, Is.EqualTo("12345"));
+
+            found.Institution = "Updated Bank";
+            db.UpdateOnlineAccounts(reloaded.OnlineAccounts);
+
+            var afterUpdate = new MyMoney();
+            db.ReadOnlineAccounts(afterUpdate.OnlineAccounts, afterUpdate);
+            var updated = afterUpdate.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount");
+            Assert.That(updated.Institution, Is.EqualTo("Updated Bank"));
+
+            updated.OnDelete();
+            var toDelete = new OnlineAccounts(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateOnlineAccounts(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadOnlineAccounts(afterDelete.OnlineAccounts, afterDelete);
+            Assert.That(afterDelete.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount"), Is.Null);
+        }
     }
 }
