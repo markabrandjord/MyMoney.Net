@@ -153,10 +153,6 @@ namespace Walkabout.Data
         {
             get
             {
-                if (string.IsNullOrEmpty(this.server))
-                {
-                    return false;
-                }
                 try
                 {
                     using (SqlConnection con = new SqlConnection(this.GetConnectionString(false)))
@@ -280,7 +276,7 @@ namespace Walkabout.Data
                     }
                     else
                     {
-                        string.Format(@"Create Database {0}", this.DatabaseName);
+                        createCommand = string.Format(@"Create Database {0}", this.DatabaseName);
                     }
 
                     using (SqlCommand cmd2 = new SqlCommand(createCommand, con))
