@@ -59,10 +59,10 @@ namespace Walkabout.Data
                 this.ReadAliases(money.Aliases, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
-                this.ReadTransactions(money.Transactions, money);
                 this.ReadCurrencies(money.Currencies, money);
                 this.ReadSecurities(money.Securities, money);
                 this.ReadStockSplits(money.StockSplits, money);
+                this.ReadTransactions(money.Transactions, money);
             }
             finally
             {
@@ -729,31 +729,46 @@ namespace Walkabout.Data
                         }
 
                         Transaction t = transactions.FindTransactionById(id);
+                        System.Diagnostics.Debug.Assert(t != null); // since we just loaded it above.
                         Transaction u = transactions.FindTransactionById(transferTarget);
                         if (u == null)
                         {
                             errors.Add(new DataError(id, "Transaction is marked as a transfer, but other side of transfer was not found"));
-                            continue;
                         }
-
-                        int sid = reader.IsDBNull(17) ? -1 : reader.GetInt32(17);
-                        if (sid == -1)
+                        if (t != null && u != null)
                         {
-                            t.Transfer = new Transfer(id, t, u);
-                        }
-                        else
-                        {
-                            Split s = u.FindSplit(sid);
-                            if (s == null)
+                            int sid = reader.IsDBNull(17) ? -1 : reader.GetInt32(17);
+                            if (sid == -1)
                             {
-                                errors.Add(new DataError(id, sid, "Transaction contains a split marked as a transfer, but other side of transfer was not found"));
+                                if (u.Transfer != null)
+                                {
+                                    if (u.Transfer.Transaction != t)
+                                    {
+                                        // already have a transfer for this transaction!
+                                        errors.Add(new DataError(id, string.Format("Already have a transfer for this transaction, so transfer {0} is a duplicate of transfer {1}", id, u.Transfer.Id)));
+                                    }
+                                }
+                                t.Transfer = new Transfer(id, t, u);
                             }
                             else
                             {
-                                t.Transfer = new Transfer(id, t, u, s);
+                                Split s = u.FindSplit(sid);
+                                if (s == null)
+                                {
+                                    errors.Add(new DataError(id, sid, "Transaction contains a split marked as a transfer, but other side of transfer was not found"));
+                                }
+                                else
+                                {
+                                    if (t.Transfer != null)
+                                    {
+                                        // already have a transfer for this split!
+                                        errors.Add(new DataError(id, string.Format("Already have a transfer for this split, so {0} is a duplicate of {1}", id, t.Transfer.Id)));
+                                    }
+                                    t.Transfer = new Transfer(id, t, u, s);
+                                }
                             }
+                            t.OnUpdated();
                         }
-                        t.OnUpdated();
                     }
                 }
             }
