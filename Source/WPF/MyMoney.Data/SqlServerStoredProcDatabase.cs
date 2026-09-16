@@ -12,11 +12,11 @@ namespace Walkabout.Data
     /// A SqlServerDatabase variant that performs CRUD exclusively through
     /// stored procedures, matching the grants given to the MyMoneyUser
     /// login (see Database/SqlScripts/Access/*_AccessProcs.sql). Covers
-    /// Payees, Accounts, Categories, Currencies, Securities, StockSplits,
-    /// Aliases, Transactions, Splits, and Investment -- the entities
-    /// scoped to issue #22. OnlineAccounts, AccountAliases,
-    /// TransactionExtras, RentBuildings, RentUnits, and LoanPayments are
-    /// tracked separately as issue #23.
+    /// every [TableMapping] entity: Payees, Accounts, Categories,
+    /// Currencies, Securities, StockSplits, Aliases, Transactions,
+    /// Splits, and Investment (issue #22), plus OnlineAccounts,
+    /// AccountAliases, TransactionExtras, RentBuildings, RentUnits, and
+    /// LoanPayments (issue #23).
     /// </summary>
     public class SqlServerStoredProcDatabase : SqlServerDatabase
     {
@@ -532,13 +532,14 @@ namespace Walkabout.Data
         /// table grants at all -- only EXECUTE on the *_AccessProcs.sql
         /// stored procedures -- so LazyCreateTables() and the base class's
         /// generic ReadXxx() methods would fail with a SQL Server
-        /// permissions error. This override reads every entity in scope
-        /// for issue #22 (Payees, Aliases, Categories, Accounts,
-        /// Currencies, Securities, StockSplits, Transactions -- with
-        /// Splits and Investment read inline inside ReadTransactions) via
-        /// their dedicated stored procedures, in FK-safe dependency
-        /// order. OnlineAccounts and the other issue #23 entities are
-        /// still left empty.
+        /// permissions error. This override reads every [TableMapping]
+        /// entity via its dedicated stored procedures, in FK-safe
+        /// dependency order: OnlineAccounts before Accounts (Account.
+        /// OnlineAccount is resolved by lookup), Accounts before
+        /// LoanPayments (which matches loan accounts by iterating
+        /// money.Accounts), and RentUnits before RentBuildings (handled
+        /// internally by ReadRentBuildings, matching issue #22's
+        /// Splits/Investment-inside-ReadTransactions pattern).
         /// </summary>
         public override MyMoney Load(IStatusService status)
         {

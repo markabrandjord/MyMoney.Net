@@ -37,8 +37,9 @@ namespace Walkabout.TestSupport
 
         private static readonly string[] TablesToWipe =
         {
-            "Splits", "Investments", "Transactions", "StockSplits", "Aliases",
-            "Accounts", "Securities", "Currencies", "Categories", "Payees"
+            "Splits", "Investments", "Transactions", "TransactionExtras", "StockSplits", "Aliases",
+            "AccountAliases", "LoanPayments", "RentUnits", "RentBuildings",
+            "Accounts", "OnlineAccounts", "Securities", "Currencies", "Categories", "Payees"
         };
 
         public override void SetUp()

@@ -91,7 +91,7 @@ namespace Walkabout.Data
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Payees_AccessProcs.sql")));
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
 
-            Console.WriteLine("Creating schema for Accounts/Categories/Currencies/Securities/StockSplits/Aliases/Transactions/Splits/Investments as 'MyMoneyAdmin'...");
+            Console.WriteLine("Creating schema for every [TableMapping] table as 'MyMoneyAdmin'...");
             var adminDatabase = new SqlServerStoredProcDatabase
             {
                 ConnectionStringOverride = adminBuilder.ConnectionString
@@ -99,7 +99,7 @@ namespace Walkabout.Data
             adminDatabase.LazyCreateTables();
             adminDatabase.Disconnect();
 
-            Console.WriteLine("Deploying issue #22 access procedures as 'MyMoneyAdmin'...");
+            Console.WriteLine("Deploying issue #22/#23 access procedures as 'MyMoneyAdmin'...");
             string[] accessProcs = { "Accounts_AccessProcs.sql", "Categories_AccessProcs.sql", "Currencies_AccessProcs.sql", "Securities_AccessProcs.sql", "StockSplits_AccessProcs.sql", "Aliases_AccessProcs.sql", "Transactions_AccessProcs.sql", "Splits_AccessProcs.sql", "Investments_AccessProcs.sql", "OnlineAccounts_AccessProcs.sql", "AccountAliases_AccessProcs.sql", "TransactionExtras_AccessProcs.sql", "LoanPayments_AccessProcs.sql", "RentUnits_AccessProcs.sql", "RentBuildings_AccessProcs.sql" };
             foreach (var procFile in accessProcs)
             {
