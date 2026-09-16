@@ -29,6 +29,7 @@ namespace Walkabout.TestSupport
     /// therefore every test -- fails fast instead of running.
     /// </summary>
     [TestFixture]
+    [Category("RequiresSqlServer")]
     public class SqlServerDatabaseContractTests : DatabaseContractTests
     {
         private const string UserConnectionEnvVar = "MYMONEY_TEST_SQLSERVER_USER_CONNECTION";
