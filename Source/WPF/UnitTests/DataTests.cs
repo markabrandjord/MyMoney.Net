@@ -172,6 +172,15 @@ namespace Walkabout.Tests
             }
         }
 
+        [Test]
+        public void PersistentObject_RowVersion_DefaultsToZeroAndIsSettable()
+        {
+            var account = new Account();
+            Assert.That(account.RowVersion, Is.EqualTo(0));
+            account.RowVersion = 42;
+            Assert.That(account.RowVersion, Is.EqualTo(42));
+        }
+
     }
 
     [DataContract(Namespace = "http://test")]

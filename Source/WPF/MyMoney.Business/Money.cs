@@ -457,6 +457,16 @@ namespace Walkabout.Data
         [XmlIgnore]
         public PersistentContainer Parent { get; set; }
 
+        /// <summary>
+        /// Opaque optimistic-concurrency token: SQL Server's native ROWVERSION converted to a
+        /// long via BitConverter for storage-agnostic use here, or SQLite's plain integer
+        /// counter, depending on which IDatabase loaded this object. Only ever compared for
+        /// exact equality (never ordering) when writing back — see
+        /// docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+        /// </summary>
+        [XmlIgnore]
+        public long RowVersion { get; set; }
+
         public PersistentObject()
         { // for serialization
         }
