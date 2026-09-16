@@ -1503,7 +1503,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void ReadAliases(Aliases aliases, MyMoney money)
+        public virtual void ReadAliases(Aliases aliases, MyMoney money)
         {
             Payees payees = money.Payees;
             IDataReader reader = this.ExecuteReader("SELECT Id,Pattern,Payee,Flags FROM Aliases");
@@ -1668,7 +1668,7 @@ namespace Walkabout.Data
             payees.RemoveDeleted();
         }
 
-        public void UpdateAliases(Aliases aliases)
+        public virtual void UpdateAliases(Aliases aliases)
         {
             if (aliases.Count == 0)
             {

@@ -276,5 +276,56 @@ namespace Walkabout.Tests
             db.ReadStockSplits(afterDelete.StockSplits, afterDelete);
             Assert.That(afterDelete.Securities.FindSecurity("SqlServerStoredProcDatabaseTests StockSplit Security", false), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteAlias_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var payee = money.Payees.AddPayee(999002);
+            payee.Name = "SqlServerStoredProcDatabaseTests Alias Payee";
+            payee.OnInserted();
+            db.UpdatePayees(money.Payees);
+
+            var alias = money.Aliases.AddAlias(0);
+            alias.Pattern = "SqlServerStoredProcDatabaseTests Alias Pattern";
+            alias.Payee = payee;
+            alias.AliasType = AliasType.None;
+            alias.OnInserted();
+            db.UpdateAliases(money.Aliases);
+
+            var reloaded = new MyMoney();
+            db.ReadPayees(reloaded.Payees, reloaded);
+            db.ReadAliases(reloaded.Aliases, reloaded);
+            var found = reloaded.Aliases.FindAlias("SqlServerStoredProcDatabaseTests Alias Pattern");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Payee.Name, Is.EqualTo("SqlServerStoredProcDatabaseTests Alias Payee"));
+
+            found.AliasType = AliasType.Regex;
+            db.UpdateAliases(reloaded.Aliases);
+
+            var afterUpdate = new MyMoney();
+            db.ReadPayees(afterUpdate.Payees, afterUpdate);
+            db.ReadAliases(afterUpdate.Aliases, afterUpdate);
+            var updated = afterUpdate.Aliases.FindAlias("SqlServerStoredProcDatabaseTests Alias Pattern");
+            Assert.That(updated.AliasType, Is.EqualTo(AliasType.Regex));
+
+            updated.OnDelete();
+            var toDelete = new Aliases(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateAliases(toDelete);
+
+            var payeeToDelete = afterUpdate.Payees.FindPayee("SqlServerStoredProcDatabaseTests Alias Payee", false);
+            payeeToDelete.OnDelete();
+            var payeesToDelete = new Payees(afterUpdate);
+            payeesToDelete.Add(payeeToDelete);
+            db.UpdatePayees(payeesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAliases(afterDelete.Aliases, afterDelete);
+            Assert.That(afterDelete.Aliases.FindAlias("SqlServerStoredProcDatabaseTests Alias Pattern"), Is.Null);
+        }
     }
 }

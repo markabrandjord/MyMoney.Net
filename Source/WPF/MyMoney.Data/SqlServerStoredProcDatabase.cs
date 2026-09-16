@@ -55,6 +55,7 @@ namespace Walkabout.Data
             try
             {
                 this.ReadPayees(money.Payees, money);
+                this.ReadAliases(money.Aliases, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
                 this.ReadCurrencies(money.Currencies, money);
@@ -577,6 +578,74 @@ namespace Walkabout.Data
                 s.OnUpdated();
             }
             stockSplits.RemoveDeleted();
+        }
+
+        public override void ReadAliases(Aliases aliases, MyMoney money)
+        {
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.Aliases_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    aliases.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Alias a = aliases.AddAlias(id);
+                        a.Pattern = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        int payeeId = reader.GetInt32(2);
+                        a.Payee = money.Payees.FindPayeeAt(payeeId);
+                        if (!reader.IsDBNull(3))
+                        {
+                            a.AliasType = (AliasType)reader.GetInt32(3);
+                        }
+                        a.OnUpdated();
+                    }
+                    aliases.EndUpdate();
+                }
+            }
+            aliases.FireChangeEvent(aliases, aliases, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateAliases(Aliases aliases)
+        {
+            if (aliases.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Alias a in aliases)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", a.Id), ("@Pattern", (object)a.Pattern ?? DBNull.Value), ("@Payee", a.Payee.Id),
+                        ("@Flags", (int)a.AliasType)
+                    };
+
+                    if (a.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Aliases_Update", parameters);
+                    }
+                    else if (a.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.Aliases_Insert", parameters);
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Aliases_Delete", ("@Id", a.Id));
+                    }
+                }
+            }
+
+            foreach (Alias a in aliases)
+            {
+                a.OnUpdated();
+            }
+            aliases.RemoveDeleted();
         }
 
         /// <summary>
