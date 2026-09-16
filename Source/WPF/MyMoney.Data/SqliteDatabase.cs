@@ -571,6 +571,11 @@ namespace Walkabout.Data
                 // this is the easy case, we need to create the table
                 string createTable = GetCreateTableScript(mapping, DbFlavor.Sqlite);
                 this.ExecuteNonQuery(createTable);
+
+                foreach (string indexScript in GetCreateIndexScripts(mapping))
+                {
+                    this.ExecuteNonQuery(indexScript);
+                }
             }
             else
             {

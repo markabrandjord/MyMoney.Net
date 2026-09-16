@@ -406,6 +406,21 @@ namespace Walkabout.Data
             return sb.ToString();
         }
 
+        // Derive secondary indexes automatically from any ColumnObjectMapping column, since
+        // every such column is a foreign-key/join column that benefits from an index (see
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24)).
+        internal static IEnumerable<string> GetCreateIndexScripts(TableMapping mapping)
+        {
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                if (column is ColumnObjectMapping)
+                {
+                    yield return string.Format("CREATE INDEX [IX_{0}_{1}] ON [{0}] ([{1}])",
+                        mapping.TableName, column.ColumnName);
+                }
+            }
+        }
+
         public virtual void CreateOrUpdateTable(TableMapping mapping)
         {
             if (!this.TableExists(mapping.TableName))
@@ -413,6 +428,11 @@ namespace Walkabout.Data
                 // this is the easy case, we need to create the table
                 string createTable = GetCreateTableScript(mapping, this.DbFlavor);
                 this.ExecuteNonQuery(createTable);
+
+                foreach (string indexScript in GetCreateIndexScripts(mapping))
+                {
+                    this.ExecuteNonQuery(indexScript);
+                }
             }
             else
             {

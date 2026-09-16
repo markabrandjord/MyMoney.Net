@@ -154,5 +154,21 @@ namespace Walkabout.Data.Tests
             string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
             Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
         }
+
+        [Test]
+        public void GetCreateIndexScripts_EmitsIndexForColumnObjectMapping()
+        {
+            // NOTE: TableName must be set explicitly here (matching the pattern used at the top
+            // of this file, e.g. `new TableMapping() { TableName = "Transactions" }`), because
+            // TableMapping.ObjectType's setter (Mapping.cs) only derives Columns from the type's
+            // reflected attributes, not TableName. TableName is only ever populated "for free"
+            // when a TableMapping is obtained directly off a type via reflection as the actual
+            // attribute instance (as SqlServerDatabase.Load does), not when constructed fresh as
+            // here or in the sibling FK test above (which didn't need TableName for its assert).
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow), TableName = "MappingTestChildTable" };
+            var scripts = SqlServerDatabase.GetCreateIndexScripts(mapping).ToList();
+            Assert.That(scripts, Has.One.Matches<string>(s =>
+                s.Contains("CREATE INDEX") && s.Contains("MappingTestChildTable") && s.Contains("ParentId")));
+        }
     }
 }
