@@ -135,6 +135,10 @@ namespace Walkabout.Data
                 string constr = this.GetConnectionString(true);
                 this.sqliteConnection = new SQLiteConnection(constr);
                 this.sqliteConnection.Open();
+                using (var pragmaCommand = new SQLiteCommand("PRAGMA foreign_keys = ON;", this.sqliteConnection))
+                {
+                    pragmaCommand.ExecuteNonQuery();
+                }
             }
             return this.sqliteConnection;
         }
