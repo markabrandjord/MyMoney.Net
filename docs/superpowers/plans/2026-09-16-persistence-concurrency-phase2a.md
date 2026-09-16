@@ -87,7 +87,7 @@ column, and FK/index auto-derivation).
 **Interfaces:**
 - Consumes: `PersistentObject`/`PersistentObject.RowVersion` (Phase 1, `Money.cs:389`/`:468`).
 - Produces: `IAggregateRoot` (`Money.cs`... actually declared in `IDatabase.cs` — a marker
-  interface with one member, `int Id { get; }`), `IDatabase.SaveOne<T>(T root) where T :
+  interface with one member, `long Id { get; }`), `IDatabase.SaveOne<T>(T root) where T :
   PersistentObject, IAggregateRoot`, `IDatabase.SaveTransfer(Transaction from, Transaction to)`,
   `IDatabase.SaveBatch(IEnumerable<PersistentObject> roots)`, `ConcurrencyConflictException(
   PersistentObject root, long expectedRowVersion, long actualRowVersion)` — Task 2 (`MockDatabase`)
@@ -166,7 +166,7 @@ Then insert the new marker interface right after the `DbFlavor` enum's closing b
     /// </summary>
     public interface IAggregateRoot
     {
-        int Id { get; }
+        long Id { get; }
     }
 
 ```
@@ -684,7 +684,7 @@ to:
         // RestoreRowVersions) so a later SaveOne/SaveBatch call has something real to compare
         // against. Key is (root's concrete type, its Id) since Id alone isn't unique across
         // tables (an Account and a Category can share Id=1).
-        private readonly Dictionary<(Type RootType, int Id), long> committedVersions = new Dictionary<(Type RootType, int Id), long>();
+        private readonly Dictionary<(Type RootType, long Id), long> committedVersions = new Dictionary<(Type RootType, long Id), long>();
 ```
 
 Change (replacing the three stub bodies Task 1 added, right after `Save(MyMoney)`):
@@ -762,7 +762,7 @@ to:
             foreach (PersistentObject root in list)
             {
                 IAggregateRoot identity = (IAggregateRoot)root;
-                (Type, int) key = (root.GetType(), identity.Id);
+                (Type, long) key = (root.GetType(), identity.Id);
                 if (root.IsDeleted)
                 {
                     this.committedVersions.Remove(key);
