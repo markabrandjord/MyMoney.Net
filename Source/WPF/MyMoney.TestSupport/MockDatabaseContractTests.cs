@@ -129,5 +129,92 @@ namespace Walkabout.TestSupport
             // B must NOT have been committed even though only A conflicted.
             Assert.That(reloaded.Accounts.FindAccount("B").Description, Is.Not.EqualTo("Attempted B"));
         }
+
+        [Test]
+        public void SaveOne_TransactionWithSplits_CommitsSplitsAsOneUnit()
+        {
+            // R2's central promise: SaveOne<Transaction> must commit its owned Splits as one
+            // unit with the transaction itself.
+            MyMoney money = new MyMoney();
+            Account account = money.Accounts.AddAccount("Checking");
+            Category groceries = money.Categories.GetOrCreateCategory("Groceries", CategoryType.Expense);
+            Category gas = money.Categories.GetOrCreateCategory("Gas", CategoryType.Expense);
+
+            Transaction transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -75.00m;
+            money.Transactions.AddTransaction(transaction);
+            transaction.Splits = new Splits(transaction, transaction);
+            Split first = transaction.Splits.AddSplit(0);
+            first.Amount = -50.00m;
+            first.Category = groceries;
+            first.Memo = "First split";
+            Split second = transaction.Splits.AddSplit(1);
+            second.Amount = -25.00m;
+            second.Category = gas;
+            second.Memo = "Second split";
+
+            this.Database.SaveOne(transaction);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account reloadedAccount = reloaded.Accounts.FindAccount("Checking");
+            Transaction foundTransaction = reloaded.Transactions.GetTransactionsFrom(reloadedAccount)[0];
+
+            Assert.That(foundTransaction.IsSplit, Is.True);
+            Assert.That(foundTransaction.Splits.Count, Is.EqualTo(2));
+
+            bool foundFirst = false;
+            bool foundSecond = false;
+            foreach (Split split in foundTransaction.Splits)
+            {
+                if (split.Memo == "First split")
+                {
+                    foundFirst = true;
+                    Assert.That(split.Amount, Is.EqualTo(-50.00m));
+                    Assert.That(split.Category.Name, Is.EqualTo("Groceries"));
+                }
+                else if (split.Memo == "Second split")
+                {
+                    foundSecond = true;
+                    Assert.That(split.Amount, Is.EqualTo(-25.00m));
+                    Assert.That(split.Category.Name, Is.EqualTo("Gas"));
+                }
+            }
+            Assert.That(foundFirst, Is.True, "First split should have round-tripped");
+            Assert.That(foundSecond, Is.True, "Second split should have round-tripped");
+        }
+
+        [Test]
+        public void RestoreRowVersions_CoversEveryIAggregateRootType()
+        {
+            // Safety net: if a new IAggregateRoot type is ever added to Money.cs without a
+            // matching entry in MockDatabase.RestoredAggregateRootCollections, that type's
+            // RowVersion never gets restored on Load(), causing a permanent
+            // ConcurrencyConflictException on every save - with no symptom that points here.
+            HashSet<Type> restoredTypes = new HashSet<Type>();
+            foreach (var entry in MockDatabase.RestoredAggregateRootCollections)
+            {
+                restoredTypes.Add(entry.RootType);
+            }
+
+            List<Type> allAggregateRootTypes = new List<Type>();
+            foreach (Type t in typeof(IAggregateRoot).Assembly.GetTypes())
+            {
+                if (t.IsClass && !t.IsAbstract && typeof(IAggregateRoot).IsAssignableFrom(t))
+                {
+                    allAggregateRootTypes.Add(t);
+                }
+            }
+
+            Assert.That(allAggregateRootTypes, Is.Not.Empty,
+                "Sanity check: expected at least one IAggregateRoot implementor in the assembly.");
+
+            foreach (Type t in allAggregateRootTypes)
+            {
+                Assert.That(restoredTypes.Contains(t), Is.True,
+                    t.Name + " implements IAggregateRoot but MockDatabase.RestoredAggregateRootCollections " +
+                    "has no entry for it - Load() would never restore its RowVersion.");
+            }
+        }
     }
 }

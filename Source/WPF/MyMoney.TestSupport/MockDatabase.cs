@@ -72,15 +72,45 @@ namespace Walkabout.Data
 
             // Validate every root against its last-committed version before mutating anything,
             // so a conflict on root N of N leaves nothing committed (R3's atomicity requirement).
+            // This loop also guards two shapes a real SQL engine would naturally reject but an
+            // in-memory whole-graph re-serialization wouldn't otherwise notice: roots drawn from
+            // two different loaded MyMoney graphs (only the first root's graph actually gets
+            // serialized below), and the same logical row appearing twice in one call (which
+            // would otherwise double-bump its version for a single commit).
+            MyMoney sharedOwner = null;
+            HashSet<(Type RootType, long Id)> seen = new HashSet<(Type, long)>();
             foreach (PersistentObject root in list)
             {
+                if (root == null)
+                {
+                    throw new ArgumentNullException(nameof(roots), "SaveBatch roots must not contain a null entry.");
+                }
+
                 if (!(root is IAggregateRoot identity))
                 {
                     throw new ArgumentException(string.Format(
                         "{0} is not a valid SaveBatch root - it must implement IAggregateRoot.", root.GetType().Name));
                 }
 
-                long committed = this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long v) ? v : 0;
+                (Type, long) key = (root.GetType(), identity.Id);
+                if (!seen.Add(key))
+                {
+                    throw new InvalidOperationException(string.Format(
+                        "Duplicate root in one SaveBatch call: {0} (Id={1}) appears more than once.",
+                        root.GetType().Name, identity.Id));
+                }
+
+                MyMoney rootOwner = root.Parent?.Parent as MyMoney;
+                if (sharedOwner == null)
+                {
+                    sharedOwner = rootOwner;
+                }
+                else if (rootOwner != sharedOwner)
+                {
+                    throw new InvalidOperationException("SaveBatch roots belong to different MyMoney graphs.");
+                }
+
+                long committed = this.committedVersions.TryGetValue(key, out long v) ? v : 0;
                 if (committed != root.RowVersion)
                 {
                     throw new ConcurrencyConflictException(root, committed, root.RowVersion);
@@ -95,12 +125,11 @@ namespace Walkabout.Data
             // of MockDatabase from real transaction semantics): MockDatabase alone cannot catch a
             // caller relying on unrelated dirty state getting flushed along with it - that check
             // belongs to the real-engine contract tests landing in Phase 2b/2c, not here.
-            MyMoney owner = list[0].Parent?.Parent as MyMoney;
-            if (owner == null)
+            if (sharedOwner == null)
             {
                 throw new InvalidOperationException("SaveBatch root is not attached to a loaded MyMoney graph.");
             }
-            this.Save(owner);
+            this.Save(sharedOwner);
 
             foreach (PersistentObject root in list)
             {
@@ -152,19 +181,33 @@ namespace Walkabout.Data
             }
         }
 
+        // Single source of truth for which IAggregateRoot collections Load() restores
+        // RowVersion onto. If a new IAggregateRoot type is ever added to Money.cs without a
+        // matching entry here, that type's RowVersion never gets restored on Load(), causing a
+        // permanent ConcurrencyConflictException on every save. Exposed internally so
+        // MockDatabaseContractTests can assert (via reflection) that this array covers every
+        // IAggregateRoot implementor in the MyMoney.Business assembly.
+        internal static readonly (Type RootType, Func<MyMoney, IEnumerable<PersistentObject>> Collection)[] RestoredAggregateRootCollections =
+        {
+            (typeof(Account), m => m.Accounts),
+            (typeof(Category), m => m.Categories),
+            (typeof(Payee), m => m.Payees),
+            (typeof(Currency), m => m.Currencies),
+            (typeof(Security), m => m.Securities),
+            (typeof(Alias), m => m.Aliases),
+            (typeof(OnlineAccount), m => m.OnlineAccounts),
+            (typeof(StockSplit), m => m.StockSplits),
+            (typeof(RentBuilding), m => m.Buildings),
+            (typeof(LoanPayment), m => m.LoanPayments),
+            (typeof(Transaction), m => m.Transactions),
+        };
+
         private void RestoreRowVersions(MyMoney money)
         {
-            this.ApplyVersions(money.Accounts);
-            this.ApplyVersions(money.Categories);
-            this.ApplyVersions(money.Payees);
-            this.ApplyVersions(money.Currencies);
-            this.ApplyVersions(money.Securities);
-            this.ApplyVersions(money.Aliases);
-            this.ApplyVersions(money.OnlineAccounts);
-            this.ApplyVersions(money.StockSplits);
-            this.ApplyVersions(money.Buildings);
-            this.ApplyVersions(money.LoanPayments);
-            this.ApplyVersions(money.Transactions);
+            foreach ((Type RootType, Func<MyMoney, IEnumerable<PersistentObject>> Collection) entry in RestoredAggregateRootCollections)
+            {
+                this.ApplyVersions(entry.Collection(money));
+            }
         }
 
         private void ApplyVersions(IEnumerable<PersistentObject> roots)
