@@ -488,6 +488,18 @@ namespace Walkabout.Data
                 // See if any columns need to be dropped.
                 foreach (ColumnMapping c in actual.Columns)
                 {
+                    if (c.ColumnName == "Version" || c.ColumnName == "RowVersion")
+                    {
+                        // The optimistic-concurrency version column (persistence-concurrency
+                        // phase 1, Task 3) is injected by GetCreateTableScript itself, not by
+                        // MappingEngine.GetColumnsFromObject, so it's never present in
+                        // mapping.Columns even though every real table has it. Without this
+                        // guard every table looks like it needs this column dropped on every
+                        // CreateOrUpdateTable call against an existing table (see the matching
+                        // SqliteDatabase.CreateOrUpdateTable guards, Task 4).
+                        continue;
+                    }
+
                     ColumnMapping ac = mapping.FindColumn(c.ColumnName);
                     if (ac == null)
                     {
@@ -1157,8 +1169,7 @@ namespace Walkabout.Data
                 a.Name = ReadDbString(reader, 2);
                 a.Type = (AccountType)reader.GetInt32(3);
                 a.Description = ReadDbString(reader, 4);
-                id = reader.GetInt32(5);
-                a.OnlineAccount = money.OnlineAccounts.FindOnlineAccountAt(id);
+                a.OnlineAccount = reader.IsDBNull(5) ? null : money.OnlineAccounts.FindOnlineAccountAt(reader.GetInt32(5));
                 a.OpeningBalance = reader.GetDecimal(6);
 
                 if (!reader.IsDBNull(7))
@@ -1192,8 +1203,8 @@ namespace Walkabout.Data
                 a.WebSite = ReadDbString(reader, 12);
                 a.ReconcileWarning = ReadInt32(reader, 13);
 
-                a.CategoryForPrincipal = money.Categories.FindCategoryById(ReadInt32(reader, 14));
-                a.CategoryForInterest = money.Categories.FindCategoryById(ReadInt32(reader, 15));
+                a.CategoryForPrincipal = reader.IsDBNull(14) ? null : money.Categories.FindCategoryById(reader.GetInt32(14));
+                a.CategoryForInterest = reader.IsDBNull(15) ? null : money.Categories.FindCategoryById(reader.GetInt32(15));
 
                 a.OfxAccountId = ReadDbString(reader, 16);
                 a.OnUpdated();
@@ -1224,13 +1235,13 @@ namespace Walkabout.Data
                             "CategoryIdForInterest=@CategoryIdForInterest WHERE Id=@Id;",
                             ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
                             ("@Type", (int)a.Type), ("@Description", a.Description),
-                            ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                            ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
                             ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
                             ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
                             ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
                             ("@ReconcileWarning", a.ReconcileWarning),
-                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
-                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id),
+                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id),
                             ("@Id", a.Id));
                     }
                     else if (a.IsInserted)
@@ -1240,13 +1251,13 @@ namespace Walkabout.Data
                             "VALUES (@Id,@AccountId,@OfxAccountId,@Name,@Type,@Description,@OnlineAccount,@OpeningBalance,@LastSync,@LastBalance,@SyncGuid,@Flags,@Currency,@WebSite,@ReconcileWarning,@CategoryIdForPrincipal,@CategoryIdForInterest);",
                             ("@Id", a.Id), ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
                             ("@Type", (int)a.Type), ("@Description", a.Description),
-                            ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                            ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
                             ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
                             ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
                             ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
                             ("@ReconcileWarning", a.ReconcileWarning),
-                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
-                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id));
+                            ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                            ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id));
                     }
                     else if (a.IsDeleted)
                     {
@@ -1264,7 +1275,7 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",Name='{0}'", DBString(a.Name)));
                     sb.Append(string.Format(",Type={0}", ((int)a.Type).ToString()));
                     sb.Append(string.Format(",Description='{0}'", DBString(a.Description)));
-                    sb.Append(string.Format(",OnlineAccount={0}", a.OnlineAccount != null ? a.OnlineAccount.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",OnlineAccount={0}", a.OnlineAccount != null ? a.OnlineAccount.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",OpeningBalance={0}", a.OpeningBalance.ToString()));
                     sb.Append(string.Format(",LastSync={0}", DBDateTime(a.LastSync)));
                     sb.Append(string.Format(",LastBalance={0}", DBDateTime(a.LastBalance)));
@@ -1273,8 +1284,8 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",Currency='{0}'", DBString(a.Currency)));
                     sb.Append(string.Format(",WebSite='{0}'", DBString(a.WebSite)));
                     sb.Append(string.Format(",ReconcileWarning={0}", a.ReconcileWarning));
-                    sb.Append(string.Format(",CategoryIdForPrincipal='{0}'", a.CategoryForPrincipal == null ? "-1" : a.CategoryForPrincipal.Id.ToString()));
-                    sb.Append(string.Format(",CategoryIdForInterest='{0}'", a.CategoryForInterest == null ? "-1" : a.CategoryForInterest.Id.ToString()));
+                    sb.Append(string.Format(",CategoryIdForPrincipal={0}", a.CategoryForPrincipal == null ? "NULL" : a.CategoryForPrincipal.Id.ToString()));
+                    sb.Append(string.Format(",CategoryIdForInterest={0}", a.CategoryForInterest == null ? "NULL" : a.CategoryForInterest.Id.ToString()));
 
                     sb.AppendLine(string.Format(" WHERE Id={0};", a.Id));
                 }
@@ -1288,7 +1299,7 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",'{0}'", DBString(a.Name)));
                     sb.Append(string.Format(",{0}", ((int)a.Type).ToString()));
                     sb.Append(string.Format(",'{0}'", DBString(a.Description)));
-                    sb.Append(string.Format(",{0}", a.OnlineAccount != null ? a.OnlineAccount.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",{0}", a.OnlineAccount != null ? a.OnlineAccount.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",{0}", a.OpeningBalance.ToString()));
                     sb.Append(string.Format(",{0}", DBDateTime(a.LastSync)));
                     sb.Append(string.Format(",{0}", DBDateTime(a.LastBalance)));
@@ -1297,8 +1308,8 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",'{0}'", DBString(a.Currency)));
                     sb.Append(string.Format(",'{0}'", DBString(a.WebSite)));
                     sb.Append(string.Format(",{0}", a.ReconcileWarning));
-                    sb.Append(string.Format(",'{0}'", a.CategoryForPrincipal == null ? "-1" : a.CategoryForPrincipal.Id.ToString()));
-                    sb.Append(string.Format(",'{0}'", a.CategoryForInterest == null ? "-1" : a.CategoryForInterest.Id.ToString()));
+                    sb.Append(string.Format(",{0}", a.CategoryForPrincipal == null ? "NULL" : a.CategoryForPrincipal.Id.ToString()));
+                    sb.Append(string.Format(",{0}", a.CategoryForInterest == null ? "NULL" : a.CategoryForInterest.Id.ToString()));
                     sb.AppendLine(");");
                 }
                 else if (a.IsDeleted)
@@ -2431,7 +2442,7 @@ namespace Walkabout.Data
                             "UPDATE Categories SET Name=@Name,Description=@Description,Type=@Type,ParentId=@ParentId,Budget=@Budget," +
                             "Frequency=@Frequency,Balance=@Balance,Color=@Color,TaxRefNum=@TaxRefNum WHERE Id=@Id;",
                             ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
-                            ("@ParentId", c.ParentCategory != null ? c.ParentCategory.Id : -1), ("@Budget", c.Budget),
+                            ("@ParentId", c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), ("@Budget", c.Budget),
                             ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
                             ("@TaxRefNum", c.TaxRefNum), ("@Id", c.Id));
                     }
@@ -2441,7 +2452,7 @@ namespace Walkabout.Data
                             "INSERT INTO Categories (Id,Name,Description,Type,ParentId,Budget,Frequency,Balance,Color,TaxRefNum) " +
                             "VALUES (@Id,@Name,@Description,@Type,@ParentId,@Budget,@Frequency,@Balance,@Color,@TaxRefNum);",
                             ("@Id", c.Id), ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
-                            ("@ParentId", c.ParentCategory != null ? c.ParentCategory.Id : -1), ("@Budget", c.Budget),
+                            ("@ParentId", c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), ("@Budget", c.Budget),
                             ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
                             ("@TaxRefNum", c.TaxRefNum));
                     }
@@ -2459,7 +2470,7 @@ namespace Walkabout.Data
                     sb.Append(string.Format("Name='{0}'", DBString(c.Name)));
                     sb.Append(string.Format(",Description='{0}'", DBString(c.Description)));
                     sb.Append(string.Format(",Type={0}", (int)c.Type));
-                    sb.Append(string.Format(",ParentId={0}", c.ParentCategory != null ? c.ParentCategory.Id : -1));
+                    sb.Append(string.Format(",ParentId={0}", c.ParentCategory != null ? c.ParentCategory.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",Budget={0}", c.Budget));
                     sb.Append(string.Format(",Frequency={0}", (int)c.Frequency));
                     sb.Append(string.Format(",Balance={0}", c.Balance));
@@ -2476,7 +2487,7 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",'{0}'", DBString(c.Name)));
                     sb.Append(string.Format(",'{0}'", DBString(c.Description)));
                     sb.Append(string.Format(",{0}", (int)c.Type));
-                    sb.Append(string.Format(",{0}", c.ParentCategory != null ? c.ParentCategory.Id : -1));
+                    sb.Append(string.Format(",{0}", c.ParentCategory != null ? c.ParentCategory.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",{0}", c.Budget.ToString()));
                     sb.Append(string.Format(",{0}", (int)c.Frequency));
                     sb.Append(string.Format(",{0}", c.Balance));
@@ -2912,8 +2923,8 @@ namespace Walkabout.Data
                 t.Account = money.Accounts.FindAccountAt(reader.GetInt32(4));
                 t.Status = (TransactionStatus)reader.GetInt32(5);
                 t.Memo = ReadDbString(reader, 6);
-                t.Payee = money.Payees.FindPayeeAt(reader.GetInt32(7));
-                t.Category = money.Categories.FindCategoryById(reader.GetInt32(8));
+                t.Payee = reader.IsDBNull(7) ? null : money.Payees.FindPayeeAt(reader.GetInt32(7));
+                t.Category = reader.IsDBNull(8) ? null : money.Categories.FindCategoryById(reader.GetInt32(8));
                 t.FITID = ReadDbString(reader, 9);
                 if (!reader.IsDBNull(10))
                 {
@@ -2978,7 +2989,7 @@ namespace Walkabout.Data
                 s.BatchMode = true;
                 t.Splits.BeginUpdate(false);
                 s.Amount = reader.GetDecimal(2);
-                s.Category = money.Categories.FindCategoryById(reader.GetInt32(3));
+                s.Category = reader.IsDBNull(3) ? null : money.Categories.FindCategoryById(reader.GetInt32(3));
                 s.Memo = ReadDbString(reader, 4);
                 long tid = reader.GetInt64(5);
                 if (tid != -1)
@@ -3137,7 +3148,7 @@ namespace Walkabout.Data
                             "OriginalPayee=@OriginalPayee WHERE Id=@Id;",
                             ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)), ("@Amount", t.Amount),
                             ("@Status", (int)t.Status), ("@Memo", t.Memo),
-                            ("@Payee", t.Payee != null ? t.Payee.Id : -1), ("@Category", t.Category != null ? t.Category.Id : -1),
+                            ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value), ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
                             ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
                             ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
                             ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
@@ -3158,7 +3169,7 @@ namespace Walkabout.Data
                             "VALUES (@Id,@Number,@Account,@Date,@Amount,@Status,@Memo,@Payee,@Category,@Transfer,@TransferSplit,@FITID,@SalesTax,@Flags,@ReconciledDate,@BudgetBalanceDate,@MergeDate,@OriginalPayee);",
                             ("@Id", t.Id), ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)),
                             ("@Amount", t.Amount), ("@Status", (int)t.Status), ("@Memo", t.Memo),
-                            ("@Payee", t.Payee != null ? t.Payee.Id : -1), ("@Category", t.Category != null ? t.Category.Id : -1),
+                            ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value), ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
                             ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
                             ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
                             ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
@@ -3193,8 +3204,8 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",Amount={0}", DBDecimal(t.Amount)));
                     sb.Append(string.Format(",Status={0}", ((int)t.Status).ToString()));
                     sb.Append(string.Format(",Memo='{0}'", DBString(t.Memo)));
-                    sb.Append(string.Format(",Payee={0}", t.Payee != null ? t.Payee.Id.ToString() : "-1"));
-                    sb.Append(string.Format(",Category={0}", t.Category != null ? t.Category.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",Payee={0}", t.Payee != null ? t.Payee.Id.ToString() : "NULL"));
+                    sb.Append(string.Format(",Category={0}", t.Category != null ? t.Category.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",Transfer={0}", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id.ToString() : "-1"));
                     sb.Append(string.Format(",TransferSplit={0}", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id.ToString() : "-1"));
                     sb.Append(string.Format(",FITID='{0}'", DBString(t.FITID)));
@@ -3222,8 +3233,8 @@ namespace Walkabout.Data
                     sb.Append(string.Format(",{0}", DBDecimal(t.Amount)));
                     sb.Append(string.Format(",{0}", ((int)t.Status).ToString()));
                     sb.Append(string.Format(",'{0}'", DBString(t.Memo)));
-                    sb.Append(string.Format(",{0}", t.Payee != null ? t.Payee.Id.ToString() : "-1"));
-                    sb.Append(string.Format(",{0}", t.Category != null ? t.Category.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",{0}", t.Payee != null ? t.Payee.Id.ToString() : "NULL"));
+                    sb.Append(string.Format(",{0}", t.Category != null ? t.Category.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",{0}", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id.ToString() : "-1"));
                     sb.Append(string.Format(",{0}", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id.ToString() : "-1"));
                     sb.Append(string.Format(",'{0}'", DBString(t.FITID)));
@@ -3282,9 +3293,9 @@ namespace Walkabout.Data
                         this.ExecuteNonQuery(
                             "UPDATE [Splits] SET [Amount]=@Amount,[Category]=@Category,[Memo]=@Memo,[Transfer]=@Transfer,[Payee]=@Payee," +
                             "Flags=@Flags,BudgetBalanceDate=@BudgetBalanceDate WHERE [Id]=@Id AND [Transaction]=@Transaction;",
-                            ("@Amount", s.Amount), ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", s.Memo),
+                            ("@Amount", s.Amount), ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", s.Memo),
                             ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
-                            ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                            ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
                             ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)), ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
                     }
                     else if (s.IsInserted)
@@ -3293,9 +3304,9 @@ namespace Walkabout.Data
                             "INSERT INTO [Splits] ([Id],[Transaction],[Amount],[Category],[Memo],[Transfer],[Payee],[Flags],[BudgetBalanceDate]) " +
                             "VALUES (@Id,@Transaction,@Amount,@Category,@Memo,@Transfer,@Payee,@Flags,@BudgetBalanceDate);",
                             ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
-                            ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", s.Memo),
+                            ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", s.Memo),
                             ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
-                            ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                            ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
                             ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)));
                     }
                     else if (s.IsDeleted)
@@ -3311,10 +3322,10 @@ namespace Walkabout.Data
                     sb.AppendLine("-- updating Split : " + s.Id);
                     sb.Append("UPDATE [Splits] SET ");
                     sb.Append(string.Format("[Amount]={0}", s.Amount));
-                    sb.Append(string.Format(",[Category]={0}", s.Category != null ? s.Category.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",[Category]={0}", s.Category != null ? s.Category.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",[Memo]='{0}'", DBString(s.Memo)));
                     sb.Append(string.Format(",[Transfer]={0}", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id.ToString() : "-1"));
-                    sb.Append(string.Format(",[Payee]={0}", s.Payee != null ? s.Payee.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",[Payee]={0}", s.Payee != null ? s.Payee.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",Flags={0}", (int)s.Flags));
                     sb.Append(string.Format(",BudgetBalanceDate={0}", DBNullableDateTime(s.BudgetBalanceDate)));
                     sb.AppendLine(string.Format(" WHERE [Id]={0} AND [Transaction]={1};", s.Id, s.Transaction.Id));
@@ -3326,10 +3337,10 @@ namespace Walkabout.Data
                     sb.Append(string.Format("{0}", s.Id));
                     sb.Append(string.Format(",{0}", s.Transaction.Id.ToString()));
                     sb.Append(string.Format(",{0}", s.Amount));
-                    sb.Append(string.Format(",{0}", s.Category != null ? s.Category.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",{0}", s.Category != null ? s.Category.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",'{0}'", DBString(s.Memo)));
                     sb.Append(string.Format(",{0}", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id.ToString() : "-1"));
-                    sb.Append(string.Format(",{0}", s.Payee != null ? s.Payee.Id.ToString() : "-1"));
+                    sb.Append(string.Format(",{0}", s.Payee != null ? s.Payee.Id.ToString() : "NULL"));
                     sb.Append(string.Format(",{0}", (int)s.Flags));
                     sb.Append(string.Format(",{0}", DBNullableDateTime(s.BudgetBalanceDate)));
                     sb.AppendLine(");");
