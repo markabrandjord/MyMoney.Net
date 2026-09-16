@@ -20,6 +20,14 @@ namespace Walkabout.Data
     {
         private byte[] snapshot;
 
+        // RowVersion is [XmlIgnore] (persistence-concurrency Phase 1), so it never round-trips
+        // through the DataContractSerializer snapshot below. This is MockDatabase's own
+        // last-committed-version bookkeeping, restored onto each object by Load() (see
+        // RestoreRowVersions) so a later SaveOne/SaveBatch call has something real to compare
+        // against. Key is (root's concrete type, its Id) since Id alone isn't unique across
+        // tables (an Account and a Category can share Id=1).
+        private readonly Dictionary<(Type RootType, long Id), long> committedVersions = new Dictionary<(Type RootType, long Id), long>();
+
         public string Server => "mock";
         public string DatabasePath => "mock://in-memory";
         public string UserId => null;
@@ -46,17 +54,70 @@ namespace Walkabout.Data
 
         public void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
         {
-            throw new NotImplementedException("SaveOne is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
+            this.SaveBatch(new PersistentObject[] { root });
         }
 
         public void SaveTransfer(Transaction from, Transaction to)
         {
-            throw new NotImplementedException("SaveTransfer is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
+            this.SaveBatch(new PersistentObject[] { from, to });
         }
 
         public void SaveBatch(IEnumerable<PersistentObject> roots)
         {
-            throw new NotImplementedException("SaveBatch is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
+            List<PersistentObject> list = new List<PersistentObject>(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Validate every root against its last-committed version before mutating anything,
+            // so a conflict on root N of N leaves nothing committed (R3's atomicity requirement).
+            foreach (PersistentObject root in list)
+            {
+                if (!(root is IAggregateRoot identity))
+                {
+                    throw new ArgumentException(string.Format(
+                        "{0} is not a valid SaveBatch root - it must implement IAggregateRoot.", root.GetType().Name));
+                }
+
+                long committed = this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long v) ? v : 0;
+                if (committed != root.RowVersion)
+                {
+                    throw new ConcurrencyConflictException(root, committed, root.RowVersion);
+                }
+            }
+
+            // MockDatabase has no per-row storage, so it re-serializes the whole owning graph on
+            // every call - unlike SqliteDatabase/SqlServerStoredProcDatabase (Phase 2b/2c), which
+            // only ever touch the given root(s)' own rows. This is a deliberate simplification
+            // for a test double (see
+            // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2's exemption
+            // of MockDatabase from real transaction semantics): MockDatabase alone cannot catch a
+            // caller relying on unrelated dirty state getting flushed along with it - that check
+            // belongs to the real-engine contract tests landing in Phase 2b/2c, not here.
+            MyMoney owner = list[0].Parent?.Parent as MyMoney;
+            if (owner == null)
+            {
+                throw new InvalidOperationException("SaveBatch root is not attached to a loaded MyMoney graph.");
+            }
+            this.Save(owner);
+
+            foreach (PersistentObject root in list)
+            {
+                IAggregateRoot identity = (IAggregateRoot)root;
+                (Type, long) key = (root.GetType(), identity.Id);
+                if (root.IsDeleted)
+                {
+                    this.committedVersions.Remove(key);
+                }
+                else
+                {
+                    long newVersion = root.RowVersion + 1;
+                    this.committedVersions[key] = newVersion;
+                    root.RowVersion = newVersion;
+                    root.OnUpdated();
+                }
+            }
         }
 
         private static byte[] Serialize(MyMoney money)
@@ -86,7 +147,35 @@ namespace Walkabout.Data
                 MyMoney money = (MyMoney)serializer.ReadObject(reader);
                 money.PostDeserializeFixup();
                 money.OnLoaded();
+                this.RestoreRowVersions(money);
                 return money;
+            }
+        }
+
+        private void RestoreRowVersions(MyMoney money)
+        {
+            this.ApplyVersions(money.Accounts);
+            this.ApplyVersions(money.Categories);
+            this.ApplyVersions(money.Payees);
+            this.ApplyVersions(money.Currencies);
+            this.ApplyVersions(money.Securities);
+            this.ApplyVersions(money.Aliases);
+            this.ApplyVersions(money.OnlineAccounts);
+            this.ApplyVersions(money.StockSplits);
+            this.ApplyVersions(money.Buildings);
+            this.ApplyVersions(money.LoanPayments);
+            this.ApplyVersions(money.Transactions);
+        }
+
+        private void ApplyVersions(IEnumerable<PersistentObject> roots)
+        {
+            foreach (PersistentObject root in roots)
+            {
+                if (root is IAggregateRoot identity &&
+                    this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long version))
+                {
+                    root.RowVersion = version;
+                }
             }
         }
 
@@ -105,6 +194,7 @@ namespace Walkabout.Data
         public void Delete()
         {
             this.snapshot = null;
+            this.committedVersions.Clear();
         }
 
         public string GetLog()
