@@ -124,6 +124,21 @@ namespace Walkabout.Data
             return result;
         }
 
+        public virtual void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException("XmlStore does not support SaveOne - see the design spec's Non-goals.");
+        }
+
+        public virtual void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException("XmlStore does not support SaveTransfer - see the design spec's Non-goals.");
+        }
+
+        public virtual void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            throw new NotImplementedException("XmlStore does not support SaveBatch - see the design spec's Non-goals.");
+        }
+
 
         public virtual void Save(MyMoney money)
         {

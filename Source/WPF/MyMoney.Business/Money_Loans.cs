@@ -461,7 +461,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "LoanPayments")]
-    public class LoanPayment : PersistentObject
+    public class LoanPayment : PersistentObject, IAggregateRoot
     {
         private int id;
         private int accountId;
@@ -499,6 +499,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // LoanPayment's own Id is int, but IAggregateRoot.Id is long so the same interface
+        // also fits Transaction/StockSplit's own long Id without truncation risk - this
+        // int->long widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "AccountId", SqlType = typeof(SqlInt32), AllowNulls = false)]

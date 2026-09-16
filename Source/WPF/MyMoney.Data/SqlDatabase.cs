@@ -737,6 +737,24 @@ namespace Walkabout.Data
 
         #endregion
 
+        public virtual void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(string.Format(
+                "SaveOne is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.", this.DbFlavor));
+        }
+
+        public virtual void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(string.Format(
+                "SaveTransfer is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.", this.DbFlavor));
+        }
+
+        public virtual void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            throw new NotImplementedException(string.Format(
+                "SaveBatch is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.", this.DbFlavor));
+        }
+
 
         public void UpdateBuildings(RentBuildings buildings)
         {

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Runtime.Serialization;
@@ -17,6 +19,14 @@ namespace Walkabout.Data
     public class MockDatabase : IDatabase
     {
         private byte[] snapshot;
+
+        // RowVersion is [XmlIgnore] (persistence-concurrency Phase 1), so it never round-trips
+        // through the DataContractSerializer snapshot below. This is MockDatabase's own
+        // last-committed-version bookkeeping, restored onto each object by Load() (see
+        // RestoreRowVersions) so a later SaveOne/SaveBatch call has something real to compare
+        // against. Key is (root's concrete type, its Id) since Id alone isn't unique across
+        // tables (an Account and a Category can share Id=1).
+        private readonly Dictionary<(Type RootType, long Id), long> committedVersions = new Dictionary<(Type RootType, long Id), long>();
 
         public string Server => "mock";
         public string DatabasePath => "mock://in-memory";
@@ -40,6 +50,103 @@ namespace Walkabout.Data
         public void Save(MyMoney money)
         {
             this.snapshot = Serialize(money);
+        }
+
+        public void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
+        public void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            List<PersistentObject> list = new List<PersistentObject>(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Validate every root against its last-committed version before mutating anything,
+            // so a conflict on root N of N leaves nothing committed (R3's atomicity requirement).
+            // This loop also guards two shapes a real SQL engine would naturally reject but an
+            // in-memory whole-graph re-serialization wouldn't otherwise notice: roots drawn from
+            // two different loaded MyMoney graphs (only the first root's graph actually gets
+            // serialized below), and the same logical row appearing twice in one call (which
+            // would otherwise double-bump its version for a single commit).
+            MyMoney sharedOwner = null;
+            HashSet<(Type RootType, long Id)> seen = new HashSet<(Type, long)>();
+            foreach (PersistentObject root in list)
+            {
+                if (root == null)
+                {
+                    throw new ArgumentNullException(nameof(roots), "SaveBatch roots must not contain a null entry.");
+                }
+
+                if (!(root is IAggregateRoot identity))
+                {
+                    throw new ArgumentException(string.Format(
+                        "{0} is not a valid SaveBatch root - it must implement IAggregateRoot.", root.GetType().Name));
+                }
+
+                (Type, long) key = (root.GetType(), identity.Id);
+                if (!seen.Add(key))
+                {
+                    throw new InvalidOperationException(string.Format(
+                        "Duplicate root in one SaveBatch call: {0} (Id={1}) appears more than once.",
+                        root.GetType().Name, identity.Id));
+                }
+
+                MyMoney rootOwner = root.Parent?.Parent as MyMoney;
+                if (sharedOwner == null)
+                {
+                    sharedOwner = rootOwner;
+                }
+                else if (rootOwner != sharedOwner)
+                {
+                    throw new InvalidOperationException("SaveBatch roots belong to different MyMoney graphs.");
+                }
+
+                long committed = this.committedVersions.TryGetValue(key, out long v) ? v : 0;
+                if (committed != root.RowVersion)
+                {
+                    throw new ConcurrencyConflictException(root, committed, root.RowVersion);
+                }
+            }
+
+            // MockDatabase has no per-row storage, so it re-serializes the whole owning graph on
+            // every call - unlike SqliteDatabase/SqlServerStoredProcDatabase (Phase 2b/2c), which
+            // only ever touch the given root(s)' own rows. This is a deliberate simplification
+            // for a test double (see
+            // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2's exemption
+            // of MockDatabase from real transaction semantics): MockDatabase alone cannot catch a
+            // caller relying on unrelated dirty state getting flushed along with it - that check
+            // belongs to the real-engine contract tests landing in Phase 2b/2c, not here.
+            if (sharedOwner == null)
+            {
+                throw new InvalidOperationException("SaveBatch root is not attached to a loaded MyMoney graph.");
+            }
+            this.Save(sharedOwner);
+
+            foreach (PersistentObject root in list)
+            {
+                IAggregateRoot identity = (IAggregateRoot)root;
+                (Type, long) key = (root.GetType(), identity.Id);
+                if (root.IsDeleted)
+                {
+                    this.committedVersions.Remove(key);
+                }
+                else
+                {
+                    long newVersion = root.RowVersion + 1;
+                    this.committedVersions[key] = newVersion;
+                    root.RowVersion = newVersion;
+                    root.OnUpdated();
+                }
+            }
         }
 
         private static byte[] Serialize(MyMoney money)
@@ -69,7 +176,49 @@ namespace Walkabout.Data
                 MyMoney money = (MyMoney)serializer.ReadObject(reader);
                 money.PostDeserializeFixup();
                 money.OnLoaded();
+                this.RestoreRowVersions(money);
                 return money;
+            }
+        }
+
+        // Single source of truth for which IAggregateRoot collections Load() restores
+        // RowVersion onto. If a new IAggregateRoot type is ever added to Money.cs without a
+        // matching entry here, that type's RowVersion never gets restored on Load(), causing a
+        // permanent ConcurrencyConflictException on every save. Exposed internally so
+        // MockDatabaseContractTests can assert (via reflection) that this array covers every
+        // IAggregateRoot implementor in the MyMoney.Business assembly.
+        internal static readonly (Type RootType, Func<MyMoney, IEnumerable<PersistentObject>> Collection)[] RestoredAggregateRootCollections =
+        {
+            (typeof(Account), m => m.Accounts),
+            (typeof(Category), m => m.Categories),
+            (typeof(Payee), m => m.Payees),
+            (typeof(Currency), m => m.Currencies),
+            (typeof(Security), m => m.Securities),
+            (typeof(Alias), m => m.Aliases),
+            (typeof(OnlineAccount), m => m.OnlineAccounts),
+            (typeof(StockSplit), m => m.StockSplits),
+            (typeof(RentBuilding), m => m.Buildings),
+            (typeof(LoanPayment), m => m.LoanPayments),
+            (typeof(Transaction), m => m.Transactions),
+        };
+
+        private void RestoreRowVersions(MyMoney money)
+        {
+            foreach ((Type RootType, Func<MyMoney, IEnumerable<PersistentObject>> Collection) entry in RestoredAggregateRootCollections)
+            {
+                this.ApplyVersions(entry.Collection(money));
+            }
+        }
+
+        private void ApplyVersions(IEnumerable<PersistentObject> roots)
+        {
+            foreach (PersistentObject root in roots)
+            {
+                if (root is IAggregateRoot identity &&
+                    this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long version))
+                {
+                    root.RowVersion = version;
+                }
             }
         }
 
@@ -88,6 +237,7 @@ namespace Walkabout.Data
         public void Delete()
         {
             this.snapshot = null;
+            this.committedVersions.Clear();
         }
 
         public string GetLog()
