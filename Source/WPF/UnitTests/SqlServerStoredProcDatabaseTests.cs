@@ -65,7 +65,8 @@ namespace Walkabout.Tests
             var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
 
             var money = new MyMoney();
-            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests Account");
+            var account = money.Accounts.AddAccount(999002);
+            account.Name = "SqlServerStoredProcDatabaseTests Account";
             account.Type = AccountType.Checking;
             account.Description = "Test account";
             account.OpeningBalance = 100.00m;
