@@ -3244,7 +3244,7 @@ namespace Walkabout.Data
             transactions.RemoveDeleted();
         }
 
-        public void UpdateSplits(Splits splits)
+        public virtual void UpdateSplits(Splits splits)
         {
             StringBuilder sb = new StringBuilder();
 

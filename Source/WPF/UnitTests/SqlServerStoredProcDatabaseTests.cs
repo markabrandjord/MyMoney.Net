@@ -382,5 +382,94 @@ namespace Walkabout.Tests
             db.ReadAccounts(afterDelete.Accounts, afterDelete);
             Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Transaction Account"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteSplit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests Split Account");
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTests:SplitCategory", CategoryType.Expense);
+            category.OnInserted();
+            db.UpdateCategories(money.Categories);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -100.00m;
+            money.Transactions.AddTransaction(transaction);
+            transaction.Splits = new Splits(transaction, transaction);
+            var split = transaction.Splits.AddSplit(0);
+            split.Amount = -100.00m;
+            split.Category = category;
+            split.Memo = "SqlServerStoredProcDatabaseTests Split";
+            transaction.OnInserted();
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadCategories(reloaded.Categories, reloaded);
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Split Account");
+            var foundTransaction = reloaded.Transactions.GetTransactionsFrom(reloadedAccount).First();
+            Assert.That(foundTransaction.IsSplit, Is.True);
+            Assert.That(foundTransaction.Splits.Count, Is.EqualTo(1));
+            var foundSplit = Enumerable.First<Split>(foundTransaction.Splits);
+            Assert.That(foundSplit.Memo, Is.EqualTo("SqlServerStoredProcDatabaseTests Split"));
+
+            foundSplit.Memo = "Updated split memo";
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCategories(afterUpdate.Categories, afterUpdate);
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Split Account");
+            var updatedTransaction = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount).First();
+            Assert.That(Enumerable.First<Split>(updatedTransaction.Splits).Memo, Is.EqualTo("Updated split memo"));
+
+            // Cascade-mark the splits as deleted too, mirroring what
+            // Transactions.RemoveTransaction does (Money.cs) -- Transaction.OnDelete()
+            // itself does NOT cascade to child Splits, so without this the split
+            // row is orphaned in the database once its owning transaction is deleted.
+            if (updatedTransaction.IsSplit)
+            {
+                updatedTransaction.Splits.RemoveAll();
+            }
+            updatedTransaction.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updatedTransaction);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            // GetOrCreateCategory("SqlServerStoredProcDatabaseTests:SplitCategory", ...) auto-created
+            // a "SqlServerStoredProcDatabaseTests" parent category too (Category.AddParents in Money.cs)
+            // -- delete both, or the parent is orphaned debris that collides with the next run's
+            // freshly-numbered local category ids.
+            var categoryToDelete = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests:SplitCategory");
+            var parentCategoryToDelete = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests");
+            categoryToDelete.OnDelete();
+            var categoriesToDelete = new Categories(afterUpdate);
+            categoriesToDelete.Add(categoryToDelete);
+            if (parentCategoryToDelete != null)
+            {
+                parentCategoryToDelete.OnDelete();
+                categoriesToDelete.Add(parentCategoryToDelete);
+            }
+            db.UpdateCategories(categoriesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Split Account"), Is.Null);
+        }
     }
 }

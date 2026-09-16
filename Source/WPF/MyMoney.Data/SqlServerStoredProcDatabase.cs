@@ -715,6 +715,51 @@ namespace Walkabout.Data
                     transactions.EndUpdate();
                 }
 
+                using (var command = new SqlCommand("dbo.Splits_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        long transactionId = reader.GetInt64(1);
+                        Transaction t = transactions.FindTransactionById(transactionId);
+                        if (t == null)
+                        {
+                            continue;
+                        }
+
+                        if (!t.IsSplit)
+                        {
+                            t.Splits = new Splits(t, t);
+                        }
+                        Split s = t.Splits.AddSplit(id);
+                        s.BatchMode = true;
+                        t.Splits.BeginUpdate(false);
+                        s.Amount = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            s.Category = money.Categories.FindCategoryById(reader.GetInt32(3));
+                        }
+                        s.Memo = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        if (!reader.IsDBNull(6))
+                        {
+                            s.Payee = money.Payees.FindPayeeAt(reader.GetInt32(6));
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            s.Flags = (SplitFlags)reader.GetInt32(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            s.BudgetBalanceDate = reader.GetDateTime(8);
+                        }
+                        t.Splits.EndUpdate();
+                        s.BatchMode = false;
+                        s.OnUpdated();
+                        t.OnUpdated();
+                    }
+                }
+
                 // Resolve transfers (mirrors SqlServerDatabase.ReadTransactions's third pass).
                 using (var command = new SqlCommand("dbo.Transactions_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
                 using (var reader = command.ExecuteReader())
@@ -771,6 +816,30 @@ namespace Walkabout.Data
                         }
                     }
                 }
+            }
+
+            // recompute state of Payee objects
+            foreach (Transaction t in transactions)
+            {
+                t.BatchMode = true;
+
+                Payee p = t.Payee;
+                if (p != null)
+                {
+                    // setup initial counts
+                    if (t.Category == null && t.Transfer == null && !t.IsSplit)
+                    {
+                        p.UncategorizedTransactions++;
+                        p.OnUpdated();
+                    }
+                    if ((t.Flags & TransactionFlags.Unaccepted) != 0)
+                    {
+                        p.UnacceptedTransactions++;
+                        p.OnUpdated();
+                    }
+                }
+
+                t.BatchMode = false;
             }
 
             transactions.FireChangeEvent(transactions, transactions, null, ChangeType.Reloaded);
@@ -844,6 +913,44 @@ namespace Walkabout.Data
                 t.OnUpdated();
             }
             transactions.RemoveDeleted();
+        }
+
+        public override void UpdateSplits(Splits splits)
+        {
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Split s in splits)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
+                        ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", (object)s.Memo ?? DBNull.Value),
+                        ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                        ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                        ("@BudgetBalanceDate", SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate))
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Splits_Update", parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.Splits_Insert", parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Splits_Delete", ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                    }
+                }
+            }
+
+            foreach (Split s in splits)
+            {
+                s.OnUpdated();
+            }
+            splits.RemoveDeleted();
         }
 
         /// <summary>
