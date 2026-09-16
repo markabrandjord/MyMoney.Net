@@ -741,6 +741,26 @@ namespace Walkabout.Data
                             s.Category = money.Categories.FindCategoryById(reader.GetInt32(3));
                         }
                         s.Memo = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        if (!reader.IsDBNull(5))
+                        {
+                            long tid = reader.GetInt64(5);
+                            if (tid != -1)
+                            {
+                                Transaction u = transactions.FindTransactionById(tid);
+                                if (u == null)
+                                {
+                                    errors.Add(new DataError(transactionId, id, "Other side of split transfer not found"));
+                                }
+                                else
+                                {
+                                    if (u.Transfer != null && (u.Transfer.Transaction != t || u.Transfer.Split != s))
+                                    {
+                                        errors.Add(new DataError(transactionId, id, "Duplicate transfer found"));
+                                    }
+                                    s.Transfer = new Transfer(tid, t, s, u);
+                                }
+                            }
+                        }
                         if (!reader.IsDBNull(6))
                         {
                             s.Payee = money.Payees.FindPayeeAt(reader.GetInt32(6));

@@ -395,7 +395,7 @@ namespace Walkabout.Tests
             account.OnInserted();
             db.UpdateAccounts(money.Accounts);
 
-            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTests:SplitCategory", CategoryType.Expense);
+            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTestsSplitCategory", CategoryType.Expense);
             category.OnInserted();
             db.UpdateCategories(money.Categories);
 
@@ -451,25 +451,17 @@ namespace Walkabout.Tests
             accountsToDelete.Add(afterUpdateAccount);
             db.UpdateAccounts(accountsToDelete);
 
-            // GetOrCreateCategory("SqlServerStoredProcDatabaseTests:SplitCategory", ...) auto-created
-            // a "SqlServerStoredProcDatabaseTests" parent category too (Category.AddParents in Money.cs)
-            // -- delete both, or the parent is orphaned debris that collides with the next run's
-            // freshly-numbered local category ids.
-            var categoryToDelete = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests:SplitCategory");
-            var parentCategoryToDelete = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests");
+            var categoryToDelete = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTestsSplitCategory");
             categoryToDelete.OnDelete();
             var categoriesToDelete = new Categories(afterUpdate);
             categoriesToDelete.Add(categoryToDelete);
-            if (parentCategoryToDelete != null)
-            {
-                parentCategoryToDelete.OnDelete();
-                categoriesToDelete.Add(parentCategoryToDelete);
-            }
             db.UpdateCategories(categoriesToDelete);
 
             var afterDelete = new MyMoney();
             db.ReadAccounts(afterDelete.Accounts, afterDelete);
             Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Split Account"), Is.Null);
+            db.ReadTransactions(afterDelete.Transactions, afterDelete);
+            Assert.That(afterDelete.Transactions.Count, Is.EqualTo(0));
         }
     }
 }
