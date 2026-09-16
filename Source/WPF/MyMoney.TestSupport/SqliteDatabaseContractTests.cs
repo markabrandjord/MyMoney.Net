@@ -1,4 +1,5 @@
 using System;
+using System.Data;
 using System.IO;
 using NUnit.Framework;
 using Walkabout.Data;
@@ -23,6 +24,16 @@ namespace Walkabout.TestSupport
             {
                 File.Delete(this.path);
             }
+        }
+
+        [Test]
+        public void Connect_EnablesWalModeAndBusyTimeout()
+        {
+            DataSet journalModeResult = this.Database.QueryDataSet("PRAGMA journal_mode;");
+            Assert.That(journalModeResult.Tables[0].Rows[0][0].ToString().ToLowerInvariant(), Is.EqualTo("wal"));
+
+            DataSet busyTimeoutResult = this.Database.QueryDataSet("PRAGMA busy_timeout;");
+            Assert.That(Convert.ToInt32(busyTimeoutResult.Tables[0].Rows[0][0]), Is.EqualTo(5000));
         }
     }
 }

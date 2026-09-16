@@ -139,6 +139,22 @@ namespace Walkabout.Data
                 {
                     pragmaCommand.ExecuteNonQuery();
                 }
+                // WAL mode: readers never block writers, writers never block readers - the
+                // opposite of the default rollback-journal mode, which serializes all access.
+                // busy_timeout: a second writer retries for up to this many milliseconds instead
+                // of failing immediately with SQLITE_BUSY. 5000ms is a starting default (not
+                // spec-mandated - a same-machine local agent contending with an interactive user
+                // should resolve well within this window; revisit if real contention testing
+                // shows it's too short or needlessly long). See
+                // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R3.
+                using (var walCommand = new SQLiteCommand("PRAGMA journal_mode=WAL;", this.sqliteConnection))
+                {
+                    walCommand.ExecuteNonQuery();
+                }
+                using (var busyTimeoutCommand = new SQLiteCommand("PRAGMA busy_timeout=5000;", this.sqliteConnection))
+                {
+                    busyTimeoutCommand.ExecuteNonQuery();
+                }
             }
             return this.sqliteConnection;
         }
