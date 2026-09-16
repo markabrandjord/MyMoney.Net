@@ -9,5 +9,5 @@ using System.Runtime.CompilerServices;
 [assembly: CLSCompliant(true)]
 
 // Lets UnitTests exercise internal schema-generation logic (e.g.
-// SqlDatabase.GetCreateTableScript) directly, without making it public API.
+// SqlServerDatabase.GetCreateTableScript) directly, without making it public API.
 [assembly: InternalsVisibleTo("UnitTests")]
