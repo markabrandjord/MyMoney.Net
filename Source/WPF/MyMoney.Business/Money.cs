@@ -2381,12 +2381,12 @@ namespace Walkabout.Data
             if (a.Id == -1)
             {
                 a.Id = this.NextAccount++;
+                a.OnInserted();
             }
             else if (this.NextAccount <= a.Id)
             {
                 this.NextAccount = a.Id;
             }
-            a.OnInserted();
             a.Parent = this;
             this.accounts[a.Id] = a;
             if (!string.IsNullOrWhiteSpace(a.Name))
@@ -3942,7 +3942,6 @@ namespace Walkabout.Data
                     this.nextAlias = a.Id + 1;
                 }
                 a.Parent = this;
-                a.OnInserted();
                 this.aliases[a.Id] = a;
             }
 
@@ -4623,7 +4622,6 @@ namespace Walkabout.Data
                     this.nextCurrency = a.Id + 1;
                 }
                 a.Parent = this;
-                a.OnInserted();
                 this.currencies[a.Id] = a;
 
 
