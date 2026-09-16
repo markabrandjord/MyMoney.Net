@@ -1056,7 +1056,7 @@ namespace Walkabout.Data
         /// (for dates) the same whole-second truncation as the SQL-text versions, so persisted
         /// values are unchanged - only how they reach the database changes.
         /// </summary>
-        private static object DBDateTimeParam(DateTime dt)
+        internal static object DBDateTimeParam(DateTime dt)
         {
             if (dt == DateTime.MinValue)
             {
@@ -1065,7 +1065,7 @@ namespace Walkabout.Data
             return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Kind);
         }
 
-        private static object DBNullableDateTimeParam(DateTime? ndt)
+        internal static object DBNullableDateTimeParam(DateTime? ndt)
         {
             if (!ndt.HasValue)
             {
@@ -1074,7 +1074,7 @@ namespace Walkabout.Data
             return DBDateTimeParam(ndt.Value);
         }
 
-        private static object DBGuidParam(SqlGuid guid)
+        internal static object DBGuidParam(SqlGuid guid)
         {
             return guid.IsNull ? (object)DBNull.Value : guid.ToString();
         }

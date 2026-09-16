@@ -1,3 +1,5 @@
+using System;
+using System.Data;
 using Microsoft.Data.SqlClient;
 using Walkabout.Utilities;
 
@@ -126,14 +128,26 @@ namespace Walkabout.Data
             payees.RemoveDeleted();
         }
 
-        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        /// <summary>
+        /// Shared ADO.NET helper for every entity's stored-proc CRUD calls
+        /// (see the design spec for issue #22). Keeps each entity's
+        /// Read/Update override thin: build the parameter list, call this.
+        /// </summary>
+        private static void ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)
         {
-            using (var command = new SqlCommand(procName, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+            using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
             {
-                command.Parameters.AddWithValue("@Id", p.Id);
-                command.Parameters.AddWithValue("@Name", (object)p.Name ?? System.DBNull.Value);
+                foreach (var (name, value) in parameters)
+                {
+                    command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                }
                 command.ExecuteNonQuery();
             }
+        }
+
+        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        {
+            ExecuteProc(connection, procName, ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value));
         }
     }
 }

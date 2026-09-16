@@ -91,6 +91,27 @@ namespace Walkabout.Data
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Payees_AccessProcs.sql")));
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
 
+            Console.WriteLine("Creating schema for Accounts/Categories/Currencies/Securities/StockSplits/Aliases/Transactions/Splits/Investments as 'MyMoneyAdmin'...");
+            var adminDatabase = new SqlServerDatabase
+            {
+                Server = server,
+                UserId = "MyMoneyAdmin",
+                Password = adminPassword,
+                DatabasePath = databaseName
+            };
+            adminDatabase.LazyCreateTables();
+
+            Console.WriteLine("Deploying issue #22 access procedures as 'MyMoneyAdmin'...");
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Accounts_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Categories_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Currencies_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Securities_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "StockSplits_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Aliases_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Transactions_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Splits_AccessProcs.sql")));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Investments_AccessProcs.sql")));
+
             // Credentials are written only after every deployment step has
             // succeeded -- writing them earlier (e.g. right after the sa-run
             // bootstrap script) would let DataEngineStartup.DatabaseExists
