@@ -158,9 +158,9 @@ git commit -m "Document -m:1 as required for dotnet test when SQL Server env var
 ### Task 3: Add `RowVersion`/`Version` column emission to the shared schema generator
 
 **Files:**
-- Modify: `Source/WPF/MyMoney.Business/Mapping.cs:23-76` (`TableMapping`)
 - Modify: `Source/WPF/MyMoney.Data/SqlDatabase.cs:324-343` (`LazyCreateTables`), `:345-378`
   (`GetCreateTableScript`), `:380-` (`CreateOrUpdateTable`)
+- Modify: `Source/WPF/MyMoney.Data/Properties/AssemblyInfo.cs` (add `InternalsVisibleTo`)
 - Modify: `Source/WPF/MyMoney.Data/SqliteDatabase.cs:552-` (`CreateOrUpdateTable`), and its second
   call site at `:651`
 - Test: `Source/WPF/UnitTests/SqlMappingTests.cs`
