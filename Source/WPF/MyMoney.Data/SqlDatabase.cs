@@ -2864,7 +2864,7 @@ namespace Walkabout.Data
 
         #region TABLE CATEGORIES
         // Returns list of errors found in database.
-        public ArrayList ReadTransactions(Transactions transactions, MyMoney money)
+        public virtual ArrayList ReadTransactions(Transactions transactions, MyMoney money)
         {
             transactions.Clear();
 
@@ -3084,7 +3084,7 @@ namespace Walkabout.Data
             return errors;
         }
 
-        public void UpdateTransactions(Transactions transactions)
+        public virtual void UpdateTransactions(Transactions transactions)
         {
             if (transactions.Count == 0)
             {

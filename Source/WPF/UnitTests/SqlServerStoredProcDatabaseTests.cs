@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using Walkabout.Data;
 
@@ -326,6 +327,60 @@ namespace Walkabout.Tests
             var afterDelete = new MyMoney();
             db.ReadAliases(afterDelete.Aliases, afterDelete);
             Assert.That(afterDelete.Aliases.FindAlias("SqlServerStoredProcDatabaseTests Alias Pattern"), Is.Null);
+        }
+
+        [Test]
+        public void InsertUpdateDeleteTransaction_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests Transaction Account");
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -42.50m;
+            transaction.Memo = "SqlServerStoredProcDatabaseTests Transaction";
+            money.Transactions.AddTransaction(transaction);
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Transaction Account");
+            var found = reloaded.Transactions.GetTransactionsFrom(reloadedAccount)
+                .FirstOrDefault(t => t.Memo == "SqlServerStoredProcDatabaseTests Transaction");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Amount, Is.EqualTo(-42.50m));
+
+            found.Amount = -50.00m;
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Transaction Account");
+            var updated = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount)
+                .FirstOrDefault(t => t.Memo == "SqlServerStoredProcDatabaseTests Transaction");
+            Assert.That(updated.Amount, Is.EqualTo(-50.00m));
+
+            updated.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updated);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Transaction Account"), Is.Null);
         }
     }
 }

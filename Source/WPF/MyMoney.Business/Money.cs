@@ -9355,11 +9355,20 @@ namespace Walkabout.Data
                 }
 
                 this.transactions[t.Id] = t;
-                t.OnInserted();
 
-                if (t.Investment != null)
+                // Mirrors Accounts.AddAccount's guard: don't clobber a ChangeType the
+                // caller already set deliberately (e.g. OnDelete(), when re-adding an
+                // existing transaction to a scratch Transactions collection just to
+                // push a deletion through Update*). Only a genuinely fresh transaction
+                // should be forced to Inserted here.
+                if (!t.IsDeleted)
                 {
-                    t.Investment.OnInserted();
+                    t.OnInserted();
+
+                    if (t.Investment != null)
+                    {
+                        t.Investment.OnInserted();
+                    }
                 }
             }
             this.FireChangeEvent(this, t, null, ChangeType.Inserted);

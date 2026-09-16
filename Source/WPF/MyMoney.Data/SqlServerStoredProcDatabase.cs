@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Data;
 using System.Data.SqlTypes;
 using Microsoft.Data.SqlClient;
@@ -58,6 +59,7 @@ namespace Walkabout.Data
                 this.ReadAliases(money.Aliases, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
+                this.ReadTransactions(money.Transactions, money);
                 this.ReadCurrencies(money.Currencies, money);
                 this.ReadSecurities(money.Securities, money);
                 this.ReadStockSplits(money.StockSplits, money);
@@ -646,6 +648,187 @@ namespace Walkabout.Data
                 a.OnUpdated();
             }
             aliases.RemoveDeleted();
+        }
+
+        public override ArrayList ReadTransactions(Transactions transactions, MyMoney money)
+        {
+            transactions.Clear();
+            ArrayList errors = new ArrayList();
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.Transactions_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    transactions.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        Transaction t = transactions.AddTransaction(id);
+                        t.BatchMode = true;
+                        t.Number = reader.IsDBNull(1) ? null : reader.GetString(1).TrimEnd();
+                        t.Account = money.Accounts.FindAccountAt(reader.GetInt32(4));
+                        if (!reader.IsDBNull(2))
+                        {
+                            t.Date = reader.GetDateTime(2);
+                        }
+                        t.Amount = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        t.Status = (TransactionStatus)reader.GetInt32(5);
+                        t.Memo = reader.IsDBNull(6) ? null : reader.GetString(6);
+                        if (!reader.IsDBNull(7))
+                        {
+                            t.Payee = money.Payees.FindPayeeAt(reader.GetInt32(7));
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            t.Category = money.Categories.FindCategoryById(reader.GetInt32(8));
+                        }
+                        t.FITID = reader.IsDBNull(9) ? null : reader.GetString(9).TrimEnd();
+                        if (!reader.IsDBNull(10))
+                        {
+                            t.SalesTax = reader.GetDecimal(10);
+                        }
+                        if (!reader.IsDBNull(11))
+                        {
+                            t.Flags = (TransactionFlags)reader.GetInt32(11);
+                        }
+                        if (!reader.IsDBNull(12))
+                        {
+                            t.ReconciledDate = reader.GetDateTime(12);
+                        }
+                        if (!reader.IsDBNull(13))
+                        {
+                            t.BudgetBalanceDate = reader.GetDateTime(13);
+                        }
+                        if (!reader.IsDBNull(14))
+                        {
+                            t.MergeDate = reader.GetDateTime(14);
+                        }
+                        if (!reader.IsDBNull(15))
+                        {
+                            t.OriginalPayee = reader.GetString(15);
+                        }
+                        t.BatchMode = false;
+                        t.OnUpdated();
+                    }
+                    transactions.EndUpdate();
+                }
+
+                // Resolve transfers (mirrors SqlServerDatabase.ReadTransactions's third pass).
+                using (var command = new SqlCommand("dbo.Transactions_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        long transferTarget = reader.IsDBNull(16) ? -1 : reader.GetInt64(16);
+                        if (transferTarget == -1)
+                        {
+                            continue;
+                        }
+
+                        Transaction t = transactions.FindTransactionById(id);
+                        Transaction u = transactions.FindTransactionById(transferTarget);
+                        if (u == null)
+                        {
+                            errors.Add(new DataError(id, "Transaction is marked as a transfer, but other side of transfer was not found"));
+                            continue;
+                        }
+
+                        int sid = reader.IsDBNull(17) ? -1 : reader.GetInt32(17);
+                        if (sid == -1)
+                        {
+                            t.Transfer = new Transfer(id, t, u);
+                        }
+                        else
+                        {
+                            Split s = u.FindSplit(sid);
+                            if (s == null)
+                            {
+                                errors.Add(new DataError(id, sid, "Transaction contains a split marked as a transfer, but other side of transfer was not found"));
+                            }
+                            else
+                            {
+                                t.Transfer = new Transfer(id, t, u, s);
+                            }
+                        }
+                        t.OnUpdated();
+                    }
+                }
+            }
+
+            transactions.FireChangeEvent(transactions, transactions, null, ChangeType.Reloaded);
+            return errors;
+        }
+
+        public override void UpdateTransactions(Transactions transactions)
+        {
+            if (transactions.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                foreach (Transaction t in transactions)
+                {
+                    if (t.Account == null)
+                    {
+                        continue;
+                    }
+
+                    connection.Open();
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", t.Id), ("@Number", (object)t.Number ?? DBNull.Value), ("@Account", t.Account.Id),
+                        ("@Date", SqlServerDatabase.DBDateTimeParam(t.Date)), ("@Amount", t.Amount), ("@Status", (int)t.Status),
+                        ("@Memo", (object)t.Memo ?? DBNull.Value), ("@Payee", t.Payee != null ? t.Payee.Id : -1),
+                        ("@Category", t.Category != null ? t.Category.Id : -1),
+                        ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                        ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                        ("@FITID", (object)t.FITID ?? DBNull.Value), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
+                        ("@ReconciledDate", SqlServerDatabase.DBNullableDateTimeParam(t.ReconciledDate)),
+                        ("@BudgetBalanceDate", SqlServerDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                        ("@MergeDate", SqlServerDatabase.DBNullableDateTimeParam(t.MergeDate)),
+                        ("@OriginalPayee", (object)t.OriginalPayee ?? DBNull.Value)
+                    };
+
+                    if (t.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Transactions_Update", parameters);
+                    }
+                    else if (t.IsInserted)
+                    {
+                        if (t.Id == -1)
+                        {
+                            connection.Close();
+                            continue;
+                        }
+                        ExecuteProc(connection, "dbo.Transactions_Insert", parameters);
+                    }
+                    else if (t.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Transactions_Delete", ("@Id", t.Id));
+                    }
+                    connection.Close();
+
+                    if (t.Splits != null)
+                    {
+                        this.UpdateSplits(t.Splits);
+                    }
+                    if (t.Investment != null)
+                    {
+                        this.UpdateInvestment(t.Investment);
+                    }
+                }
+            }
+
+            foreach (Transaction t in transactions)
+            {
+                t.OnUpdated();
+            }
+            transactions.RemoveDeleted();
         }
 
         /// <summary>
