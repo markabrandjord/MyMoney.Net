@@ -1023,7 +1023,7 @@ namespace Walkabout.Data
                         {
                             s.Date = reader.GetDateTime(1);
                         }
-                        s.Security = money.Securities.FindSecurityAt(reader.GetInt32(2));
+                        s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
                         s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
                         s.OnUpdated();
@@ -1048,14 +1048,14 @@ namespace Walkabout.Data
                 {
                     if (s.IsChanged || s.IsInserted)
                     {
-                        if (s.Security == null || s.Date == DateTime.MinValue)
+                        if (s.Date == DateTime.MinValue)
                         {
                             continue;
                         }
 
                         (string Name, object Value)[] parameters =
                         {
-                            ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
+                            ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
                             ("@Numerator", s.Numerator), ("@Denominator", s.Denominator)
                         };
 
@@ -1353,7 +1353,7 @@ namespace Walkabout.Data
                         }
 
                         Investment i = t.GetOrCreateInvestment();
-                        i.Security = money.Securities.FindSecurityAt(reader.GetInt32(1));
+                        i.Security = reader.IsDBNull(1) ? null : money.Securities.FindSecurityAt(reader.GetInt32(1));
                         i.UnitPrice = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
                         i.Units = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         i.Commission = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
@@ -1539,7 +1539,7 @@ namespace Walkabout.Data
                 connection.Open();
                 (string Name, object Value)[] parameters =
                 {
-                    ("@Id", i.Id), ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                    ("@Id", i.Id), ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice),
                     ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
                     ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
                     ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load)
