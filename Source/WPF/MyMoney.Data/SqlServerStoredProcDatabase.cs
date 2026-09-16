@@ -360,7 +360,7 @@ namespace Walkabout.Data
                     {
                         int id = reader.GetInt32(0);
                         Currency s = currencies.AddCurrency(id);
-                        s.Symbol = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        s.Symbol = reader.IsDBNull(1) ? null : reader.GetString(1).TrimEnd();
                         s.Name = reader.IsDBNull(2) ? null : reader.GetString(2);
                         if (!reader.IsDBNull(3))
                         {
