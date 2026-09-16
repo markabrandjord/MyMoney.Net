@@ -55,8 +55,17 @@ jobs:
           "git        : $(git --version)"
           "runner     : $env:RUNNER_NAME on $env:COMPUTERNAME"
 
-      - name: Build
+      - name: Build (Debug)
         run: dotnet build Source/WPF/MyMoney.sln -m:1
+
+      # Release-only compile breaks are real (conditional-compilation
+      # directives, optimization-dependent code) and the retired
+      # dotnet-desktop.yml workflow caught this config -- so verify it still
+      # builds. Not re-running the test suite against Release: the tests
+      # exercise logic, not the optimizer, and doubling every test run to
+      # catch a config-specific compile error is the wrong trade.
+      - name: Build (Release)
+        run: dotnet build Source/WPF/MyMoney.sln -c Release -m:1
 
       # UnitTests and MyMoney.TestSupport only -- see docs/dev/index.md.
       # ScenarioTest and UITests are excluded: both drive real Windows UI
