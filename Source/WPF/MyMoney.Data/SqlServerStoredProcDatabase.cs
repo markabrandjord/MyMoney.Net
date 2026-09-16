@@ -713,13 +713,13 @@ namespace Walkabout.Data
                         ("@Id", a.Id), ("@AccountId", (object)a.AccountId ?? DBNull.Value),
                         ("@OfxAccountId", (object)a.OfxAccountId ?? DBNull.Value), ("@Name", (object)a.Name ?? DBNull.Value),
                         ("@Type", (int)a.Type), ("@Description", (object)a.Description ?? DBNull.Value),
-                        ("@OnlineAccount", a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                        ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
                         ("@OpeningBalance", a.OpeningBalance), ("@LastSync", SqlServerDatabase.DBDateTimeParam(a.LastSync)),
                         ("@LastBalance", SqlServerDatabase.DBDateTimeParam(a.LastBalance)), ("@SyncGuid", SqlServerDatabase.DBGuidParam(a.SyncGuid)),
                         ("@Flags", (int)a.Flags), ("@Currency", (object)a.Currency ?? DBNull.Value),
                         ("@WebSite", (object)a.WebSite ?? DBNull.Value), ("@ReconcileWarning", a.ReconcileWarning),
-                        ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
-                        ("@CategoryIdForInterest", a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id)
+                        ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                        ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id)
                     };
 
                     if (a.IsChanged)
