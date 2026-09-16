@@ -441,7 +441,7 @@ namespace Walkabout.Data
                         {
                             s.LastPrice = reader.GetDecimal(4);
                         }
-                        s.CuspId = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        s.CuspId = reader.IsDBNull(5) ? null : reader.GetString(5).TrimEnd();
                         if (!reader.IsDBNull(6))
                         {
                             s.SecurityType = (SecurityType)reader.GetInt32(6);
