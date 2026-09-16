@@ -323,39 +323,24 @@ namespace Walkabout.Data
                         ("@Color", (object)c.Color ?? DBNull.Value), ("@TaxRefNum", c.TaxRefNum)
                     };
 
-                    if (c.IsDeleted)
+                    if (c.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Categories_Delete", ("@Id", c.Id));
+                        ExecuteProc(connection, "dbo.Categories_Update", parameters);
                     }
                     else if (c.IsInserted)
                     {
-                        // For inserted categories, try to insert. If the category already exists
-                        // (e.g., a parent category created in a previous test run), treat it as
-                        // an update instead. This handles the case where the same category
-                        // hierarchy is recreated multiple times without cleanup.
-                        try
-                        {
-                            ExecuteProc(connection, "dbo.Categories_Insert", parameters);
-                        }
-                        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2627)
-                        {
-                            // Primary key violation - category already exists, update it instead
-                            ExecuteProc(connection, "dbo.Categories_Update", parameters);
-                        }
+                        ExecuteProc(connection, "dbo.Categories_Insert", parameters);
                     }
-                    else if (c.IsChanged)
+                    else if (c.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Categories_Update", parameters);
+                        ExecuteProc(connection, "dbo.Categories_Delete", ("@Id", c.Id));
                     }
                 }
             }
 
             foreach (Category c in categories)
             {
-                if (!c.IsDeleted)
-                {
-                    c.OnUpdated();
-                }
+                c.OnUpdated();
             }
             categories.RemoveDeleted();
         }

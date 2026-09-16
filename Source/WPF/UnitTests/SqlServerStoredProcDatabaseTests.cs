@@ -107,7 +107,7 @@ namespace Walkabout.Tests
             var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
 
             var money = new MyMoney();
-            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTests:Category", CategoryType.Expense);
+            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTestsCategory", CategoryType.Expense);
             category.Description = "Test category";
             category.Budget = 250.00m;
             category.OnInserted();
@@ -116,7 +116,7 @@ namespace Walkabout.Tests
 
             var reloaded = new MyMoney();
             db.ReadCategories(reloaded.Categories, reloaded);
-            var found = reloaded.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category");
+            var found = reloaded.Categories.FindCategory("SqlServerStoredProcDatabaseTestsCategory");
             Assert.That(found, Is.Not.Null);
             Assert.That(found.Description, Is.EqualTo("Test category"));
             Assert.That(found.Budget, Is.EqualTo(250.00m));
@@ -126,7 +126,7 @@ namespace Walkabout.Tests
 
             var afterUpdate = new MyMoney();
             db.ReadCategories(afterUpdate.Categories, afterUpdate);
-            var updated = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category");
+            var updated = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTestsCategory");
             Assert.That(updated.Description, Is.EqualTo("Updated description"));
 
             updated.OnDelete();
@@ -136,7 +136,7 @@ namespace Walkabout.Tests
 
             var afterDelete = new MyMoney();
             db.ReadCategories(afterDelete.Categories, afterDelete);
-            Assert.That(afterDelete.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category"), Is.Null);
+            Assert.That(afterDelete.Categories.FindCategory("SqlServerStoredProcDatabaseTestsCategory"), Is.Null);
         }
     }
 }
