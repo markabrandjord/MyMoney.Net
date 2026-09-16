@@ -88,3 +88,19 @@ scenario tests, project dependency diagram). Quick reference:
   checkout as usual). Confirmed via `dotnet build`/`dotnet test` giving
   identical results before and after — the fix only touched line endings and
   genuinely merged content, not behavior.
+
+  **Resolved 2026-09-16** (PR #35, commit `5e703cd`): the whole repo was
+  renormalized in one pass via `git add --renormalize .`, which re-runs the
+  clean filter against every tracked file's blob and restages any that don't
+  match what the effective attributes say they should be — fixing every
+  leftover CRLF-native blob in one content-preserving commit (verified via
+  `git diff --cached -b --ignore-space-at-eol` being empty, and
+  `dotnet build`/`dotnet test` giving identical results before and after).
+  Any local checkout still showing files as perpetually "modified" against a
+  clean `master` after this point is stale local drift from before this fix
+  landed, not a live problem — `git reset --hard origin/master` clears it (a
+  plain `git checkout -- .` or `git reset --hard HEAD` can fail to, if the
+  working tree was checked out from a pre-renormalization commit; reset
+  straight to the post-renormalization target instead of the old `HEAD`).
+  New branches created after this point, and fresh clones, should not hit
+  this class of issue at all going forward.
