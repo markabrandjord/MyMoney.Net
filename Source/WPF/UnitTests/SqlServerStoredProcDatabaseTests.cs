@@ -744,5 +744,70 @@ namespace Walkabout.Tests
             accountsToDelete.Add(cleanupAccount);
             db.UpdateAccounts(accountsToDelete);
         }
+
+        [Test]
+        public void InsertUpdateDeleteRentBuildingAndUnit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var building = new RentBuilding(money.Buildings)
+            {
+                Id = -1,
+                Name = "SqlServerStoredProcDatabaseTests Building",
+                Address = "123 Test St",
+                PurchasedDate = new DateTime(2020, 1, 1),
+                PurchasedPrice = 200000m,
+                LandValue = 50000m,
+                EstimatedValue = 250000m
+            };
+            money.Buildings.AddRentBuilding(building);
+            building.OnInserted();
+
+            var unit = new RentUnit(money.Buildings.Units) { Id = 999007, Building = building.Id, Name = "Unit A", Renter = "Test Renter" };
+            money.Buildings.Units.AddRentUnit(unit);
+            unit.OnInserted();
+
+            db.UpdateRentUnits(money.Buildings.Units);
+            db.UpdateRentBuildings(money.Buildings);
+
+            var reloaded = new MyMoney();
+            db.ReadRentBuildings(reloaded.Buildings, reloaded);
+            var foundBuilding = reloaded.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building");
+            Assert.That(foundBuilding, Is.Not.Null);
+            Assert.That(foundBuilding.Address, Is.EqualTo("123 Test St"));
+            Assert.That(foundBuilding.Units.Count, Is.EqualTo(1));
+            var foundUnit = reloaded.Buildings.Units.Get(999007);
+            Assert.That(foundUnit, Is.Not.Null);
+            Assert.That(foundUnit.Name, Is.EqualTo("Unit A"));
+
+            foundBuilding.Address = "456 Updated Ave";
+            foundUnit.Renter = "Updated Renter";
+            db.UpdateRentUnits(reloaded.Buildings.Units);
+            db.UpdateRentBuildings(reloaded.Buildings);
+
+            var afterUpdate = new MyMoney();
+            db.ReadRentBuildings(afterUpdate.Buildings, afterUpdate);
+            var updatedBuilding = afterUpdate.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building");
+            Assert.That(updatedBuilding.Address, Is.EqualTo("456 Updated Ave"));
+            var updatedUnit = afterUpdate.Buildings.Units.Get(999007);
+            Assert.That(updatedUnit.Renter, Is.EqualTo("Updated Renter"));
+
+            updatedUnit.OnDelete();
+            var unitsToDelete = new RentUnits(afterUpdate);
+            unitsToDelete.Add(updatedUnit);
+            db.UpdateRentUnits(unitsToDelete);
+
+            updatedBuilding.OnDelete();
+            var buildingsToDelete = new RentBuildings(afterUpdate);
+            buildingsToDelete.AddRentBuilding(updatedBuilding);
+            db.UpdateRentBuildings(buildingsToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadRentBuildings(afterDelete.Buildings, afterDelete);
+            Assert.That(afterDelete.Buildings.FindByName("SqlServerStoredProcDatabaseTests Building"), Is.Null);
+            Assert.That(afterDelete.Buildings.Units.Get(999007), Is.Null);
+        }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Data;
 using System.Data.SqlTypes;
+using System.Linq;
 using Microsoft.Data.SqlClient;
 using Walkabout.Utilities;
 
@@ -361,6 +362,169 @@ namespace Walkabout.Data
             loans.RemoveDeleted();
         }
 
+        public override void ReadRentUnits(RentUnits collection, MyMoney money)
+        {
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.RentUnits_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        RentUnit r = new RentUnit(collection);
+                        r.Id = reader.GetInt32(0);
+                        r.Building = reader.GetInt32(1);
+                        r.Name = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        r.Renter = reader.IsDBNull(3) ? null : reader.GetString(3);
+                        r.Note = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        collection.AddRentUnit(r);
+                        r.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+        }
+
+        public override void UpdateRentUnits(RentUnits units)
+        {
+            if (units.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (RentUnit x in units)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", x.Id), ("@Building", x.Building), ("@Name", (object)x.Name ?? DBNull.Value),
+                        ("@Renter", (object)x.Renter ?? DBNull.Value), ("@Note", (object)x.Note ?? DBNull.Value)
+                    };
+
+                    if (x.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Update", parameters);
+                    }
+                    else if (x.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Insert", parameters);
+                    }
+                    else if (x.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.RentUnits_Delete", ("@Id", x.Id), ("@Building", x.Building));
+                    }
+                }
+            }
+
+            foreach (RentUnit x in units)
+            {
+                x.OnUpdated();
+            }
+            units.RemoveDeleted();
+        }
+
+        public override void ReadRentBuildings(RentBuildings collection, MyMoney money)
+        {
+            this.ReadRentUnits(collection.Units, money);
+
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.RentBuildings_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        RentBuilding r = new RentBuilding(collection);
+                        r.Id = reader.GetInt32(0);
+                        r.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        r.Address = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            r.PurchasedDate = reader.GetDateTime(3);
+                        }
+                        r.PurchasedPrice = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        r.LandValue = reader.IsDBNull(5) ? 0 : reader.GetDecimal(5);
+                        r.EstimatedValue = reader.IsDBNull(6) ? 0 : reader.GetDecimal(6);
+                        r.CategoryForIncome = reader.IsDBNull(7) ? -1 : reader.GetInt32(7);
+                        r.CategoryForTaxes = reader.IsDBNull(8) ? -1 : reader.GetInt32(8);
+                        r.CategoryForInterest = reader.IsDBNull(9) ? -1 : reader.GetInt32(9);
+                        r.CategoryForRepairs = reader.IsDBNull(10) ? -1 : reader.GetInt32(10);
+                        r.CategoryForMaintenance = reader.IsDBNull(11) ? -1 : reader.GetInt32(11);
+                        r.CategoryForManagement = reader.IsDBNull(12) ? -1 : reader.GetInt32(12);
+                        r.OwnershipName1 = reader.IsDBNull(13) ? null : reader.GetString(13);
+                        r.OwnershipName2 = reader.IsDBNull(14) ? null : reader.GetString(14);
+                        r.OwnershipPercentage1 = reader.IsDBNull(15) ? 0 : reader.GetDecimal(15);
+                        r.OwnershipPercentage2 = reader.IsDBNull(16) ? 0 : reader.GetDecimal(16);
+                        r.Note = reader.IsDBNull(17) ? null : reader.GetString(17);
+
+                        foreach (var unit in money.Buildings.Units.GetList().Where(x => x.Building == r.Id).OrderBy(x => x.Id))
+                        {
+                            r.Units.Add(unit);
+                        }
+
+                        collection.AddRentBuilding(r);
+                        r.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+        }
+
+        public override void UpdateRentBuildings(RentBuildings buildings)
+        {
+            if (buildings.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (RentBuilding p in buildings)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value), ("@Address", (object)p.Address ?? DBNull.Value),
+                        ("@PurchasedDate", SqlServerDatabase.DBDateTimeParam(p.PurchasedDate)), ("@PurchasedPrice", p.PurchasedPrice),
+                        ("@LandValue", p.LandValue), ("@EstimatedValue", p.EstimatedValue),
+                        ("@CategoryForIncome", p.CategoryForIncome), ("@CategoryForTaxes", p.CategoryForTaxes),
+                        ("@CategoryForInterest", p.CategoryForInterest), ("@CategoryForRepairs", p.CategoryForRepairs),
+                        ("@CategoryForMaintenance", p.CategoryForMaintenance), ("@CategoryForManagement", p.CategoryForManagement),
+                        ("@OwnershipName1", (object)p.OwnershipName1 ?? DBNull.Value), ("@OwnershipName2", (object)p.OwnershipName2 ?? DBNull.Value),
+                        ("@OwnershipPercentage1", p.OwnershipPercentage1), ("@OwnershipPercentage2", p.OwnershipPercentage2),
+                        ("@Note", (object)p.Note ?? DBNull.Value)
+                    };
+
+                    if (p.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Update", parameters);
+                    }
+                    else if (p.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Insert", parameters);
+                    }
+                    else if (p.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.RentBuildings_Delete", ("@Id", p.Id));
+                    }
+                }
+            }
+
+            foreach (RentBuilding p in buildings)
+            {
+                p.OnUpdated();
+            }
+            buildings.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -394,6 +558,7 @@ namespace Walkabout.Data
                 this.ReadTransactions(money.Transactions, money);
                 this.ReadTransactionExtras(money.TransactionExtras, money);
                 this.ReadLoanPayments(money.LoanPayments, money);
+                this.ReadRentBuildings(money.Buildings, money);
             }
             finally
             {
