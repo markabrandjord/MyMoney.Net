@@ -1313,7 +1313,7 @@ namespace Walkabout.Data
 
         #region TABLE ONLINE ACCCOUNTS
 
-        public void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
+        public virtual void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
         {
             onlineAccounts.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Name,Institution,OFX,FID,UserId,Password,BankId,BranchId,BrokerId,OfxVersion,LogoUrl,AppId,AppVersion,ClientUid,UserCred1,UserCred2,AuthToken,AccessKey,UserKey,UserKeyExpireDate FROM OnlineAccounts");
@@ -1354,7 +1354,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateOnlineAccounts(OnlineAccounts accounts)
+        public virtual void UpdateOnlineAccounts(OnlineAccounts accounts)
         {
             if (accounts.Count == 0)
             {
@@ -1531,7 +1531,7 @@ namespace Walkabout.Data
         }
 
 
-        private void ReadAccountAliases(AccountAliases accountAliases, MyMoney money)
+        public virtual void ReadAccountAliases(AccountAliases accountAliases, MyMoney money)
         {
             IDataReader reader = this.ExecuteReader("SELECT Id,Pattern,AccountId,Flags FROM AccountAliases");
             accountAliases.BeginUpdate(false);
@@ -1561,7 +1561,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        private void ReadTransactionExtras(TransactionExtras extras, MyMoney money)
+        public virtual void ReadTransactionExtras(TransactionExtras extras, MyMoney money)
         {
             IDataReader reader = this.ExecuteReader("SELECT [Id],[Transaction],[TaxYear],[TaxDate] FROM TransactionExtras");
             extras.BeginUpdate(false);
@@ -1737,7 +1737,7 @@ namespace Walkabout.Data
             aliases.RemoveDeleted();
         }
 
-        private void UpdateAccountAliases(AccountAliases accountAliases)
+        public virtual void UpdateAccountAliases(AccountAliases accountAliases)
         {
             if (accountAliases.Count == 0)
             {
@@ -1811,7 +1811,7 @@ namespace Walkabout.Data
         }
 
 
-        private void UpdateTransactionExtras(TransactionExtras extras)
+        public virtual void UpdateTransactionExtras(TransactionExtras extras)
         {
             if (extras.Count == 0)
             {
@@ -1910,7 +1910,7 @@ namespace Walkabout.Data
 
         #region TABLE RENT BUILDING
 
-        public void ReadRentBuildings(RentBuildings collection, MyMoney money)
+        public virtual void ReadRentBuildings(RentBuildings collection, MyMoney money)
         {
             this.ReadRentUnits(collection.Units, money);
 
@@ -1956,7 +1956,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateRentBuildings(RentBuildings buildings)
+        public virtual void UpdateRentBuildings(RentBuildings buildings)
         {
             if (buildings.Count == 0)
             {
@@ -2110,7 +2110,7 @@ namespace Walkabout.Data
 
         #region TABLE UNITS
 
-        public void ReadRentUnits(RentUnits collection, MyMoney money)
+        public virtual void ReadRentUnits(RentUnits collection, MyMoney money)
         {
             collection.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Building,Name,Renter,Note FROM RentUnits");
@@ -2133,7 +2133,7 @@ namespace Walkabout.Data
         }
 
 
-        public void UpdateRentUnits(RentUnits units)
+        public virtual void UpdateRentUnits(RentUnits units)
         {
             if (units.Count == 0)
             {
@@ -2213,7 +2213,7 @@ namespace Walkabout.Data
 
         #region TABLE LOANS
 
-        public void ReadLoanPayments(LoanPayments collection, MyMoney money)
+        public virtual void ReadLoanPayments(LoanPayments collection, MyMoney money)
         {
             collection.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id, AccountId,Date,Principal,Interest,Memo FROM LoanPayments");
@@ -2246,7 +2246,7 @@ namespace Walkabout.Data
             }
         }
 
-        public void UpdateLoanPayments(LoanPayments loans)
+        public virtual void UpdateLoanPayments(LoanPayments loans)
         {
             if (loans.Count == 0)
             {
