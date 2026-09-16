@@ -92,14 +92,12 @@ namespace Walkabout.Data
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
 
             Console.WriteLine("Creating schema for Accounts/Categories/Currencies/Securities/StockSplits/Aliases/Transactions/Splits/Investments as 'MyMoneyAdmin'...");
-            var adminDatabase = new SqlServerDatabase
+            var adminDatabase = new SqlServerStoredProcDatabase
             {
-                Server = server,
-                UserId = "MyMoneyAdmin",
-                Password = adminPassword,
-                DatabasePath = databaseName
+                ConnectionStringOverride = adminBuilder.ConnectionString
             };
             adminDatabase.LazyCreateTables();
+            adminDatabase.Disconnect();
 
             Console.WriteLine("Deploying issue #22 access procedures as 'MyMoneyAdmin'...");
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Accounts_AccessProcs.sql")));
