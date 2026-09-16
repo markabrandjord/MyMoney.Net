@@ -328,6 +328,7 @@ namespace Walkabout.Data
             // (MyMoney.Data) assembly -- this used to be "this.GetType().Assembly"
             // back when everything was one assembly, which silently found zero
             // mapped types after the Money.cs extraction (Task 1) split them out.
+            List<TableMapping> mappings = new List<TableMapping>();
             foreach (Type t in typeof(MyMoney).Assembly.GetTypes())
             {
                 object[] attrs = t.GetCustomAttributes(typeof(TableMapping), false);
@@ -338,6 +339,25 @@ namespace Walkabout.Data
                     mapping.ObjectType = t;
                     this.tableNames.Add(mapping.TableName);
                     this.CreateOrUpdateTable(mapping);
+                    mappings.Add(mapping);
+                }
+            }
+
+            // Real SQL Server is DDL-strict about FOREIGN KEY targets existing at CREATE TABLE
+            // time, and the loop above creates tables in reflection order, which does not
+            // guarantee dependency order. So for SqlServer only, FK constraints are added here in
+            // a second pass, after every table has been created, avoiding the need for any
+            // dependency-order sorting. SQLite (and SQL CE) keep their FK constraints inline in
+            // the CREATE TABLE statement itself (see GetCreateTableScript), since those engines
+            // resolve FK targets at DML time, not DDL time.
+            if (this.DbFlavor == DbFlavor.SqlServer)
+            {
+                foreach (TableMapping mapping in mappings)
+                {
+                    foreach (string addForeignKey in GetAddForeignKeyScripts(mapping))
+                    {
+                        this.ExecuteNonQuery(addForeignKey);
+                    }
                 }
             }
         }
@@ -391,19 +411,48 @@ namespace Walkabout.Data
             // whose referenced type resolved a ForeignKeyTable (see MappingEngine.ResolveColumnType
             // in MyMoney.Business/Mapping.cs). See
             // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24).
-            foreach (ColumnMapping column in mapping.Columns)
+            //
+            // This stays inline only for flavors other than real SQL Server (SQLite, SQL CE):
+            // those engines resolve FK targets at DML time, not DDL time, so an inline FK
+            // referencing a table that doesn't exist yet at CREATE TABLE time is harmless.
+            // Real SQL Server is DDL-strict about this, and LazyCreateTables() creates tables in
+            // reflection order, which does not guarantee dependency order -- an inline FK there
+            // can reference a table that hasn't been created yet and fail outright. So for
+            // SqlServer, FK constraints are instead added in a second ALTER TABLE pass after every
+            // table exists; see GetAddForeignKeyScripts() and LazyCreateTables().
+            if (flavor != DbFlavor.SqlServer)
             {
-                if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
+                foreach (ColumnMapping column in mapping.Columns)
                 {
-                    sb.AppendLine(",");
-                    sb.Append(string.Format("  FOREIGN KEY ([{0}]) REFERENCES [{1}]([{2}])",
-                        column.ColumnName, co.ForeignKeyTable, co.KeyProperty));
+                    if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
+                    {
+                        sb.AppendLine(",");
+                        sb.Append(string.Format("  FOREIGN KEY ([{0}]) REFERENCES [{1}]([{2}])",
+                            column.ColumnName, co.ForeignKeyTable, co.KeyProperty));
+                    }
                 }
             }
 
             sb.AppendLine();
             sb.AppendLine(")");
             return sb.ToString();
+        }
+
+        // Companion to the SqlServer branch of GetCreateTableScript above: yields one
+        // ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY statement per ColumnObjectMapping column
+        // with a resolved ForeignKeyTable, using the same detection logic that used to be emitted
+        // inline. Only used for DbFlavor.SqlServer -- see LazyCreateTables().
+        internal static IEnumerable<string> GetAddForeignKeyScripts(TableMapping mapping)
+        {
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                if (column is ColumnObjectMapping co && !string.IsNullOrEmpty(co.ForeignKeyTable))
+                {
+                    yield return string.Format(
+                        "ALTER TABLE [{0}] ADD CONSTRAINT [FK_{0}_{1}] FOREIGN KEY ([{1}]) REFERENCES [{2}]([{3}])",
+                        mapping.TableName, column.ColumnName, co.ForeignKeyTable, co.KeyProperty);
+                }
+            }
         }
 
         // Derive secondary indexes automatically from any ColumnObjectMapping column, since
@@ -663,14 +712,14 @@ namespace Walkabout.Data
                 try
                 {
                     this.UpdateOnlineAccounts(money.OnlineAccounts);
+                    this.UpdateCategories(money.Categories);  // Must populate the Categories before the Account, since the Account now have 2 fields pointing to Categories
                     this.UpdateAccounts(money.Accounts);
                     this.UpdatePayees(money.Payees);
                     this.UpdateAliases(money.Aliases);
                     this.UpdateAccountAliases(money.AccountAliases);
-                    this.UpdateCategories(money.Categories);
                     this.UpdateCurrencies(money.Currencies);
-                    this.UpdateTransactions(money.Transactions);
                     this.UpdateSecurities(money.Securities);
+                    this.UpdateTransactions(money.Transactions);
                     this.UpdateStockSplits(money.StockSplits);
                     this.UpdateBuildings(money.Buildings);
                     this.UpdateLoanPayments(money.LoanPayments);
@@ -2812,11 +2861,10 @@ namespace Walkabout.Data
             {
                 this.IncrementProgress("StockSplits");
 
-                int sid = reader.GetInt32(2);
                 long id = reader.GetInt64(0);
                 StockSplit s = splits.AddStockSplit(id);
                 s.Date = reader.SafeGetDateTime(1);
-                s.Security = money.Securities.FindSecurityAt(sid);
+                s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
                 s.Numerator = reader.GetDecimal(3);
                 s.Denominator = reader.GetDecimal(4);
                 s.OnUpdated();
@@ -2841,21 +2889,15 @@ namespace Walkabout.Data
                 {
                     if (s.IsChanged && s.Date != DateTime.MinValue)
                     {
-                        if (s.Security != null)
-                        {
-                            this.ExecuteNonQuery("UPDATE StockSplits SET Date=@Date,Security=@Security,Numerator=@Numerator,Denominator=@Denominator WHERE Id=@Id;",
-                                ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security.Id), ("@Numerator", s.Numerator),
-                                ("@Denominator", s.Denominator), ("@Id", s.Id));
-                        }
+                        this.ExecuteNonQuery("UPDATE StockSplits SET Date=@Date,Security=@Security,Numerator=@Numerator,Denominator=@Denominator WHERE Id=@Id;",
+                            ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id), ("@Numerator", s.Numerator),
+                            ("@Denominator", s.Denominator), ("@Id", s.Id));
                     }
                     else if (s.IsInserted && s.Date != DateTime.MinValue)
                     {
-                        if (s.Security != null)
-                        {
-                            this.ExecuteNonQuery("INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (@Id,@Date,@Security,@Numerator,@Denominator);",
-                                ("@Id", s.Id), ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
-                                ("@Numerator", s.Numerator), ("@Denominator", s.Denominator));
-                        }
+                        this.ExecuteNonQuery("INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (@Id,@Date,@Security,@Numerator,@Denominator);",
+                            ("@Id", s.Id), ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                            ("@Numerator", s.Numerator), ("@Denominator", s.Denominator));
                     }
                     else if (s.IsDeleted)
                     {
@@ -2866,34 +2908,28 @@ namespace Walkabout.Data
 
                 if (s.IsChanged && s.Date != DateTime.MinValue)
                 {
-                    if (s.Security != null)
-                    {
-                        sb.AppendLine("-- updating StockSplits for : " + s.Security.Name);
-                        sb.Append("UPDATE StockSplits SET ");
-                        sb.Append(string.Format("Date={0}", DBDateTime(s.Date)));
-                        sb.Append(string.Format(",Security={0}", s.Security.Id));
-                        sb.Append(string.Format(",Numerator={0}", s.Numerator));
-                        sb.Append(string.Format(",Denominator={0}", s.Denominator));
-                        sb.AppendLine(string.Format(" WHERE Id={0};", s.Id));
-                    }
+                    sb.AppendLine("-- updating StockSplits for : " + (s.Security != null ? s.Security.Name : "(none)"));
+                    sb.Append("UPDATE StockSplits SET ");
+                    sb.Append(string.Format("Date={0}", DBDateTime(s.Date)));
+                    sb.Append(string.Format(",Security={0}", s.Security == null ? "NULL" : s.Security.Id.ToString()));
+                    sb.Append(string.Format(",Numerator={0}", s.Numerator));
+                    sb.Append(string.Format(",Denominator={0}", s.Denominator));
+                    sb.AppendLine(string.Format(" WHERE Id={0};", s.Id));
                 }
                 else if (s.IsInserted && s.Date != DateTime.MinValue)
                 {
-                    if (s.Security != null)
-                    {
-                        sb.AppendLine("-- inserting StockSplits for : " + s.Security.Name);
-                        sb.Append("INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (");
-                        sb.Append(string.Format("{0}", s.Id.ToString()));
-                        sb.Append(string.Format(",{0}", DBDateTime(s.Date)));
-                        sb.Append(string.Format(",{0}", s.Security.Id));
-                        sb.Append(string.Format(",{0}", s.Numerator));
-                        sb.Append(string.Format(",{0}", s.Denominator));
-                        sb.AppendLine(");");
-                    }
+                    sb.AppendLine("-- inserting StockSplits for : " + (s.Security != null ? s.Security.Name : "(none)"));
+                    sb.Append("INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (");
+                    sb.Append(string.Format("{0}", s.Id.ToString()));
+                    sb.Append(string.Format(",{0}", DBDateTime(s.Date)));
+                    sb.Append(string.Format(",{0}", s.Security == null ? "NULL" : s.Security.Id.ToString()));
+                    sb.Append(string.Format(",{0}", s.Numerator));
+                    sb.Append(string.Format(",{0}", s.Denominator));
+                    sb.AppendLine(");");
                 }
                 else if (s.IsDeleted)
                 {
-                    sb.AppendLine("-- deleting StockSplits for : " + s.Security.Name);
+                    sb.AppendLine("-- deleting StockSplits for : " + (s.Security != null ? s.Security.Name : "(none)"));
                     sb.AppendLine(string.Format("DELETE FROM StockSplits WHERE Id={0};", s.Id.ToString()));
                 }
 
@@ -3410,7 +3446,7 @@ namespace Walkabout.Data
                 {
                     Investment i = t.GetOrCreateInvestment();
                     Debug.Assert(i != null); // should be associated with investment account.
-                    i.Security = money.Securities.FindSecurityAt(reader.GetInt32(1));
+                    i.Security = reader.IsDBNull(1) ? null : money.Securities.FindSecurityAt(reader.GetInt32(1));
                     i.UnitPrice = reader.GetDecimal(2);
                     i.Units = reader.GetDecimal(3);
                     i.Commission = reader.GetDecimal(4);
@@ -3473,7 +3509,7 @@ namespace Walkabout.Data
                         "UPDATE Investments SET Security=@Security,UnitPrice=@UnitPrice,Units=@Units,Commission=@Commission," +
                         "InvestmentType=@InvestmentType,TradeType=@TradeType,TaxExempt=@TaxExempt,Withholding=@Withholding," +
                         "MarkUpDown=@MarkUpDown,Taxes=@Taxes,Fees=@Fees,[Load]=@Load WHERE Id=@Id;",
-                        ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice), ("@Units", i.Units),
+                        ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice), ("@Units", i.Units),
                         ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type), ("@TradeType", (int)i.TradeType),
                         ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding), ("@MarkUpDown", i.MarkUpDown),
                         ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load), ("@Id", i.Id));
@@ -3483,7 +3519,7 @@ namespace Walkabout.Data
                     this.ExecuteNonQuery(
                         "INSERT INTO Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load]) " +
                         "VALUES (@Id,@Security,@UnitPrice,@Units,@Commission,@InvestmentType,@TradeType,@TaxExempt,@Withholding,@MarkUpDown,@Taxes,@Fees,@Load);",
-                        ("@Id", i.Id), ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                        ("@Id", i.Id), ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice),
                         ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
                         ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
                         ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load));
@@ -3501,7 +3537,7 @@ namespace Walkabout.Data
             {
                 sb.AppendLine("-- updating Investment : " + i.Id);
                 sb.Append("UPDATE Investments SET ");
-                sb.Append(string.Format("Security={0}", i.Security == null ? -1 : i.Security.Id));
+                sb.Append(string.Format("Security={0}", i.Security == null ? "NULL" : i.Security.Id.ToString()));
                 sb.Append(string.Format(",UnitPrice={0}", DBDecimal(i.UnitPrice)));
                 sb.Append(string.Format(",Units={0}", DBDecimal(i.Units)));
                 sb.Append(string.Format(",Commission={0}", DBDecimal(i.Commission)));
@@ -3521,7 +3557,7 @@ namespace Walkabout.Data
                 sb.AppendLine("-- inserting Investment : " + i.Id);
                 sb.Append("INSERT INTO Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load]) VALUES (");
                 sb.Append(string.Format("'{0}'", i.Id.ToString()));
-                sb.Append(string.Format(",'{0}'", i.Security == null ? -1 : i.Security.Id));
+                sb.Append(string.Format(",{0}", i.Security == null ? "NULL" : i.Security.Id.ToString()));
                 sb.Append(string.Format(",{0}", DBDecimal(i.UnitPrice)));
                 sb.Append(string.Format(",{0}", DBDecimal(i.Units)));
                 sb.Append(string.Format(",{0}", DBDecimal(i.Commission)));
@@ -3828,6 +3864,12 @@ namespace Walkabout.Data
                     return typeof(SqlDouble);
                 case "bit":
                     return typeof(SqlBoolean);
+                case "timestamp":
+                case "rowversion":
+                    // SQL Server reports ROWVERSION columns as DATA_TYPE='timestamp' in
+                    // INFORMATION_SCHEMA.COLUMNS; "rowversion" is handled too in case a future
+                    // SQL Server version reports it differently.
+                    return typeof(SqlBinary);
                 default:
                     throw new NotImplementedException(string.Format("SQL type '{0}' is not supported by the mapping engine", value));
             }
