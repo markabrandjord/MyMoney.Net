@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Text;
@@ -76,6 +77,21 @@ namespace Walkabout.Data
         public MyMoney Load(IStatusService status)
         {
             throw new NotImplementedException();
+        }
+
+        public void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException("CsvStore does not support SaveOne - it is a write-only export format.");
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException("CsvStore does not support SaveTransfer - it is a write-only export format.");
+        }
+
+        public void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            throw new NotImplementedException("CsvStore does not support SaveBatch - it is a write-only export format.");
         }
 
         public void Save(MyMoney money)

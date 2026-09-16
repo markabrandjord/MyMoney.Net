@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Runtime.Serialization;
@@ -40,6 +42,21 @@ namespace Walkabout.Data
         public void Save(MyMoney money)
         {
             this.snapshot = Serialize(money);
+        }
+
+        public void SaveOne<T>(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException("SaveOne is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException("SaveTransfer is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
+        }
+
+        public void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            throw new NotImplementedException("SaveBatch is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.");
         }
 
         private static byte[] Serialize(MyMoney money)

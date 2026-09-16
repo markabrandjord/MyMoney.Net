@@ -1,4 +1,5 @@
 ﻿using NUnit.Framework;
+using System;
 using System.Diagnostics;
 using System.Runtime.Serialization;
 using System.Xml;
@@ -179,6 +180,49 @@ namespace Walkabout.Tests
             Assert.That(account.RowVersion, Is.EqualTo(0));
             account.RowVersion = 42;
             Assert.That(account.RowVersion, Is.EqualTo(42));
+        }
+
+        [Test]
+        public void AggregateRootTypes_ImplementIAggregateRoot()
+        {
+            Type[] expectedRoots =
+            {
+                typeof(Account), typeof(Category), typeof(Payee), typeof(Currency),
+                typeof(Security), typeof(Alias), typeof(OnlineAccount), typeof(StockSplit),
+                typeof(RentBuilding), typeof(LoanPayment), typeof(Transaction)
+            };
+
+            foreach (Type t in expectedRoots)
+            {
+                Assert.That(typeof(IAggregateRoot).IsAssignableFrom(t), Is.True,
+                    t.Name + " should implement IAggregateRoot");
+            }
+
+            // Owned children never get their own commit boundary - only their owning
+            // aggregate's SaveOne/SaveBatch call commits them.
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(Split)), Is.False);
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(Investment)), Is.False);
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(RentUnit)), Is.False);
+        }
+
+        [Test]
+        public void IAggregateRootId_IsLong_AndDoesNotTruncateOnHighVolumeEntities()
+        {
+            // Transaction and StockSplit are the two aggregate roots whose own Id is already a
+            // long (not int) - IAggregateRoot.Id must be long too, or this would silently
+            // truncate for a real installation with enough transactions to exceed int.MaxValue.
+            const long largeId = 5_000_000_000L; // > int.MaxValue (2,147,483,647)
+
+            var transaction = new Transaction { Id = largeId };
+            Assert.That(((IAggregateRoot)transaction).Id, Is.EqualTo(largeId));
+
+            var stockSplit = new StockSplit { Id = largeId };
+            Assert.That(((IAggregateRoot)stockSplit).Id, Is.EqualTo(largeId));
+
+            // And a plain int-backed aggregate root still round-trips through the widened
+            // (int -> long) explicit interface implementation.
+            var account = new Account { Id = 42 };
+            Assert.That(((IAggregateRoot)account).Id, Is.EqualTo(42L));
         }
 
     }

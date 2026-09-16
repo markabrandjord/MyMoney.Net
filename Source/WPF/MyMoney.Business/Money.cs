@@ -2637,7 +2637,7 @@ namespace Walkabout.Data
     //================================================================================
     [TableMapping(TableName = "Accounts")]
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
-    public class Account : PersistentObject
+    public class Account : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string accountId;
@@ -2679,6 +2679,12 @@ namespace Walkabout.Data
             get { return this.id; }
             set { if (this.id != value) { this.id = value; this.OnChanged("Id"); } }
         }
+
+        // Account's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [XmlAttribute]
@@ -3473,7 +3479,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "OnlineAccounts")]
-    public class OnlineAccount : PersistentObject
+    public class OnlineAccount : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string name;
@@ -3538,6 +3544,12 @@ namespace Walkabout.Data
             get { return this.id; }
             set { if (this.id != value) { this.id = value; this.OnChanged("Id"); } }
         }
+
+        // OnlineAccount's own Id is int, but IAggregateRoot.Id is long so the same interface
+        // also fits Transaction/StockSplit's own long Id without truncation risk - this
+        // int->long widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Name", MaxLength = 80)]
@@ -4373,7 +4385,7 @@ namespace Walkabout.Data
     //================================================================================
     [TableMapping(TableName = "Currencies")]
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
-    public class Currency : PersistentObject
+    public class Currency : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string name;
@@ -4405,6 +4417,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // Currency's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Symbol", MaxLength = 20)]
@@ -5169,7 +5187,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "Payees")]
-    public class Payee : PersistentObject
+    public class Payee : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private int unaccepted;
@@ -5190,6 +5208,12 @@ namespace Walkabout.Data
             get { return this.id; }
             set { if (this.id != value) { this.id = value; this.OnChanged("Id"); } }
         }
+
+        // Payee's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Name", MaxLength = 255)]
@@ -5287,7 +5311,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "Aliases")]
-    public class Alias : PersistentObject
+    public class Alias : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string pattern;
@@ -5305,6 +5329,12 @@ namespace Walkabout.Data
         [DataMember]
         [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
         public int Id { get { return this.id; } set { this.id = value; } }
+
+        // Alias's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Pattern", MaxLength = 255)]
@@ -6028,7 +6058,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "RentBuildings")]
-    public class RentBuilding : PersistentObject
+    public class RentBuilding : PersistentObject, IAggregateRoot
     {
         #region PRIVATE PROPERTIES
 
@@ -6077,6 +6107,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // RentBuilding's own Id is int, but IAggregateRoot.Id is long so the same interface
+        // also fits Transaction/StockSplit's own long Id without truncation risk - this
+        // int->long widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Name", MaxLength = 255)]
@@ -7645,7 +7681,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "Categories")]
-    public class Category : PersistentObject
+    public class Category : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string label;
@@ -7683,6 +7719,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // Category's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         public override void OnDelete()
         {
@@ -8717,7 +8759,7 @@ namespace Walkabout.Data
     //================================================================================
     [TableMapping(TableName = "Securities")]
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
-    public class Security : PersistentObject
+    public class Security : PersistentObject, IAggregateRoot
     {
         private int id = -1;
         private string name;
@@ -8770,6 +8812,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // Security's own Id is int, but IAggregateRoot.Id is long so the same interface also
+        // fits Transaction/StockSplit's own long Id without truncation risk - this int->long
+        // widening is always lossless. See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Name", MaxLength = 80)]
@@ -10785,7 +10833,7 @@ namespace Walkabout.Data
     //================================================================================
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
     [TableMapping(TableName = "Transactions")]
-    public class Transaction : PersistentObject
+    public class Transaction : PersistentObject, IAggregateRoot
     {
         private long id = -1;
         private Account account; // that this transaction originated.
@@ -10884,6 +10932,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // Transaction's own Id is already long, matching IAggregateRoot.Id exactly - explicit
+        // interface implementation just for symmetry with the other 9 aggregate roots (which
+        // are int and need a lossless int->long widening explicit impl). See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         private void SetViewState(TransactionViewFlags flag, bool set)
         {
@@ -15024,7 +15078,7 @@ namespace Walkabout.Data
 
     [TableMapping(TableName = "StockSplits")]
     [DataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
-    public class StockSplit : PersistentObject
+    public class StockSplit : PersistentObject, IAggregateRoot
     {
         private long id = -1;
         private Security security;
@@ -15066,6 +15120,12 @@ namespace Walkabout.Data
                 }
             }
         }
+
+        // StockSplit's own Id is already long, matching IAggregateRoot.Id exactly - explicit
+        // interface implementation just for symmetry with the other 9 aggregate roots (which
+        // are int and need a lossless int->long widening explicit impl). See
+        // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2/R4.
+        long IAggregateRoot.Id { get { return this.id; } }
 
         [DataMember]
         [ColumnMapping(ColumnName = "Date")]
@@ -15153,6 +15213,28 @@ namespace Walkabout.Data
         {
         }
 
+    }
+
+    /// <summary>
+    /// Thrown by IDatabase.SaveOne/SaveTransfer/SaveBatch when a root's RowVersion no longer
+    /// matches what's actually committed - i.e. someone else wrote this row since it was loaded.
+    /// See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+    /// </summary>
+    public class ConcurrencyConflictException : Exception
+    {
+        public PersistentObject Root { get; }
+        public long ExpectedRowVersion { get; }
+        public long ActualRowVersion { get; }
+
+        public ConcurrencyConflictException(PersistentObject root, long expectedRowVersion, long actualRowVersion)
+            : base(string.Format(
+                "Concurrency conflict saving {0} (Id={1}): expected RowVersion {2} but the caller had {3}.",
+                root.GetType().Name, ((IAggregateRoot)root).Id, expectedRowVersion, actualRowVersion))
+        {
+            this.Root = root;
+            this.ExpectedRowVersion = expectedRowVersion;
+            this.ActualRowVersion = actualRowVersion;
+        }
     }
 
 }
