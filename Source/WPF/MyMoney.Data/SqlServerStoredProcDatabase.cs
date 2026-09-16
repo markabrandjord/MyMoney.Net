@@ -280,6 +280,87 @@ namespace Walkabout.Data
             extras.RemoveDeleted();
         }
 
+        public override void ReadLoanPayments(LoanPayments collection, MyMoney money)
+        {
+            collection.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.LoanPayments_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    collection.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        LoanPayment x = new LoanPayment(collection);
+                        x.BatchMode = true;
+                        x.Id = reader.GetInt32(0);
+                        x.AccountId = reader.GetInt32(1);
+                        if (!reader.IsDBNull(2))
+                        {
+                            x.Date = reader.GetDateTime(2);
+                        }
+                        x.Principal = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        x.Interest = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        x.Memo = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        x.BatchMode = false;
+                        collection.AddLoan(x);
+                        x.OnUpdated();
+                    }
+                    collection.EndUpdate();
+                }
+            }
+            collection.FireChangeEvent(collection, collection, null, ChangeType.Reloaded);
+
+            foreach (Account a in money.Accounts)
+            {
+                if (a.Type == AccountType.Loan)
+                {
+                    money.GetOrCreateLoanAccount(a);
+                }
+            }
+        }
+
+        public override void UpdateLoanPayments(LoanPayments loans)
+        {
+            if (loans.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (LoanPayment i in loans)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", i.Id), ("@AccountId", i.AccountId), ("@Date", SqlServerDatabase.DBDateTimeParam(i.Date)),
+                        ("@Principal", i.Principal), ("@Interest", i.Interest), ("@Memo", (object)i.Memo ?? DBNull.Value)
+                    };
+
+                    if (i.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Update", parameters);
+                    }
+                    else if (i.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Insert", parameters);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.LoanPayments_Delete", ("@Id", i.Id));
+                    }
+                }
+            }
+
+            foreach (LoanPayment i in loans)
+            {
+                i.OnUpdated();
+            }
+            loans.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -312,6 +393,7 @@ namespace Walkabout.Data
                 this.ReadStockSplits(money.StockSplits, money);
                 this.ReadTransactions(money.Transactions, money);
                 this.ReadTransactionExtras(money.TransactionExtras, money);
+                this.ReadLoanPayments(money.LoanPayments, money);
             }
             finally
             {

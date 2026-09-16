@@ -686,5 +686,63 @@ namespace Walkabout.Tests
             accountsToDelete.Add(cleanupAccount);
             db.UpdateAccounts(accountsToDelete);
         }
+
+        [Test]
+        public void InsertUpdateDeleteLoanPayment_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests LoanPayment Account");
+            account.Type = AccountType.Loan;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var loanPayment = new LoanPayment(money.LoanPayments)
+            {
+                Id = 999006,
+                AccountId = account.Id,
+                Date = new DateTime(2026, 1, 1),
+                Principal = 100.00m,
+                Interest = 25.00m,
+                Memo = "SqlServerStoredProcDatabaseTests LoanPayment"
+            };
+            money.LoanPayments.AddLoan(loanPayment);
+            loanPayment.OnInserted();
+            db.UpdateLoanPayments(money.LoanPayments);
+
+            var reloaded = new MyMoney();
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadLoanPayments(reloaded.LoanPayments, reloaded);
+            var found = reloaded.LoanPayments.GetList().FirstOrDefault(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Principal, Is.EqualTo(100.00m));
+
+            found.Principal = 150.00m;
+            db.UpdateLoanPayments(reloaded.LoanPayments);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadLoanPayments(afterUpdate.LoanPayments, afterUpdate);
+            var updated = afterUpdate.LoanPayments.GetList().FirstOrDefault(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment");
+            Assert.That(updated.Principal, Is.EqualTo(150.00m));
+
+            updated.OnDelete();
+            var toDelete = new LoanPayments(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateLoanPayments(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadLoanPayments(afterDelete.LoanPayments, afterDelete);
+            Assert.That(afterDelete.LoanPayments.GetList().Any(x => x.Memo == "SqlServerStoredProcDatabaseTests LoanPayment"), Is.False);
+
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            var cleanupAccount = afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests LoanPayment Account");
+            cleanupAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterDelete);
+            accountsToDelete.Add(cleanupAccount);
+            db.UpdateAccounts(accountsToDelete);
+        }
     }
 }
