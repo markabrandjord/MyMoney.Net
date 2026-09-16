@@ -66,16 +66,22 @@ jobs:
       # same reason ScenarioTest is documented as "not run via dotnet
       # test" even for local development.
       #
-      # TestCategory!=RequiresSqlServer excludes SqlServerDatabaseContractTests/
-      # SqlServerStoredProcDatabaseTests, which fail fast (by design, not
-      # skip) without MYMONEY_TEST_SQLSERVER_* env vars -- see
-      # docs/dev/index.md. Those aren't configured for this runner yet;
-      # wiring up a live SQL Server connection for CI is a separate,
-      # deliberate follow-up, not something to default into silently here.
+      # SqlServerDatabaseContractTests/SqlServerStoredProcDatabaseTests fail
+      # fast (by design, not skip) without MYMONEY_TEST_SQLSERVER_* env vars
+      # -- see docs/dev/index.md -- so they're excluded by name. NOTE:
+      # `--filter "TestCategory!=RequiresSqlServer"` looks like it should do
+      # the same thing but does NOT actually exclude them with this
+      # NUnit3TestAdapter version (verified locally: --list-tests still
+      # shows all of SqlServerDatabaseContractTests with that filter, while
+      # `FullyQualifiedName!~SqlServerDatabaseContractTests` correctly drops
+      # them) -- a real, silent footgun for anyone tempted to "clean this up"
+      # to the category filter later. Wiring up a live SQL Server connection
+      # for CI is a separate, deliberate follow-up, not something to default
+      # into silently here.
       - name: Test
         run: |
           dotnet test Source/WPF/UnitTests/UnitTests.csproj -m:1 --logger "trx;LogFileName=UnitTests.trx"
-          dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -m:1 --filter "TestCategory!=RequiresSqlServer" --logger "trx;LogFileName=MyMoney.TestSupport.trx"
+          dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj -m:1 --filter "FullyQualifiedName!~SqlServerDatabaseContractTests" --logger "trx;LogFileName=MyMoney.TestSupport.trx"
 
       - name: Test results
         if: always()
