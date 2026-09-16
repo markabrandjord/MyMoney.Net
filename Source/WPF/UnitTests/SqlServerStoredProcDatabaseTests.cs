@@ -99,5 +99,44 @@ namespace Walkabout.Tests
             db.ReadAccounts(afterDelete.Accounts, afterDelete);
             Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Account"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var category = money.Categories.GetOrCreateCategory("SqlServerStoredProcDatabaseTests:Category", CategoryType.Expense);
+            category.Description = "Test category";
+            category.Budget = 250.00m;
+            category.OnInserted();
+
+            db.UpdateCategories(money.Categories);
+
+            var reloaded = new MyMoney();
+            db.ReadCategories(reloaded.Categories, reloaded);
+            var found = reloaded.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Description, Is.EqualTo("Test category"));
+            Assert.That(found.Budget, Is.EqualTo(250.00m));
+
+            found.Description = "Updated description";
+            db.UpdateCategories(reloaded.Categories);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCategories(afterUpdate.Categories, afterUpdate);
+            var updated = afterUpdate.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category");
+            Assert.That(updated.Description, Is.EqualTo("Updated description"));
+
+            updated.OnDelete();
+            var toDelete = new Categories(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateCategories(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadCategories(afterDelete.Categories, afterDelete);
+            Assert.That(afterDelete.Categories.FindCategory("SqlServerStoredProcDatabaseTests:Category"), Is.Null);
+        }
     }
 }

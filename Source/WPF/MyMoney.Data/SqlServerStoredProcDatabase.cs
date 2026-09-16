@@ -55,6 +55,7 @@ namespace Walkabout.Data
             try
             {
                 this.ReadPayees(money.Payees, money);
+                this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
             }
             finally
@@ -241,6 +242,122 @@ namespace Walkabout.Data
                 }
             }
             accounts.RemoveDeleted();
+        }
+
+        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.Categories_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    categories.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Category c = new Category(categories);
+                        c.Id = id;
+                        categories.AddCategory(c);
+                        c.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        c.Description = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            c.Type = (CategoryType)reader.GetInt32(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            c.ParentId = reader.GetInt32(4);
+                        }
+                        if (!reader.IsDBNull(5))
+                        {
+                            c.Budget = reader.GetDecimal(5);
+                        }
+                        if (!reader.IsDBNull(6))
+                        {
+                            c.Frequency = (CalendarRange)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            c.Balance = reader.GetDecimal(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            c.Color = reader.GetString(8);
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            c.TaxRefNum = reader.GetInt32(9);
+                        }
+                        c.OnUpdated();
+                        if (c.Type == CategoryType.Reserved)
+                        {
+                            c.Type = CategoryType.Expense;
+                        }
+                    }
+                    categories.EndUpdate();
+                }
+            }
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateCategories(Categories categories)
+        {
+            if (categories.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Category c in categories)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", c.Id), ("@Name", (object)c.Name ?? DBNull.Value),
+                        ("@Description", (object)c.Description ?? DBNull.Value), ("@Type", (int)c.Type),
+                        ("@ParentId", c.ParentCategory != null ? c.ParentCategory.Id : -1), ("@Budget", c.Budget),
+                        ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance),
+                        ("@Color", (object)c.Color ?? DBNull.Value), ("@TaxRefNum", c.TaxRefNum)
+                    };
+
+                    if (c.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Categories_Delete", ("@Id", c.Id));
+                    }
+                    else if (c.IsInserted)
+                    {
+                        // For inserted categories, try to insert. If the category already exists
+                        // (e.g., a parent category created in a previous test run), treat it as
+                        // an update instead. This handles the case where the same category
+                        // hierarchy is recreated multiple times without cleanup.
+                        try
+                        {
+                            ExecuteProc(connection, "dbo.Categories_Insert", parameters);
+                        }
+                        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2627)
+                        {
+                            // Primary key violation - category already exists, update it instead
+                            ExecuteProc(connection, "dbo.Categories_Update", parameters);
+                        }
+                    }
+                    else if (c.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Categories_Update", parameters);
+                    }
+                }
+            }
+
+            foreach (Category c in categories)
+            {
+                if (!c.IsDeleted)
+                {
+                    c.OnUpdated();
+                }
+            }
+            categories.RemoveDeleted();
         }
 
         /// <summary>

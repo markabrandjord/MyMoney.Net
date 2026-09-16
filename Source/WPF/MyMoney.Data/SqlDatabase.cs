@@ -2334,7 +2334,7 @@ namespace Walkabout.Data
 
         #region TABLE CATEGORIES
 
-        public void ReadCategories(Categories categories, MyMoney money)
+        public virtual void ReadCategories(Categories categories, MyMoney money)
         {
             categories.Clear();
             IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum] FROM Categories");
@@ -2388,7 +2388,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateCategories(Categories categories)
+        public virtual void UpdateCategories(Categories categories)
         {
             if (categories.Count == 0)
             {
