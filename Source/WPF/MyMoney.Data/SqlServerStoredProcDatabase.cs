@@ -534,7 +534,7 @@ namespace Walkabout.Data
             splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
         }
 
-        public new void UpdateStockSplits(StockSplits stockSplits)
+        public override void UpdateStockSplits(StockSplits stockSplits)
         {
             if (stockSplits.Count == 0)
             {

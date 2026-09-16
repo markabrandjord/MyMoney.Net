@@ -2771,7 +2771,7 @@ namespace Walkabout.Data
         }
 
 
-        public void UpdateStockSplits(StockSplits stockSplits)
+        public virtual void UpdateStockSplits(StockSplits stockSplits)
         {
             if (stockSplits.Count == 0)
             {
