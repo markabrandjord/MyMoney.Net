@@ -134,6 +134,77 @@ namespace Walkabout.Data
             accounts.RemoveDeleted();
         }
 
+        public override void ReadAccountAliases(AccountAliases accountAliases, MyMoney money)
+        {
+            accountAliases.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.AccountAliases_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    accountAliases.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        AccountAlias a = accountAliases.AddAlias(id);
+                        a.Pattern = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        a.AccountId = reader.IsDBNull(2) ? null : reader.GetString(2).TrimEnd();
+                        if (!reader.IsDBNull(3))
+                        {
+                            a.AliasType = (AliasType)reader.GetInt32(3);
+                        }
+                        a.OnUpdated();
+                    }
+                    accountAliases.EndUpdate();
+                }
+            }
+            accountAliases.FireChangeEvent(accountAliases, accountAliases, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateAccountAliases(AccountAliases accountAliases)
+        {
+            if (accountAliases.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (AccountAlias a in accountAliases)
+                {
+                    if (a.IsChanged || a.IsInserted)
+                    {
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", a.Id), ("@Pattern", (object)a.Pattern ?? DBNull.Value),
+                            ("@AccountId", (object)a.AccountId ?? DBNull.Value), ("@Flags", (int)a.AliasType)
+                        };
+
+                        if (a.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.AccountAliases_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.AccountAliases_Insert", parameters);
+                        }
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.AccountAliases_Delete", ("@Id", a.Id));
+                    }
+                }
+            }
+
+            foreach (AccountAlias a in accountAliases)
+            {
+                a.OnUpdated();
+            }
+            accountAliases.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -158,6 +229,7 @@ namespace Walkabout.Data
                 this.ReadOnlineAccounts(money.OnlineAccounts, money);
                 this.ReadPayees(money.Payees, money);
                 this.ReadAliases(money.Aliases, money);
+                this.ReadAccountAliases(money.AccountAliases, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
                 this.ReadCurrencies(money.Currencies, money);

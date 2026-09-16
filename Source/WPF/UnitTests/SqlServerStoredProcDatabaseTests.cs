@@ -584,5 +584,44 @@ namespace Walkabout.Tests
             db.ReadOnlineAccounts(afterDelete.OnlineAccounts, afterDelete);
             Assert.That(afterDelete.OnlineAccounts.FindOnlineAccount("SqlServerStoredProcDatabaseTests OnlineAccount"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteAccountAlias_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var alias = money.AccountAliases.AddAlias(999004);
+            alias.Pattern = "SqlServerStoredProcDatabaseTests AccountAlias Pattern";
+            alias.AccountId = "ACCT12345";
+            alias.AliasType = AliasType.None;
+            alias.OnInserted();
+
+            db.UpdateAccountAliases(money.AccountAliases);
+
+            var reloaded = new MyMoney();
+            db.ReadAccountAliases(reloaded.AccountAliases, reloaded);
+            var found = reloaded.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.AccountId, Is.EqualTo("ACCT12345"));
+
+            found.AliasType = AliasType.Regex;
+            db.UpdateAccountAliases(reloaded.AccountAliases);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccountAliases(afterUpdate.AccountAliases, afterUpdate);
+            var updated = afterUpdate.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern");
+            Assert.That(updated.AliasType, Is.EqualTo(AliasType.Regex));
+
+            updated.OnDelete();
+            var toDelete = new AccountAliases(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateAccountAliases(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccountAliases(afterDelete.AccountAliases, afterDelete);
+            Assert.That(afterDelete.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern"), Is.Null);
+        }
     }
 }
