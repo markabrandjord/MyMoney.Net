@@ -623,5 +623,68 @@ namespace Walkabout.Tests
             db.ReadAccountAliases(afterDelete.AccountAliases, afterDelete);
             Assert.That(afterDelete.AccountAliases.FindAlias("SqlServerStoredProcDatabaseTests AccountAlias Pattern"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteTransactionExtra_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests TransactionExtra Account");
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -10.00m;
+            money.Transactions.AddTransaction(transaction);
+            db.UpdateTransactions(money.Transactions);
+
+            var extra = money.TransactionExtras.AddExtra(999005);
+            extra.Transaction = transaction.Id;
+            extra.TaxYear = 2026;
+            extra.TaxDate = new DateTime(2026, 4, 15);
+            extra.OnInserted();
+            db.UpdateTransactionExtras(money.TransactionExtras);
+
+            var reloaded = new MyMoney();
+            db.ReadTransactionExtras(reloaded.TransactionExtras, reloaded);
+            var found = reloaded.TransactionExtras.FindByTransaction(transaction.Id);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.TaxYear, Is.EqualTo(2026));
+
+            found.TaxYear = 2027;
+            db.UpdateTransactionExtras(reloaded.TransactionExtras);
+
+            var afterUpdate = new MyMoney();
+            db.ReadTransactionExtras(afterUpdate.TransactionExtras, afterUpdate);
+            var updated = afterUpdate.TransactionExtras.FindByTransaction(transaction.Id);
+            Assert.That(updated.TaxYear, Is.EqualTo(2027));
+
+            updated.OnDelete();
+            var toDelete = new TransactionExtras(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateTransactionExtras(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadTransactionExtras(afterDelete.TransactionExtras, afterDelete);
+            Assert.That(afterDelete.TransactionExtras.FindByTransaction(transaction.Id), Is.Null);
+
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            db.ReadTransactions(afterDelete.Transactions, afterDelete);
+            var cleanupAccount = afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests TransactionExtra Account");
+            var cleanupTransaction = afterDelete.Transactions.GetTransactionsFrom(cleanupAccount).FirstOrDefault();
+            cleanupTransaction.OnDelete();
+            var transactionsToDelete = new Transactions(afterDelete);
+            transactionsToDelete.AddTransaction(cleanupTransaction);
+            db.UpdateTransactions(transactionsToDelete);
+
+            cleanupAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterDelete);
+            accountsToDelete.Add(cleanupAccount);
+            db.UpdateAccounts(accountsToDelete);
+        }
     }
 }

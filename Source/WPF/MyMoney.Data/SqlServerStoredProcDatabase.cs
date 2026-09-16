@@ -205,6 +205,81 @@ namespace Walkabout.Data
             accountAliases.RemoveDeleted();
         }
 
+        public override void ReadTransactionExtras(TransactionExtras extras, MyMoney money)
+        {
+            extras.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.TransactionExtras_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    extras.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        TransactionExtra a = extras.AddExtra(id);
+                        a.Transaction = reader.GetInt64(1);
+                        a.TaxYear = reader.GetInt32(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            DateTime taxDate = reader.GetDateTime(3);
+                            if (taxDate.Year > 1)
+                            {
+                                a.TaxDate = taxDate;
+                            }
+                        }
+                        a.OnUpdated();
+                    }
+                    extras.EndUpdate();
+                }
+            }
+            extras.FireChangeEvent(extras, extras, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateTransactionExtras(TransactionExtras extras)
+        {
+            if (extras.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (TransactionExtra e in extras)
+                {
+                    if (e.IsChanged || e.IsInserted)
+                    {
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", e.Id), ("@Transaction", e.Transaction), ("@TaxYear", e.TaxYear),
+                            ("@TaxDate", SqlServerDatabase.DBNullableDateTimeParam(e.TaxDate))
+                        };
+
+                        if (e.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.TransactionExtras_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.TransactionExtras_Insert", parameters);
+                        }
+                    }
+                    else if (e.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.TransactionExtras_Delete", ("@Id", e.Id));
+                    }
+                }
+            }
+
+            foreach (TransactionExtra e in extras)
+            {
+                e.OnUpdated();
+            }
+            extras.RemoveDeleted();
+        }
+
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
@@ -236,6 +311,7 @@ namespace Walkabout.Data
                 this.ReadSecurities(money.Securities, money);
                 this.ReadStockSplits(money.StockSplits, money);
                 this.ReadTransactions(money.Transactions, money);
+                this.ReadTransactionExtras(money.TransactionExtras, money);
             }
             finally
             {
