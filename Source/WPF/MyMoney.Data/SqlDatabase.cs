@@ -153,10 +153,6 @@ namespace Walkabout.Data
         {
             get
             {
-                if (string.IsNullOrEmpty(this.server))
-                {
-                    return false;
-                }
                 try
                 {
                     using (SqlConnection con = new SqlConnection(this.GetConnectionString(false)))
@@ -280,7 +276,7 @@ namespace Walkabout.Data
                     }
                     else
                     {
-                        string.Format(@"Create Database {0}", this.DatabaseName);
+                        createCommand = string.Format(@"Create Database {0}", this.DatabaseName);
                     }
 
                     using (SqlCommand cmd2 = new SqlCommand(createCommand, con))
@@ -1056,7 +1052,7 @@ namespace Walkabout.Data
         /// (for dates) the same whole-second truncation as the SQL-text versions, so persisted
         /// values are unchanged - only how they reach the database changes.
         /// </summary>
-        private static object DBDateTimeParam(DateTime dt)
+        internal static object DBDateTimeParam(DateTime dt)
         {
             if (dt == DateTime.MinValue)
             {
@@ -1065,7 +1061,7 @@ namespace Walkabout.Data
             return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Kind);
         }
 
-        private static object DBNullableDateTimeParam(DateTime? ndt)
+        internal static object DBNullableDateTimeParam(DateTime? ndt)
         {
             if (!ndt.HasValue)
             {
@@ -1074,7 +1070,7 @@ namespace Walkabout.Data
             return DBDateTimeParam(ndt.Value);
         }
 
-        private static object DBGuidParam(SqlGuid guid)
+        internal static object DBGuidParam(SqlGuid guid)
         {
             return guid.IsNull ? (object)DBNull.Value : guid.ToString();
         }
@@ -1118,7 +1114,7 @@ namespace Walkabout.Data
         }
 
         #region TABLE ACCCOUNTS
-        public void ReadAccounts(Accounts accts, MyMoney money)
+        public virtual void ReadAccounts(Accounts accts, MyMoney money)
         {
             IDataReader reader = this.ExecuteReader("SELECT Id,AccountId,Name,Type,Description,OnlineAccount,OpeningBalance,LastSync,LastBalance,SyncGuid,Flags,Currency,WebSite,ReconcileWarning,CategoryIdForPrincipal,CategoryIdForInterest,OfxAccountId FROM Accounts");
             accts.BeginUpdate(false);
@@ -1178,7 +1174,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateAccounts(Accounts accounts)
+        public virtual void UpdateAccounts(Accounts accounts)
         {
             if (accounts.Count == 0)
             {
@@ -1503,7 +1499,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void ReadAliases(Aliases aliases, MyMoney money)
+        public virtual void ReadAliases(Aliases aliases, MyMoney money)
         {
             Payees payees = money.Payees;
             IDataReader reader = this.ExecuteReader("SELECT Id,Pattern,Payee,Flags FROM Aliases");
@@ -1668,7 +1664,7 @@ namespace Walkabout.Data
             payees.RemoveDeleted();
         }
 
-        public void UpdateAliases(Aliases aliases)
+        public virtual void UpdateAliases(Aliases aliases)
         {
             if (aliases.Count == 0)
             {
@@ -2334,7 +2330,7 @@ namespace Walkabout.Data
 
         #region TABLE CATEGORIES
 
-        public void ReadCategories(Categories categories, MyMoney money)
+        public virtual void ReadCategories(Categories categories, MyMoney money)
         {
             categories.Clear();
             IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum] FROM Categories");
@@ -2388,7 +2384,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateCategories(Categories categories)
+        public virtual void UpdateCategories(Categories categories)
         {
             if (categories.Count == 0)
             {
@@ -2487,7 +2483,7 @@ namespace Walkabout.Data
 
         #region CURRENCIES
 
-        public void ReadCurrencies(Currencies currencies, MyMoney money)
+        public virtual void ReadCurrencies(Currencies currencies, MyMoney money)
         {
             currencies.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Symbol,Name,Ratio,LastRatio,CultureCode FROM Currencies");
@@ -2527,7 +2523,7 @@ namespace Walkabout.Data
         }
 
 
-        public void UpdateCurrencies(Currencies currencies)
+        public virtual void UpdateCurrencies(Currencies currencies)
         {
             if (currencies.Count == 0)
             {
@@ -2611,7 +2607,7 @@ namespace Walkabout.Data
 
         #region TABLE SECURITIES
 
-        public void ReadSecurities(Securities securities, MyMoney money)
+        public virtual void ReadSecurities(Securities securities, MyMoney money)
         {
             securities.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Name,Symbol,Price,LastPrice,CuspId,SecurityType,Taxable,PriceDate FROM Securities");
@@ -2652,7 +2648,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateSecurities(Securities securities)
+        public virtual void UpdateSecurities(Securities securities)
         {
             if (securities.Count == 0)
             {
@@ -2771,7 +2767,7 @@ namespace Walkabout.Data
         }
 
 
-        public void UpdateStockSplits(StockSplits stockSplits)
+        public virtual void UpdateStockSplits(StockSplits stockSplits)
         {
             if (stockSplits.Count == 0)
             {
@@ -2864,7 +2860,7 @@ namespace Walkabout.Data
 
         #region TABLE CATEGORIES
         // Returns list of errors found in database.
-        public ArrayList ReadTransactions(Transactions transactions, MyMoney money)
+        public virtual ArrayList ReadTransactions(Transactions transactions, MyMoney money)
         {
             transactions.Clear();
 
@@ -3084,7 +3080,7 @@ namespace Walkabout.Data
             return errors;
         }
 
-        public void UpdateTransactions(Transactions transactions)
+        public virtual void UpdateTransactions(Transactions transactions)
         {
             if (transactions.Count == 0)
             {
@@ -3244,7 +3240,7 @@ namespace Walkabout.Data
             transactions.RemoveDeleted();
         }
 
-        public void UpdateSplits(Splits splits)
+        public virtual void UpdateSplits(Splits splits)
         {
             StringBuilder sb = new StringBuilder();
 
@@ -3402,7 +3398,7 @@ namespace Walkabout.Data
             return reader;
         }
 
-        public void UpdateInvestment(Investment i)
+        public virtual void UpdateInvestment(Investment i)
         {
             if (i == null)
             {

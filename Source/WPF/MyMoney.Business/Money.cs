@@ -2381,12 +2381,12 @@ namespace Walkabout.Data
             if (a.Id == -1)
             {
                 a.Id = this.NextAccount++;
+                a.OnInserted();
             }
             else if (this.NextAccount <= a.Id)
             {
                 this.NextAccount = a.Id;
             }
-            a.OnInserted();
             a.Parent = this;
             this.accounts[a.Id] = a;
             if (!string.IsNullOrWhiteSpace(a.Name))
@@ -3942,7 +3942,6 @@ namespace Walkabout.Data
                     this.nextAlias = a.Id + 1;
                 }
                 a.Parent = this;
-                a.OnInserted();
                 this.aliases[a.Id] = a;
             }
 
@@ -4623,7 +4622,6 @@ namespace Walkabout.Data
                     this.nextCurrency = a.Id + 1;
                 }
                 a.Parent = this;
-                a.OnInserted();
                 this.currencies[a.Id] = a;
 
 
@@ -9357,11 +9355,22 @@ namespace Walkabout.Data
                 }
 
                 this.transactions[t.Id] = t;
-                t.OnInserted();
 
-                if (t.Investment != null)
+                // Don't clobber a ChangeType the caller already set deliberately
+                // (e.g. OnDelete(), when re-adding an existing transaction to a
+                // scratch Transactions collection just to push a deletion through
+                // Update*). Only a genuinely fresh transaction should be forced to
+                // Inserted here. (Uses an IsDeleted guard rather than Accounts.AddAccount's
+                // Id==-1 guard because AddTransaction's id!=-1 branch is also the
+                // legitimate XmlStore.Load path, documented just above.)
+                if (!t.IsDeleted)
                 {
-                    t.Investment.OnInserted();
+                    t.OnInserted();
+
+                    if (t.Investment != null)
+                    {
+                        t.Investment.OnInserted();
+                    }
                 }
             }
             this.FireChangeEvent(this, t, null, ChangeType.Inserted);

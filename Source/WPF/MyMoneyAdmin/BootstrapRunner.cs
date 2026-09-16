@@ -91,6 +91,22 @@ namespace Walkabout.Data
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Payees_AccessProcs.sql")));
             ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Test", "Payees_TestProcs.sql")));
 
+            Console.WriteLine("Creating schema for Accounts/Categories/Currencies/Securities/StockSplits/Aliases/Transactions/Splits/Investments as 'MyMoneyAdmin'...");
+            var adminDatabase = new SqlServerStoredProcDatabase
+            {
+                ConnectionStringOverride = adminBuilder.ConnectionString
+            };
+            adminDatabase.LazyCreateTables();
+            adminDatabase.Disconnect();
+
+            Console.WriteLine("Deploying issue #22 access procedures as 'MyMoneyAdmin'...");
+            string[] accessProcs = { "Accounts_AccessProcs.sql", "Categories_AccessProcs.sql", "Currencies_AccessProcs.sql", "Securities_AccessProcs.sql", "StockSplits_AccessProcs.sql", "Aliases_AccessProcs.sql", "Transactions_AccessProcs.sql", "Splits_AccessProcs.sql", "Investments_AccessProcs.sql" };
+            foreach (var procFile in accessProcs)
+            {
+                string procPath = Path.Combine(this.sqlScriptsRoot, "Access", procFile);
+                ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(procPath));
+            }
+
             // Credentials are written only after every deployment step has
             // succeeded -- writing them earlier (e.g. right after the sa-run
             // bootstrap script) would let DataEngineStartup.DatabaseExists
