@@ -138,5 +138,46 @@ namespace Walkabout.Tests
             db.ReadCategories(afterDelete.Categories, afterDelete);
             Assert.That(afterDelete.Categories.FindCategory("SqlServerStoredProcDatabaseTestsCategory"), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteCurrency_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var currency = money.Currencies.AddCurrency(0);
+            currency.Symbol = "ZZT";
+            currency.Name = "SqlServerStoredProcDatabaseTests Currency";
+            currency.Ratio = 1.5m;
+            currency.CultureCode = "en-US";
+            currency.OnInserted();
+
+            db.UpdateCurrencies(money.Currencies);
+
+            var reloaded = new MyMoney();
+            db.ReadCurrencies(reloaded.Currencies, reloaded);
+            var found = reloaded.Currencies.FindCurrency("ZZT");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Name, Is.EqualTo("SqlServerStoredProcDatabaseTests Currency"));
+            Assert.That(found.Ratio, Is.EqualTo(1.5m));
+
+            found.Ratio = 2.0m;
+            db.UpdateCurrencies(reloaded.Currencies);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCurrencies(afterUpdate.Currencies, afterUpdate);
+            var updated = afterUpdate.Currencies.FindCurrency("ZZT");
+            Assert.That(updated.Ratio, Is.EqualTo(2.0m));
+
+            updated.OnDelete();
+            var toDelete = new Currencies(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateCurrencies(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadCurrencies(afterDelete.Currencies, afterDelete);
+            Assert.That(afterDelete.Currencies.FindCurrency("ZZT"), Is.Null);
+        }
     }
 }

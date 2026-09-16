@@ -57,6 +57,7 @@ namespace Walkabout.Data
                 this.ReadPayees(money.Payees, money);
                 this.ReadCategories(money.Categories, money);
                 this.ReadAccounts(money.Accounts, money);
+                this.ReadCurrencies(money.Currencies, money);
             }
             finally
             {
@@ -343,6 +344,79 @@ namespace Walkabout.Data
                 c.OnUpdated();
             }
             categories.RemoveDeleted();
+        }
+
+        public override void ReadCurrencies(Currencies currencies, MyMoney money)
+        {
+            currencies.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.Currencies_SelectAll", connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    currencies.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Currency s = currencies.AddCurrency(id);
+                        s.Symbol = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        s.Name = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            s.Ratio = reader.GetDecimal(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            s.LastRatio = reader.GetDecimal(4);
+                        }
+                        s.CultureCode = reader.IsDBNull(5) ? "en-US" : reader.GetString(5);
+                        s.OnUpdated();
+                    }
+                    currencies.EndUpdate();
+                }
+            }
+            currencies.FireChangeEvent(currencies, currencies, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateCurrencies(Currencies currencies)
+        {
+            if (currencies.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Currency s in currencies)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", s.Id), ("@Symbol", (object)s.Symbol ?? DBNull.Value), ("@Name", (object)s.Name ?? DBNull.Value),
+                        ("@Ratio", s.Ratio), ("@LastRatio", s.LastRatio), ("@CultureCode", (object)s.CultureCode ?? DBNull.Value)
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.Currencies_Update", parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.Currencies_Insert", parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.Currencies_Delete", ("@Id", s.Id));
+                    }
+                }
+            }
+
+            foreach (Currency s in currencies)
+            {
+                s.OnUpdated();
+            }
+            currencies.RemoveDeleted();
         }
 
         /// <summary>
