@@ -14378,7 +14378,7 @@ namespace Walkabout.Data
         public DateTime DateAcquired { get; set; }
 
         [IgnoreDataMember]
-        [ColumnObjectMapping(ColumnName = "Security", KeyProperty = "Id")]
+        [ColumnObjectMapping(ColumnName = "Security", KeyProperty = "Id", AllowNulls = true)]
         public Security Security
         {
             get { return this.security; }
@@ -15083,7 +15083,7 @@ namespace Walkabout.Data
         }
 
         [DataMember]
-        [ColumnObjectMapping(ColumnName = "Security", KeyProperty = "Id")]
+        [ColumnObjectMapping(ColumnName = "Security", KeyProperty = "Id", AllowNulls = true)]
         public Security Security
         {
             get { return this.security; }
