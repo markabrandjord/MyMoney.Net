@@ -100,3 +100,34 @@ namespace Walkabout.Tests
         }
     }
 }
+
+namespace Walkabout.Data.Tests
+{
+    [TestFixture]
+    public class SqlMappingTests
+    {
+        [TableMapping(TableName = "MappingTestTable")]
+        private class FakeRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_SqlServer_AppendsRowVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Contain("[RowVersion] ROWVERSION NOT NULL"));
+        }
+
+        [Test]
+        public void GetCreateTableScript_Sqlite_AppendsIntegerVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.Sqlite);
+            Assert.That(script, Does.Contain("[Version] INTEGER NOT NULL DEFAULT 1"));
+            Assert.That(script, Does.Not.Contain("ROWVERSION"));
+        }
+    }
+}

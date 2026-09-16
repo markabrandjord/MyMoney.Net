@@ -313,7 +313,12 @@ namespace Walkabout.Data
             Type columnType = null;
             bool hasLength = false;
             bool hasPrecision = false;
-            switch (parts[0])
+            // Column types are matched case-insensitively: GetCreateTableScript emits the
+            // application-maintained version column as uppercase "INTEGER" (SqlDatabase.cs),
+            // while ColumnMapping.GetSqlDefinition emits everything else lowercase. Sqlite's
+            // sqlite_master.sql stores the CREATE TABLE text verbatim, so GetTableSchema/
+            // ParseColumnSql round-trip whatever case was originally written.
+            switch (parts[0].ToLowerInvariant())
             {
                 case "int":
                 case "integer":
@@ -554,7 +559,7 @@ namespace Walkabout.Data
             if (!this.TableExists(mapping.TableName))
             {
                 // this is the easy case, we need to create the table
-                string createTable = GetCreateTableScript(mapping);
+                string createTable = GetCreateTableScript(mapping, DbFlavor.Sqlite);
                 this.ExecuteNonQuery(createTable);
             }
             else
@@ -648,7 +653,7 @@ namespace Walkabout.Data
                         // invent a new name for the temporary table
                         string originalTableName = mapping.TableName;
                         mapping.TableName = "NEW_" + originalTableName;
-                        string createTable = GetCreateTableScript(mapping);
+                        string createTable = GetCreateTableScript(mapping, DbFlavor.Sqlite);
                         this.ExecuteNonQuery(createTable);
 
                         // copy the data across to this new table, taking any "renames" into account.

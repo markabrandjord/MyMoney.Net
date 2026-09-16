@@ -342,7 +342,7 @@ namespace Walkabout.Data
             }
         }
 
-        internal static string GetCreateTableScript(TableMapping mapping)
+        internal static string GetCreateTableScript(TableMapping mapping, DbFlavor flavor)
         {
             /* for example:
              create table OnlineAccounts (
@@ -372,6 +372,21 @@ namespace Walkabout.Data
 
                 first = false;
             }
+
+            // Every table gets an optimistic-concurrency version column, engine-appropriate:
+            // SQL Server's ROWVERSION is engine-maintained (no application code ever sets it);
+            // SQLite has no equivalent type, so it's a plain application-maintained counter.
+            // See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+            sb.AppendLine(",");
+            if (flavor == DbFlavor.SqlServer)
+            {
+                sb.Append("  [RowVersion] ROWVERSION NOT NULL");
+            }
+            else
+            {
+                sb.Append("  [Version] INTEGER NOT NULL DEFAULT 1");
+            }
+
             sb.AppendLine();
             sb.AppendLine(")");
             return sb.ToString();
@@ -382,7 +397,7 @@ namespace Walkabout.Data
             if (!this.TableExists(mapping.TableName))
             {
                 // this is the easy case, we need to create the table
-                string createTable = GetCreateTableScript(mapping);
+                string createTable = GetCreateTableScript(mapping, this.DbFlavor);
                 this.ExecuteNonQuery(createTable);
             }
             else
