@@ -20,9 +20,9 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Transactions_Insert
-    @Id BIGINT, @Number NVARCHAR(20), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
+    @Id BIGINT, @Number NVARCHAR(10), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
     @Memo NVARCHAR(255), @Payee INT, @Category INT, @Transfer BIGINT, @TransferSplit INT,
-    @FITID NVARCHAR(50), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
+    @FITID NVARCHAR(40), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
     @BudgetBalanceDate DATETIME, @MergeDate DATETIME, @OriginalPayee NVARCHAR(255)
 AS
 BEGIN
@@ -35,9 +35,9 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Transactions_Update
-    @Id BIGINT, @Number NVARCHAR(20), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
+    @Id BIGINT, @Number NVARCHAR(10), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
     @Memo NVARCHAR(255), @Payee INT, @Category INT, @Transfer BIGINT, @TransferSplit INT,
-    @FITID NVARCHAR(50), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
+    @FITID NVARCHAR(40), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
     @BudgetBalanceDate DATETIME, @MergeDate DATETIME, @OriginalPayee NVARCHAR(255)
 AS
 BEGIN

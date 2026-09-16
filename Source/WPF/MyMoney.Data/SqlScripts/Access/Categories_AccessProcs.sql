@@ -16,8 +16,8 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Categories_Insert
-    @Id INT, @Name NVARCHAR(255), @Description NVARCHAR(255), @Type INT, @ParentId INT,
-    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(20), @TaxRefNum INT
+    @Id INT, @Name NVARCHAR(80), @Description NVARCHAR(255), @Type INT, @ParentId INT,
+    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(10), @TaxRefNum INT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -27,8 +27,8 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Categories_Update
-    @Id INT, @Name NVARCHAR(255), @Description NVARCHAR(255), @Type INT, @ParentId INT,
-    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(20), @TaxRefNum INT
+    @Id INT, @Name NVARCHAR(80), @Description NVARCHAR(255), @Type INT, @ParentId INT,
+    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(10), @TaxRefNum INT
 AS
 BEGIN
     SET NOCOUNT ON;

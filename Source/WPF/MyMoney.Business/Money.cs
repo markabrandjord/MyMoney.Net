@@ -9356,11 +9356,13 @@ namespace Walkabout.Data
 
                 this.transactions[t.Id] = t;
 
-                // Mirrors Accounts.AddAccount's guard: don't clobber a ChangeType the
-                // caller already set deliberately (e.g. OnDelete(), when re-adding an
-                // existing transaction to a scratch Transactions collection just to
-                // push a deletion through Update*). Only a genuinely fresh transaction
-                // should be forced to Inserted here.
+                // Don't clobber a ChangeType the caller already set deliberately
+                // (e.g. OnDelete(), when re-adding an existing transaction to a
+                // scratch Transactions collection just to push a deletion through
+                // Update*). Only a genuinely fresh transaction should be forced to
+                // Inserted here. (Uses an IsDeleted guard rather than Accounts.AddAccount's
+                // Id==-1 guard because AddTransaction's id!=-1 branch is also the
+                // legitimate XmlStore.Load path, documented just above.)
                 if (!t.IsDeleted)
                 {
                     t.OnInserted();

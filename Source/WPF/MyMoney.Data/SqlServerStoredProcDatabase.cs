@@ -8,11 +8,14 @@ using Walkabout.Utilities;
 namespace Walkabout.Data
 {
     /// <summary>
-    /// A SqlServerDatabase variant that performs Payees CRUD exclusively
-    /// through stored procedures, matching the grants given to the
-    /// MyMoneyUser login (see Database/SqlScripts/Access/Payees_AccessProcs.sql).
-    /// Other tables are not yet overridden -- see the "Known Limitation"
-    /// section of the plan that introduced this class.
+    /// A SqlServerDatabase variant that performs CRUD exclusively through
+    /// stored procedures, matching the grants given to the MyMoneyUser
+    /// login (see Database/SqlScripts/Access/*_AccessProcs.sql). Covers
+    /// Payees, Accounts, Categories, Currencies, Securities, StockSplits,
+    /// Aliases, Transactions, Splits, and Investment -- the entities
+    /// scoped to issue #22. OnlineAccounts, AccountAliases,
+    /// TransactionExtras, RentBuildings, RentUnits, and LoanPayments are
+    /// tracked separately as issue #23.
     /// </summary>
     public class SqlServerStoredProcDatabase : SqlServerDatabase
     {
@@ -37,17 +40,17 @@ namespace Walkabout.Data
         /// <summary>
         /// Overrides the base SqlServerDatabase.Load(), which starts with
         /// LazyCreateTables() (DDL against every [TableMapping] table) and
-        /// then reads every table via raw SQL (ReadOnlineAccounts,
-        /// ReadCategories, ReadAccounts, ReadTransactions, etc.). MyMoneyUser
-        /// only has EXECUTE grants on the four Payees_* access procedures
-        /// (see Database/SqlScripts/Access/Payees_AccessProcs.sql) -- it has
-        /// no direct table grants at all -- so LazyCreateTables() and every
-        /// ReadXxx() other than ReadPayees() would fail with a SQL Server
-        /// permissions error. This override reads only Payees, matching the
-        /// "Payees-only vertical slice" this class exists to prove out (see
-        /// the "Known Limitation" section of the plan that introduced it).
-        /// Every other MyMoney collection is left empty, not because the
-        /// data doesn't exist, but because reading it isn't wired up yet.
+        /// then reads every table via raw SQL. MyMoneyUser has no direct
+        /// table grants at all -- only EXECUTE on the *_AccessProcs.sql
+        /// stored procedures -- so LazyCreateTables() and the base class's
+        /// generic ReadXxx() methods would fail with a SQL Server
+        /// permissions error. This override reads every entity in scope
+        /// for issue #22 (Payees, Aliases, Categories, Accounts,
+        /// Currencies, Securities, StockSplits, Transactions -- with
+        /// Splits and Investment read inline inside ReadTransactions) via
+        /// their dedicated stored procedures, in FK-safe dependency
+        /// order. OnlineAccounts and the other issue #23 entities are
+        /// still left empty.
         /// </summary>
         public override MyMoney Load(IStatusService status)
         {
@@ -151,7 +154,7 @@ namespace Walkabout.Data
                     {
                         int id = reader.GetInt32(0);
                         Account a = accts.AddAccount(id);
-                        a.AccountId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        a.AccountId = reader.IsDBNull(1) ? null : reader.GetString(1).TrimEnd();
                         a.OfxAccountId = reader.IsDBNull(2) ? null : reader.GetString(2);
                         a.Name = reader.IsDBNull(3) ? null : reader.GetString(3);
                         a.Type = (AccountType)reader.GetInt32(4);
@@ -177,7 +180,7 @@ namespace Walkabout.Data
                         {
                             a.Flags = (AccountFlags)reader.GetInt32(11);
                         }
-                        a.Currency = reader.IsDBNull(12) ? null : reader.GetString(12);
+                        a.Currency = reader.IsDBNull(12) ? null : reader.GetString(12).TrimEnd();
                         a.WebSite = reader.IsDBNull(13) ? null : reader.GetString(13);
                         if (!reader.IsDBNull(14))
                         {
@@ -290,7 +293,7 @@ namespace Walkabout.Data
                         }
                         if (!reader.IsDBNull(8))
                         {
-                            c.Color = reader.GetString(8);
+                            c.Color = reader.GetString(8).TrimEnd();
                         }
                         if (!reader.IsDBNull(9))
                         {
@@ -549,24 +552,27 @@ namespace Walkabout.Data
                 connection.Open();
                 foreach (StockSplit s in stockSplits)
                 {
-                    if (s.Security == null || s.Date == DateTime.MinValue)
+                    if (s.IsChanged || s.IsInserted)
                     {
-                        continue;
-                    }
+                        if (s.Security == null || s.Date == DateTime.MinValue)
+                        {
+                            continue;
+                        }
 
-                    (string Name, object Value)[] parameters =
-                    {
-                        ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
-                        ("@Numerator", s.Numerator), ("@Denominator", s.Denominator)
-                    };
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
+                            ("@Numerator", s.Numerator), ("@Denominator", s.Denominator)
+                        };
 
-                    if (s.IsChanged)
-                    {
-                        ExecuteProc(connection, "dbo.StockSplits_Update", parameters);
-                    }
-                    else if (s.IsInserted)
-                    {
-                        ExecuteProc(connection, "dbo.StockSplits_Insert", parameters);
+                        if (s.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.StockSplits_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.StockSplits_Insert", parameters);
+                        }
                     }
                     else if (s.IsDeleted)
                     {
@@ -622,19 +628,22 @@ namespace Walkabout.Data
                 connection.Open();
                 foreach (Alias a in aliases)
                 {
-                    (string Name, object Value)[] parameters =
+                    if (a.IsChanged || a.IsInserted)
                     {
-                        ("@Id", a.Id), ("@Pattern", (object)a.Pattern ?? DBNull.Value), ("@Payee", a.Payee.Id),
-                        ("@Flags", (int)a.AliasType)
-                    };
+                        (string Name, object Value)[] parameters =
+                        {
+                            ("@Id", a.Id), ("@Pattern", (object)a.Pattern ?? DBNull.Value), ("@Payee", a.Payee.Id),
+                            ("@Flags", (int)a.AliasType)
+                        };
 
-                    if (a.IsChanged)
-                    {
-                        ExecuteProc(connection, "dbo.Aliases_Update", parameters);
-                    }
-                    else if (a.IsInserted)
-                    {
-                        ExecuteProc(connection, "dbo.Aliases_Insert", parameters);
+                        if (a.IsChanged)
+                        {
+                            ExecuteProc(connection, "dbo.Aliases_Update", parameters);
+                        }
+                        else
+                        {
+                            ExecuteProc(connection, "dbo.Aliases_Insert", parameters);
+                        }
                     }
                     else if (a.IsDeleted)
                     {
