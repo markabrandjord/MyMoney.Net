@@ -463,5 +463,86 @@ namespace Walkabout.Tests
             db.ReadTransactions(afterDelete.Transactions, afterDelete);
             Assert.That(afterDelete.Transactions.Count, Is.EqualTo(0));
         }
+
+        [Test]
+        public void InsertUpdateDeleteInvestment_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("SqlServerStoredProcDatabaseTests Investment Account");
+            account.Type = AccountType.Brokerage;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var security = money.Securities.AddSecurity(0);
+            security.Name = "SqlServerStoredProcDatabaseTests Investment Security";
+            security.Symbol = "ZZI";
+            security.OnInserted();
+            db.UpdateSecurities(money.Securities);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -1000.00m;
+            money.Transactions.AddTransaction(transaction);
+            var investment = transaction.GetOrCreateInvestment();
+            investment.Security = security;
+            investment.UnitPrice = 100.00m;
+            investment.Units = 10;
+            investment.Type = InvestmentType.Buy;
+            transaction.OnInserted();
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Investment Account");
+            var foundTransaction = reloaded.Transactions.GetTransactionsFrom(reloadedAccount).First();
+            Assert.That(foundTransaction.Investment, Is.Not.Null);
+            Assert.That(foundTransaction.Investment.UnitPrice, Is.EqualTo(100.00m));
+            Assert.That(foundTransaction.Investment.Units, Is.EqualTo(10));
+
+            foundTransaction.Investment.Units = 20;
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Investment Account");
+            var updatedTransaction = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount).First();
+            Assert.That(updatedTransaction.Investment.Units, Is.EqualTo(20));
+
+            // Cascade-mark the investment as deleted too, mirroring what
+            // Transactions.RemoveTransaction does (Money.cs) -- Transaction.OnDelete()
+            // itself does NOT cascade to the child Investment, so without this the
+            // investment row is orphaned in the database once its owning transaction
+            // is deleted.
+            if (updatedTransaction.Investment != null)
+            {
+                updatedTransaction.Investment.OnDelete();
+            }
+            updatedTransaction.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updatedTransaction);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            var securityToDelete = afterUpdate.Securities.FindSecurity("SqlServerStoredProcDatabaseTests Investment Security", false);
+            securityToDelete.OnDelete();
+            var securitiesToDelete = new Securities(afterUpdate);
+            securitiesToDelete.Add(securityToDelete);
+            db.UpdateSecurities(securitiesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount("SqlServerStoredProcDatabaseTests Investment Account"), Is.Null);
+        }
     }
 }

@@ -3402,7 +3402,7 @@ namespace Walkabout.Data
             return reader;
         }
 
-        public void UpdateInvestment(Investment i)
+        public virtual void UpdateInvestment(Investment i)
         {
             if (i == null)
             {

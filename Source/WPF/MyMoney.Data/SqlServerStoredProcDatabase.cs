@@ -836,6 +836,57 @@ namespace Walkabout.Data
                         }
                     }
                 }
+
+                using (var command = new SqlCommand("dbo.Investments_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        Transaction t = transactions.FindTransactionById(id);
+                        if (t == null)
+                        {
+                            continue;
+                        }
+
+                        Investment i = t.GetOrCreateInvestment();
+                        i.Security = money.Securities.FindSecurityAt(reader.GetInt32(1));
+                        i.UnitPrice = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                        i.Units = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        i.Commission = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        i.Type = (InvestmentType)reader.GetInt32(5);
+                        if (!reader.IsDBNull(6))
+                        {
+                            i.TradeType = (InvestmentTradeType)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            i.TaxExempt = reader.GetBoolean(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            i.Withholding = reader.GetDecimal(8);
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            i.MarkUpDown = reader.GetDecimal(9);
+                        }
+                        if (!reader.IsDBNull(10))
+                        {
+                            i.Taxes = reader.GetDecimal(10);
+                        }
+                        if (!reader.IsDBNull(11))
+                        {
+                            i.Fees = reader.GetDecimal(11);
+                        }
+                        if (!reader.IsDBNull(12))
+                        {
+                            i.Load = reader.GetDecimal(12);
+                        }
+                        i.OnUpdated();
+                        t.OnUpdated();
+                    }
+                }
             }
 
             // recompute state of Payee objects
@@ -971,6 +1022,40 @@ namespace Walkabout.Data
                 s.OnUpdated();
             }
             splits.RemoveDeleted();
+        }
+
+        public override void UpdateInvestment(Investment i)
+        {
+            if (i == null)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                (string Name, object Value)[] parameters =
+                {
+                    ("@Id", i.Id), ("@Security", i.Security == null ? -1 : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                    ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
+                    ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
+                    ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load)
+                };
+
+                if (i.IsChanged)
+                {
+                    ExecuteProc(connection, "dbo.Investments_Update", parameters);
+                }
+                else if (i.IsInserted)
+                {
+                    ExecuteProc(connection, "dbo.Investments_Insert", parameters);
+                }
+                else if (i.IsDeleted)
+                {
+                    ExecuteProc(connection, "dbo.Investments_Delete", ("@Id", i.Id));
+                }
+            }
+            i.OnUpdated();
         }
 
         /// <summary>
