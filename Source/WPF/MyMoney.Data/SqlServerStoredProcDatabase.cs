@@ -1441,8 +1441,8 @@ namespace Walkabout.Data
                     {
                         ("@Id", t.Id), ("@Number", (object)t.Number ?? DBNull.Value), ("@Account", t.Account.Id),
                         ("@Date", SqlServerDatabase.DBDateTimeParam(t.Date)), ("@Amount", t.Amount), ("@Status", (int)t.Status),
-                        ("@Memo", (object)t.Memo ?? DBNull.Value), ("@Payee", t.Payee != null ? t.Payee.Id : -1),
-                        ("@Category", t.Category != null ? t.Category.Id : -1),
+                        ("@Memo", (object)t.Memo ?? DBNull.Value), ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value),
+                        ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
                         ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
                         ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
                         ("@FITID", (object)t.FITID ?? DBNull.Value), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
@@ -1499,9 +1499,9 @@ namespace Walkabout.Data
                     (string Name, object Value)[] parameters =
                     {
                         ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
-                        ("@Category", s.Category != null ? s.Category.Id : -1), ("@Memo", (object)s.Memo ?? DBNull.Value),
+                        ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", (object)s.Memo ?? DBNull.Value),
                         ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
-                        ("@Payee", s.Payee != null ? s.Payee.Id : -1), ("@Flags", (int)s.Flags),
+                        ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
                         ("@BudgetBalanceDate", SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate))
                     };
 
