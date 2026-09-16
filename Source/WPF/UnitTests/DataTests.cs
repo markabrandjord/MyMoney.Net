@@ -225,6 +225,24 @@ namespace Walkabout.Tests
             Assert.That(((IAggregateRoot)account).Id, Is.EqualTo(42L));
         }
 
+        [Test]
+        public void ConcurrencyConflictException_NonAggregateRootRoot_DoesNotThrow()
+        {
+            // The constructor must never throw itself - even for a PersistentObject that
+            // doesn't implement IAggregateRoot (e.g. an owned child like Split) - or it would
+            // mask the real conflict being reported with an unrelated InvalidCastException.
+            Split notAnAggregateRoot = new Split();
+
+            ConcurrencyConflictException ex = null;
+            Assert.DoesNotThrow(() =>
+                ex = new ConcurrencyConflictException(notAnAggregateRoot, storedRowVersion: 1, callerRowVersion: 0));
+
+            Assert.That(ex.Root, Is.SameAs(notAnAggregateRoot));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(1));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(0));
+            Assert.That(ex.Message, Does.Contain("Split"));
+        }
+
     }
 
     [DataContract(Namespace = "http://test")]

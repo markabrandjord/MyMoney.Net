@@ -15223,17 +15223,25 @@ namespace Walkabout.Data
     public class ConcurrencyConflictException : Exception
     {
         public PersistentObject Root { get; }
-        public long ExpectedRowVersion { get; }
-        public long ActualRowVersion { get; }
 
-        public ConcurrencyConflictException(PersistentObject root, long expectedRowVersion, long actualRowVersion)
+        /// <summary>
+        /// The RowVersion actually held by the store at the time of the conflicting write.
+        /// </summary>
+        public long StoredRowVersion { get; }
+
+        /// <summary>
+        /// The RowVersion the caller had on the root it tried to save.
+        /// </summary>
+        public long CallerRowVersion { get; }
+
+        public ConcurrencyConflictException(PersistentObject root, long storedRowVersion, long callerRowVersion)
             : base(string.Format(
-                "Concurrency conflict saving {0} (Id={1}): expected RowVersion {2} but the caller had {3}.",
-                root.GetType().Name, ((IAggregateRoot)root).Id, expectedRowVersion, actualRowVersion))
+                "Concurrency conflict saving {0} (Id={1}): store has RowVersion {2} but the caller had {3}.",
+                root.GetType().Name, (root as IAggregateRoot)?.Id.ToString() ?? "?", storedRowVersion, callerRowVersion))
         {
             this.Root = root;
-            this.ExpectedRowVersion = expectedRowVersion;
-            this.ActualRowVersion = actualRowVersion;
+            this.StoredRowVersion = storedRowVersion;
+            this.CallerRowVersion = callerRowVersion;
         }
     }
 
