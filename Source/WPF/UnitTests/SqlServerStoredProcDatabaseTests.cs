@@ -220,5 +220,61 @@ namespace Walkabout.Tests
             db.ReadSecurities(afterDelete.Securities, afterDelete);
             Assert.That(afterDelete.Securities.FindSecurity("SqlServerStoredProcDatabaseTests Security", false), Is.Null);
         }
+
+        [Test]
+        public void InsertUpdateDeleteStockSplit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var security = money.Securities.AddSecurity(0);
+            security.Name = "SqlServerStoredProcDatabaseTests StockSplit Security";
+            security.Symbol = "ZZP";
+            security.OnInserted();
+            db.UpdateSecurities(money.Securities);
+
+            var split = money.StockSplits.AddStockSplit(0);
+            split.Date = new DateTime(2026, 1, 1);
+            split.Security = security;
+            split.Numerator = 2;
+            split.Denominator = 1;
+            split.OnInserted();
+            db.UpdateStockSplits(money.StockSplits);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            db.ReadStockSplits(reloaded.StockSplits, reloaded);
+            var reloadedSecurity = reloaded.Securities.FindSecurity("SqlServerStoredProcDatabaseTests StockSplit Security", false);
+            var found = reloaded.StockSplits.FindStockSplitByDate(reloadedSecurity, split.Date);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Numerator, Is.EqualTo(2));
+            Assert.That(found.Denominator, Is.EqualTo(1));
+
+            found.Numerator = 3;
+            db.UpdateStockSplits(reloaded.StockSplits);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            db.ReadStockSplits(afterUpdate.StockSplits, afterUpdate);
+            var afterUpdateSecurity = afterUpdate.Securities.FindSecurity("SqlServerStoredProcDatabaseTests StockSplit Security", false);
+            var updated = afterUpdate.StockSplits.FindStockSplitByDate(afterUpdateSecurity, split.Date);
+            Assert.That(updated.Numerator, Is.EqualTo(3));
+
+            updated.OnDelete();
+            var toDelete = new StockSplits(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateStockSplits(toDelete);
+
+            afterUpdateSecurity.OnDelete();
+            var securitiesToDelete = new Securities(afterUpdate);
+            securitiesToDelete.Add(afterUpdateSecurity);
+            db.UpdateSecurities(securitiesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadSecurities(afterDelete.Securities, afterDelete);
+            db.ReadStockSplits(afterDelete.StockSplits, afterDelete);
+            Assert.That(afterDelete.Securities.FindSecurity("SqlServerStoredProcDatabaseTests StockSplit Security", false), Is.Null);
+        }
     }
 }

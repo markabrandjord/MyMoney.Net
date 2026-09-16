@@ -59,6 +59,7 @@ namespace Walkabout.Data
                 this.ReadAccounts(money.Accounts, money);
                 this.ReadCurrencies(money.Currencies, money);
                 this.ReadSecurities(money.Securities, money);
+                this.ReadStockSplits(money.StockSplits, money);
             }
             finally
             {
@@ -502,6 +503,80 @@ namespace Walkabout.Data
                 s.OnUpdated();
             }
             securities.RemoveDeleted();
+        }
+
+        public void ReadStockSplits(StockSplits splits, MyMoney money)
+        {
+            splits.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand("dbo.StockSplits_SelectAll", connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    splits.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        StockSplit s = splits.AddStockSplit(id);
+                        if (!reader.IsDBNull(1))
+                        {
+                            s.Date = reader.GetDateTime(1);
+                        }
+                        s.Security = money.Securities.FindSecurityAt(reader.GetInt32(2));
+                        s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        s.OnUpdated();
+                    }
+                    splits.EndUpdate();
+                }
+            }
+            splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
+        }
+
+        public new void UpdateStockSplits(StockSplits stockSplits)
+        {
+            if (stockSplits.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (StockSplit s in stockSplits)
+                {
+                    if (s.Security == null || s.Date == DateTime.MinValue)
+                    {
+                        continue;
+                    }
+
+                    (string Name, object Value)[] parameters =
+                    {
+                        ("@Id", s.Id), ("@Date", SqlServerDatabase.DBDateTimeParam(s.Date)), ("@Security", s.Security.Id),
+                        ("@Numerator", s.Numerator), ("@Denominator", s.Denominator)
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, "dbo.StockSplits_Update", parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, "dbo.StockSplits_Insert", parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, "dbo.StockSplits_Delete", ("@Id", s.Id));
+                    }
+                }
+            }
+
+            foreach (StockSplit s in stockSplits)
+            {
+                s.OnUpdated();
+            }
+            stockSplits.RemoveDeleted();
         }
 
         /// <summary>
