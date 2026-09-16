@@ -104,7 +104,7 @@ namespace Walkabout.Tests
 namespace Walkabout.Data.Tests
 {
     [TestFixture]
-    public class SqlMappingTests
+    public class SchemaGenerationTests
     {
         [TableMapping(TableName = "MappingTestTable")]
         private class FakeRow
@@ -150,9 +150,34 @@ namespace Walkabout.Data.Tests
         [Test]
         public void GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping()
         {
+            // SQLite (and SQL CE) resolve FK targets at DML time, not DDL time, so they keep the
+            // FOREIGN KEY constraint inline in the CREATE TABLE statement itself.
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.Sqlite);
+            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
+        }
+
+        [Test]
+        public void GetCreateTableScript_SqlServer_OmitsInlineForeignKey()
+        {
+            // Real SQL Server is DDL-strict about FOREIGN KEY targets existing at CREATE TABLE
+            // time, and LazyCreateTables() creates tables in reflection order, which does not
+            // guarantee dependency order. So for SqlServer, FK constraints must NOT be inlined
+            // into CREATE TABLE -- they're added afterwards via GetAddForeignKeyScripts() instead
+            // (see the companion test below).
             var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
             string script = SqlServerDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
-            Assert.That(script, Does.Contain("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])"));
+            Assert.That(script, Does.Not.Contain("FOREIGN KEY"));
+        }
+
+        [Test]
+        public void GetAddForeignKeyScripts_DerivesForeignKeyFromColumnObjectMapping()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow), TableName = "MappingTestChildTable" };
+            var scripts = SqlServerDatabase.GetAddForeignKeyScripts(mapping).ToList();
+            Assert.That(scripts, Has.One.Matches<string>(s =>
+                s.Contains("ALTER TABLE [MappingTestChildTable]") &&
+                s.Contains("FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])")));
         }
 
         [Test]
