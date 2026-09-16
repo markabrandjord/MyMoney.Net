@@ -20,8 +20,8 @@ GO
 CREATE OR ALTER PROCEDURE dbo.Accounts_Insert
     @Id INT, @AccountId NVARCHAR(20), @OfxAccountId NVARCHAR(50), @Name NVARCHAR(80), @Type INT,
     @Description NVARCHAR(255), @OnlineAccount INT, @OpeningBalance MONEY, @LastSync DATETIME,
-    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(10),
-    @WebSite NVARCHAR(255), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
+    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(3),
+    @WebSite NVARCHAR(512), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -37,8 +37,8 @@ GO
 CREATE OR ALTER PROCEDURE dbo.Accounts_Update
     @Id INT, @AccountId NVARCHAR(20), @OfxAccountId NVARCHAR(50), @Name NVARCHAR(80), @Type INT,
     @Description NVARCHAR(255), @OnlineAccount INT, @OpeningBalance MONEY, @LastSync DATETIME,
-    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(10),
-    @WebSite NVARCHAR(255), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
+    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(3),
+    @WebSite NVARCHAR(512), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
 AS
 BEGIN
     SET NOCOUNT ON;
