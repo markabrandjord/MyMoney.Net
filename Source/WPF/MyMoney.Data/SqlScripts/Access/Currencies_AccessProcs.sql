@@ -15,7 +15,7 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Currencies_Insert
-    @Id INT, @Symbol NVARCHAR(10), @Name NVARCHAR(80), @Ratio DECIMAL(18,6), @LastRatio DECIMAL(18,6), @CultureCode NVARCHAR(10)
+    @Id INT, @Symbol NVARCHAR(20), @Name NVARCHAR(80), @Ratio MONEY, @LastRatio MONEY, @CultureCode NVARCHAR(80)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -25,7 +25,7 @@ END
 GO
 
 CREATE OR ALTER PROCEDURE dbo.Currencies_Update
-    @Id INT, @Symbol NVARCHAR(10), @Name NVARCHAR(80), @Ratio DECIMAL(18,6), @LastRatio DECIMAL(18,6), @CultureCode NVARCHAR(10)
+    @Id INT, @Symbol NVARCHAR(20), @Name NVARCHAR(80), @Ratio MONEY, @LastRatio MONEY, @CultureCode NVARCHAR(80)
 AS
 BEGIN
     SET NOCOUNT ON;
