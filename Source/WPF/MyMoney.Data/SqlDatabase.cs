@@ -1118,7 +1118,7 @@ namespace Walkabout.Data
         }
 
         #region TABLE ACCCOUNTS
-        public void ReadAccounts(Accounts accts, MyMoney money)
+        public virtual void ReadAccounts(Accounts accts, MyMoney money)
         {
             IDataReader reader = this.ExecuteReader("SELECT Id,AccountId,Name,Type,Description,OnlineAccount,OpeningBalance,LastSync,LastBalance,SyncGuid,Flags,Currency,WebSite,ReconcileWarning,CategoryIdForPrincipal,CategoryIdForInterest,OfxAccountId FROM Accounts");
             accts.BeginUpdate(false);
@@ -1178,7 +1178,7 @@ namespace Walkabout.Data
             reader.Close();
         }
 
-        public void UpdateAccounts(Accounts accounts)
+        public virtual void UpdateAccounts(Accounts accounts)
         {
             if (accounts.Count == 0)
             {

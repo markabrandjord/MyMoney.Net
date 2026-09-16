@@ -100,15 +100,15 @@ namespace Walkabout.Data
             adminDatabase.Disconnect();
 
             Console.WriteLine("Deploying issue #22 access procedures as 'MyMoneyAdmin'...");
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Accounts_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Categories_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Currencies_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Securities_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "StockSplits_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Aliases_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Transactions_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Splits_AccessProcs.sql")));
-            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, "Access", "Investments_AccessProcs.sql")));
+            string[] accessProcs = { "Payees_AccessProcs.sql", "Accounts_AccessProcs.sql", "Categories_AccessProcs.sql", "Currencies_AccessProcs.sql", "Securities_AccessProcs.sql", "StockSplits_AccessProcs.sql", "Aliases_AccessProcs.sql", "Transactions_AccessProcs.sql", "Splits_AccessProcs.sql", "Investments_AccessProcs.sql" };
+            foreach (var procFile in accessProcs)
+            {
+                string procPath = Path.Combine(this.sqlScriptsRoot, "Access", procFile);
+                if (File.Exists(procPath))
+                {
+                    ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(procPath));
+                }
+            }
 
             // Credentials are written only after every deployment step has
             // succeeded -- writing them earlier (e.g. right after the sa-run
