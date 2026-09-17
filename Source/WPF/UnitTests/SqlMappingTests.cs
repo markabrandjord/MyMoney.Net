@@ -196,4 +196,79 @@ namespace Walkabout.Data.Tests
                 s.Contains("CREATE INDEX") && s.Contains("MappingTestChildTable") && s.Contains("ParentId")));
         }
     }
+
+    [TestFixture]
+    public class VersionColumnRetrofitTests
+    {
+        [TableMapping(TableName = "VersionRetrofitTestTable")]
+        private class FakeVersionRetrofitRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+
+            [ColumnMapping(ColumnName = "Name", MaxLength = 50)]
+            public string Name { get; set; }
+        }
+
+        [Test]
+        public void CreateOrUpdateTable_Sqlite_RetrofitsMissingVersionColumnWithDefaultOfOne()
+        {
+            string dbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"VersionRetrofitTest_{Guid.NewGuid():N}.mmdb");
+            if (System.IO.File.Exists(dbPath))
+            {
+                System.IO.File.Delete(dbPath);
+            }
+
+            var db = new SqliteDatabase { DatabasePath = dbPath };
+            try
+            {
+                db.Create();
+
+                // Simulate a database file that predates the Version-column retrofit (persistence-
+                // concurrency Phase 1 Task 3 added Version only to GetCreateTableScript's freshly
+                // CREATEd tables): create the table directly via raw SQL, deliberately WITHOUT a
+                // Version column, and insert a row into it BEFORE CreateOrUpdateTable ever runs -
+                // exactly what an on-disk file saved before that change looks like. Every other
+                // column matches FakeVersionRetrofitRow's mapping exactly (same nullability/type),
+                // and each column is on its own line (matching GetCreateTableScript's own
+                // formatting - GetTableSchema's CREATE-TABLE-text parser assumes the opening
+                // "create table (" line carries no column of its own), so CreateOrUpdateTable takes
+                // the simple in-place ALTER TABLE path instead of the newTable rebuild path - this
+                // test is specifically about the ALTER-path retrofit, not the separate (and
+                // separately tracked, see the plan's "What's next") newTable-rebuild Version-loss
+                // gap.
+                db.ExecuteNonQuery(
+                    "CREATE TABLE [VersionRetrofitTestTable] (\r\n" +
+                    "  [Id] int PRIMARY KEY,\r\n" +
+                    "  [Name] nvarchar(50) NOT NULL\r\n" +
+                    ");");
+                db.ExecuteNonQuery("INSERT INTO [VersionRetrofitTestTable] ([Id],[Name]) VALUES (1,'pre-existing row');");
+
+                TableMapping beforeMetadata = db.LoadTableMetadata("VersionRetrofitTestTable");
+                Assert.That(beforeMetadata.FindColumn("Id"), Is.Not.Null,
+                    "Precondition: the raw CREATE TABLE must parse with both real columns present (guards against silently mis-formatting the raw SQL).");
+                Assert.That(beforeMetadata.FindColumn("Version"), Is.Null,
+                    "Precondition: the simulated pre-existing table must not already have a Version column.");
+
+                var mapping = new TableMapping { ObjectType = typeof(FakeVersionRetrofitRow), TableName = "VersionRetrofitTestTable" };
+                db.CreateOrUpdateTable(mapping);
+
+                TableMapping afterMetadata = db.LoadTableMetadata("VersionRetrofitTestTable");
+                ColumnMapping versionColumn = afterMetadata.FindColumn("Version");
+                Assert.That(versionColumn, Is.Not.Null,
+                    "CreateOrUpdateTable must retrofit the Version column onto a pre-existing table that lacks it.");
+                Assert.That(versionColumn.AllowNulls, Is.False);
+
+                // Confirm DEFAULT 1 actually applied to the pre-existing row, not just to the new
+                // column's metadata - this is what SqliteDatabase.ReadCategories/SaveOneCategory
+                // depend on to have a sane starting RowVersion for rows that existed before Phase 2b.
+                object versionValue = db.ExecuteScalar("SELECT [Version] FROM [VersionRetrofitTestTable] WHERE [Id]=1;");
+                Assert.That(Convert.ToInt64(versionValue), Is.EqualTo(1));
+            }
+            finally
+            {
+                db.Delete();
+            }
+        }
+    }
 }

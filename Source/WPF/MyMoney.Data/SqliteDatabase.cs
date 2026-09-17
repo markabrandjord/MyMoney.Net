@@ -32,6 +32,8 @@ namespace Walkabout.Data
 
         private SQLiteConnection sqliteConnection;
 
+        protected override string VersionColumnName { get { return "Version"; } }
+
 
         // BugBug: there's some sort of horrible exponential performance bug in the System.Data.Sqlite wrappers.
         // so for now we have to return false, even though that too is slow.
@@ -81,6 +83,16 @@ namespace Walkabout.Data
             {
                 File.Delete(this.DatabasePath);
             }
+            string walPath = this.DatabasePath + "-wal";
+            if (File.Exists(walPath))
+            {
+                File.Delete(walPath);
+            }
+            string shmPath = this.DatabasePath + "-shm";
+            if (File.Exists(shmPath))
+            {
+                File.Delete(shmPath);
+            }
         }
 
         public static SqliteDatabase Restore(string backup, string databaseFile, string password)
@@ -96,6 +108,20 @@ namespace Walkabout.Data
 
             result.Connect(); // make sure we can connect to it.
             result.Disconnect();
+
+            // Clear any stale WAL/SHM sidecars at the target before overwriting the main file -
+            // otherwise SQLite could replay a stale WAL from a previous session against the
+            // freshly restored database.
+            string targetWalPath = fullDatabasePath + "-wal";
+            if (File.Exists(targetWalPath))
+            {
+                File.Delete(targetWalPath);
+            }
+            string targetShmPath = fullDatabasePath + "-shm";
+            if (File.Exists(targetShmPath))
+            {
+                File.Delete(targetShmPath);
+            }
 
             // Ok, then we're good to copy it.
             File.Copy(fullBackupPath, fullDatabasePath, true);
@@ -138,6 +164,22 @@ namespace Walkabout.Data
                 using (var pragmaCommand = new SQLiteCommand("PRAGMA foreign_keys = ON;", this.sqliteConnection))
                 {
                     pragmaCommand.ExecuteNonQuery();
+                }
+                // WAL mode: readers never block writers, writers never block readers - the
+                // opposite of the default rollback-journal mode, which serializes all access.
+                // busy_timeout: a second writer retries for up to this many milliseconds instead
+                // of failing immediately with SQLITE_BUSY. 5000ms is a starting default (not
+                // spec-mandated - a same-machine local agent contending with an interactive user
+                // should resolve well within this window; revisit if real contention testing
+                // shows it's too short or needlessly long). See
+                // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R3.
+                using (var walCommand = new SQLiteCommand("PRAGMA journal_mode=WAL;", this.sqliteConnection))
+                {
+                    walCommand.ExecuteNonQuery();
+                }
+                using (var busyTimeoutCommand = new SQLiteCommand("PRAGMA busy_timeout=5000;", this.sqliteConnection))
+                {
+                    busyTimeoutCommand.ExecuteNonQuery();
                 }
             }
             return this.sqliteConnection;
@@ -564,6 +606,17 @@ namespace Walkabout.Data
         public override void Backup(string backupPath)
         {
             this.BackupPath = backupPath;
+            if (this.sqliteConnection != null && this.sqliteConnection.State == ConnectionState.Open)
+            {
+                // Under WAL mode, committed transactions can live in the "-wal" sidecar file until
+                // a checkpoint happens - a raw File.Copy of just the main .mmdb file can silently
+                // produce a backup missing the most recent transactions. Checkpoint (and truncate
+                // the WAL back to empty) before copying so the main file is fully up to date.
+                using (var checkpointCommand = new SQLiteCommand("PRAGMA wal_checkpoint(TRUNCATE);", this.sqliteConnection))
+                {
+                    checkpointCommand.ExecuteNonQuery();
+                }
+            }
             File.Copy(this.DatabasePath, backupPath);
         }
 
@@ -778,6 +831,29 @@ namespace Walkabout.Data
                             }
                         }
 
+                        if (actual.FindColumn(this.VersionColumnName) == null)
+                        {
+                            // Retrofit the optimistic-concurrency version column onto a database
+                            // file that predates persistence-concurrency Phase 1 Task 3 (which
+                            // added it only to GetCreateTableScript's freshly-CREATEd tables).
+                            // The newColumns loop above can never catch this itself: Version/
+                            // RowVersion is deliberately excluded from mapping.Columns (Task 4's
+                            // guard a few lines below, so it's also never treated as a column to
+                            // drop), since it's engine-injected rather than reflected off the
+                            // domain model. Without this, an old on-disk file would never get the
+                            // column added - harmless until persistence-concurrency Phase 2b's
+                            // SaveOne/ReadCategories (SqliteDatabase.ReadCategories) started
+                            // unconditionally selecting it, at which point every load of such a
+                            // file would fail with "no such column: Version". DEFAULT 1 mirrors
+                            // GetCreateTableScript's own literal for freshly created tables, and
+                            // SQLite allows a NOT NULL ADD COLUMN precisely because it has one.
+                            string addVersionColumn = string.Format(
+                                "ALTER TABLE [{0}] ADD COLUMN [{1}] INTEGER NOT NULL DEFAULT 1;",
+                                mapping.TableName, this.VersionColumnName);
+                            log.AppendLine(addVersionColumn);
+                            this.ExecuteScalar(addVersionColumn);
+                        }
+
                         if (renames.Count > 0)
                         {
                             // create the new column that was added.
@@ -840,6 +916,273 @@ namespace Walkabout.Data
                     this.AppendLog(log.ToString());
                 }
             }
+        }
+
+        /// <summary>
+        /// Runs a parameterized non-query inside the given explicit transaction and returns the
+        /// affected-row count - unlike the existing ExecuteNonQuery overrides (which never take a
+        /// transaction parameter and discard the row count), this is what SaveOne/SaveBatch need
+        /// to detect a RowVersion conflict (zero rows affected on an UPDATE/DELETE whose WHERE
+        /// clause checked the version). Private: only this class's new SaveOne/SaveBatch path
+        /// uses it.
+        /// </summary>
+        private int ExecuteNonQueryInTransaction(SQLiteTransaction transaction, string cmd, params (string Name, object Value)[] parameters)
+        {
+            this.AppendLog(cmd);
+            using (SQLiteCommand command = new SQLiteCommand(cmd, this.sqliteConnection, transaction))
+            {
+                foreach (var (name, value) in parameters)
+                {
+                    DbParameter p = command.CreateParameter();
+                    p.ParameterName = name;
+                    p.Value = value ?? DBNull.Value;
+                    command.Parameters.Add(p);
+                }
+                return command.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// Same transaction-explicit pattern as ExecuteNonQueryInTransaction, for the single
+        /// follow-up SELECT SaveOneCategory issues after a detected conflict, to report the
+        /// store's actual current RowVersion in ConcurrencyConflictException rather than a
+        /// sentinel. Only reached on the rare conflict path.
+        /// </summary>
+        private object ExecuteScalarInTransaction(SQLiteTransaction transaction, string cmd, params (string Name, object Value)[] parameters)
+        {
+            using (SQLiteCommand command = new SQLiteCommand(cmd, this.sqliteConnection, transaction))
+            {
+                foreach (var (name, value) in parameters)
+                {
+                    DbParameter p = command.CreateParameter();
+                    p.ParameterName = name;
+                    p.Value = value ?? DBNull.Value;
+                    command.Parameters.Add(p);
+                }
+                return command.ExecuteScalar();
+            }
+        }
+
+        public override void SaveOne<T>(T root)
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public override void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            List<PersistentObject> list = new List<PersistentObject>(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Only Category has a real implementation in this phase. If the batch contains
+            // anything else, delegate the WHOLE call to the inherited Phase 2a stub rather than
+            // partially committing some roots and throwing on others.
+            foreach (PersistentObject root in list)
+            {
+                if (!(root is Category))
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+            }
+
+            this.Connect();
+            using (SQLiteTransaction transaction = this.sqliteConnection.BeginTransaction())
+            {
+                // Every in-memory side effect (RowVersion assignment, OnUpdated, RemoveChild) is
+                // deferred into this list and only run AFTER Commit() succeeds. If any later root in
+                // this batch conflicts, the catch below rolls back EVERY write this transaction made -
+                // including ones whose own SQL statement already "succeeded" earlier in the loop. If
+                // this method mutated in-memory state immediately per-root instead, an earlier root's
+                // RowVersion/dirty-flag would end up claiming a commit that the rollback undid,
+                // violating R3 ("a failure leaves in-memory dirty-tracking state exactly matching
+                // what's actually in the database"). See SaveBatch_OneStaleRootAmongMany_
+                // RollsBackTransactionAndPreservesInMemoryState below, which fails without this.
+                List<Action> postCommitActions = new List<Action>();
+                try
+                {
+                    foreach (PersistentObject root in list)
+                    {
+                        this.SaveOneCategory((Category)root, transaction, postCommitActions);
+                    }
+                    transaction.Commit();
+                }
+                catch (Exception originalException)
+                {
+                    // A failing Rollback() (plausible under WAL/busy_timeout - Commit() can fail
+                    // with SQLITE_BUSY, and rollback of an already-troubled transaction can fail
+                    // too) must never silently replace/hide the original exception (e.g. a
+                    // ConcurrencyConflictException the caller needs to see), and must never leave
+                    // the caller thinking the rollback happened when it didn't.
+                    try
+                    {
+                        transaction.Rollback();
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        throw new Exception("Rollback failed after: " + originalException.Message, rollbackException);
+                    }
+                    throw;
+                }
+
+                // Only reached after Commit() succeeded - the catch above always rethrows before
+                // falling through here, so postCommitActions never runs against a rolled-back
+                // transaction. Runs inside the using block, before the transaction is disposed.
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Writes one Category row with a RowVersion-checked WHERE clause on UPDATE/DELETE, and
+        /// queues (but does not yet apply) the matching in-memory side effect - see SaveBatch's
+        /// comment on postCommitActions for why applying it immediately would be wrong. SQL
+        /// mirrors UpdateCategories' existing parameterized branch (SqlDatabase.cs) exactly, plus
+        /// the version check/bump - deliberately duplicated rather than shared, since
+        /// UpdateCategories serves the whole-graph Save(MyMoney) path (additive-only constraint:
+        /// not touched here) and operates on a whole Categories collection, not one root.
+        /// </summary>
+        private void SaveOneCategory(Category c, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = c.RowVersion;
+
+            if (c.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Categories (Id,Name,Description,Type,ParentId,Budget,Frequency,Balance,Color,TaxRefNum) " +
+                    "VALUES (@Id,@Name,@Description,@Type,@ParentId,@Budget,@Frequency,@Balance,@Color,@TaxRefNum);",
+                    ("@Id", c.Id), ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
+                    ("@ParentId", c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), ("@Budget", c.Budget),
+                    ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
+                    ("@TaxRefNum", c.TaxRefNum));
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = 1; // matches the schema's "Version INTEGER NOT NULL DEFAULT 1"
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Categories SET Name=@Name,Description=@Description,Type=@Type,ParentId=@ParentId,Budget=@Budget," +
+                    "Frequency=@Frequency,Balance=@Balance,Color=@Color,TaxRefNum=@TaxRefNum," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", c.Name), ("@Description", c.Description), ("@Type", (int)c.Type),
+                    ("@ParentId", c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), ("@Budget", c.Budget),
+                    ("@Frequency", (int)c.Frequency), ("@Balance", c.Balance), ("@Color", c.Color),
+                    ("@TaxRefNum", c.TaxRefNum), ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Categories", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = callerRowVersion + 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Categories WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Categories", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
+        /// version actually is - one more SELECT (inside the same transaction, so it sees a
+        /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
+        /// longer exists at all (e.g. already deleted by someone else).
+        /// </summary>
+        private void ThrowConflict(PersistentObject root, string tableName, int id, SQLiteTransaction transaction, long callerRowVersion)
+        {
+            object result = this.ExecuteScalarInTransaction(transaction,
+                "SELECT " + this.VersionColumnName + " FROM " + tableName + " WHERE Id=@Id;", ("@Id", id));
+            long storedRowVersion = (result == null || result == DBNull.Value) ? -1 : Convert.ToInt64(result);
+            throw new ConcurrencyConflictException(root, storedRowVersion, callerRowVersion);
+        }
+
+        /// <summary>
+        /// Overrides the inherited (shared-with-SqlServerDatabase) ReadCategories to also read
+        /// back the Version column - deliberately a full override, not a shared generic change,
+        /// so SQL Server's read path (which will need ROWVERSION's binary(8)-to-long conversion,
+        /// not a plain integer read) is untouched until Phase 2c actually needs it.
+        /// </summary>
+        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum],[" + this.VersionColumnName + "] FROM Categories");
+            categories.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Categories");
+                int id = reader.GetInt32(0);
+                Category c = new Category(categories);
+                c.Id = id;
+                categories.AddCategory(c);
+                c.Name = ReadDbString(reader, 1);
+                c.Description = ReadDbString(reader, 2);
+                if (!reader.IsDBNull(3))
+                {
+                    c.Type = (CategoryType)reader.GetInt32(3);
+                }
+                if (!reader.IsDBNull(4))
+                {
+                    c.ParentId = reader.GetInt32(4);
+                }
+                if (!reader.IsDBNull(5))
+                {
+                    c.Budget = reader.GetDecimal(5);
+                }
+                if (!reader.IsDBNull(6))
+                {
+                    c.Frequency = (CalendarRange)reader.GetInt32(6);
+                }
+                if (!reader.IsDBNull(7))
+                {
+                    c.Balance = reader.GetDecimal(7);
+                }
+                if (!reader.IsDBNull(8))
+                {
+                    c.Color = reader.GetString(8);
+                }
+                if (!reader.IsDBNull(9))
+                {
+                    c.TaxRefNum = reader.GetInt32(9);
+                }
+                c.RowVersion = reader.GetInt64(10);
+                c.OnUpdated();
+                // one more fix up that will need to be saved (so must come after c.OnUpdated).
+                if (c.Type == CategoryType.Reserved)
+                {
+                    c.Type = CategoryType.Expense;
+                }
+            }
+            categories.EndUpdate();
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+            reader.Close();
         }
 
     }
