@@ -474,6 +474,7 @@ namespace Walkabout.Data
                         }
 
                         collection.AddRentBuilding(r);
+                        r.RowVersion = reader.GetInt64(18);
                         r.OnUpdated();
                     }
                     collection.EndUpdate();
@@ -1681,6 +1682,10 @@ namespace Walkabout.Data
                 {
                     this.SaveLoanPaymentBatch(list.ConvertAll(r => (LoanPayment)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(RentBuilding))
+                {
+                    this.SaveRentBuildingBatch(list.ConvertAll(r => (RentBuilding)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -2477,6 +2482,174 @@ namespace Walkabout.Data
                     i.OnUpdated();
                     i.Parent.RemoveChild(i, true);
                 });
+            }
+        }
+
+        private static DataTable NewRentBuildingRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Address", typeof(string));
+            table.Columns.Add("PurchasedDate", typeof(DateTime));
+            table.Columns.Add("PurchasedPrice", typeof(decimal));
+            table.Columns.Add("LandValue", typeof(decimal));
+            table.Columns.Add("EstimatedValue", typeof(decimal));
+            table.Columns.Add("CategoryForIncome", typeof(int));
+            table.Columns.Add("CategoryForTaxes", typeof(int));
+            table.Columns.Add("CategoryForInterest", typeof(int));
+            table.Columns.Add("CategoryForRepairs", typeof(int));
+            table.Columns.Add("CategoryForMaintenance", typeof(int));
+            table.Columns.Add("CategoryForManagement", typeof(int));
+            table.Columns.Add("OwnershipName1", typeof(string));
+            table.Columns.Add("OwnershipName2", typeof(string));
+            table.Columns.Add("OwnershipPercentage1", typeof(decimal));
+            table.Columns.Add("OwnershipPercentage2", typeof(decimal));
+            table.Columns.Add("Note", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private static DataTable NewRentUnitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Building", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Renter", typeof(string));
+            table.Columns.Add("Note", typeof(string));
+            return table;
+        }
+
+        private void SaveRentBuildingBatch(List<RentBuilding> buildings, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable buildingRows = NewRentBuildingRowTable();
+            DataTable unitRows = NewRentUnitRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, RentBuilding> byId = new Dictionary<long, RentBuilding>();
+            List<RentBuilding> deletedBuildings = new List<RentBuilding>();
+            List<RentUnit> deletedUnits = new List<RentUnit>();
+            List<RentUnit> savedUnits = new List<RentUnit>();
+
+            HashSet<int> buildingIds = new HashSet<int>();
+            RentBuildings buildingsContainer = null;
+            foreach (RentBuilding r in buildings)
+            {
+                buildingIds.Add(r.Id);
+                buildingsContainer = (RentBuildings)r.Parent;
+            }
+
+            if (buildingsContainer != null && buildingsContainer.Units != null)
+            {
+                List<RentUnit> unitsSnapshot = new List<RentUnit>();
+                foreach (RentUnit u in buildingsContainer.Units)
+                {
+                    unitsSnapshot.Add(u);
+                }
+
+                foreach (RentUnit u in unitsSnapshot)
+                {
+                    if (!buildingIds.Contains(u.Building))
+                    {
+                        continue;
+                    }
+
+                    if (u.IsInserted)
+                    {
+                        unitRows.Rows.Add("I", u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsChanged)
+                    {
+                        unitRows.Rows.Add("U", u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsDeleted)
+                    {
+                        unitRows.Rows.Add("D", u.Id, u.Building, DBNull.Value, DBNull.Value, DBNull.Value);
+                        deletedUnits.Add(u);
+                    }
+                }
+            }
+
+            foreach (RentBuilding r in buildings)
+            {
+                long id = r.Id;
+                rootsById[id] = r;
+                byId[id] = r;
+                long callerRowVersion = r.RowVersion;
+                object purchasedDate = SqlServerDatabase.DBDateTimeParam(r.PurchasedDate);
+
+                if (r.IsInserted)
+                {
+                    buildingRows.Rows.Add("I", r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, DBNull.Value);
+                }
+                else if (r.IsChanged)
+                {
+                    buildingRows.Rows.Add("U", r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, callerRowVersion);
+                }
+                else if (r.IsDeleted)
+                {
+                    // 17 DBNull.Value placeholders between Id and ExpectedVersion, matching the
+                    // table's 17 nullable data columns (Name through Note) - count carefully if
+                    // touching this line, it's easy to drop one.
+                    buildingRows.Rows.Add("D", r.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedBuildings.Add(r);
+                }
+            }
+
+            if (buildingRows.Rows.Count == 0 && unitRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.RentBuildings_SaveBatch",
+                new[]
+                {
+                    ("@Buildings", "dbo.RentBuildingSaveBatchRow", buildingRows),
+                    ("@Units", "dbo.RentUnitRow", unitRows)
+                },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    RentBuilding r = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        r.RowVersion = newVersion;
+                        r.OnUpdated();
+                    });
+                });
+
+            foreach (RentBuilding r in deletedBuildings)
+            {
+                postCommitActions.Add(() =>
+                {
+                    r.OnUpdated();
+                    r.Parent.RemoveChild(r, true);
+                });
+            }
+
+            foreach (RentUnit u in savedUnits)
+            {
+                postCommitActions.Add(() => u.OnUpdated());
+            }
+
+            foreach (RentUnit u in deletedUnits)
+            {
+                postCommitActions.Add(() => u.Parent.RemoveChild(u, true));
             }
         }
     }
