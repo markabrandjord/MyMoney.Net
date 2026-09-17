@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1057,6 +1057,10 @@ namespace Walkabout.Data
                         else if (root is Security security)
                         {
                             this.SaveOneSecurity(security, transaction, postCommitActions);
+                        }
+                        else if (root is StockSplit stockSplit)
+                        {
+                            this.SaveOneStockSplit(stockSplit, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1567,6 +1571,71 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one StockSplit row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateStockSplits' existing parameterized branch (SqlDatabase.cs) exactly, including its
+        /// "Date != DateTime.MinValue" guard (an incomplete split with no date set is never written
+        /// to the database - it stays pending until the caller finishes filling it in), plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneStockSplit(StockSplit s, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = s.RowVersion;
+
+            if (s.IsInserted && s.Date != DateTime.MinValue)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (@Id,@Date,@Security,@Numerator,@Denominator);",
+                    ("@Id", s.Id), ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                    ("@Numerator", s.Numerator), ("@Denominator", s.Denominator));
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsChanged && s.Date != DateTime.MinValue)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE StockSplits SET Date=@Date,Security=@Security,Numerator=@Numerator,Denominator=@Denominator," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                    ("@Numerator", s.Numerator), ("@Denominator", s.Denominator), ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "StockSplits", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = callerRowVersion + 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM StockSplits WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "StockSplits", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+                return;
+            }
+
+            // No pending change (or an incomplete insert/update with no date yet) - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1892,6 +1961,33 @@ namespace Walkabout.Data
             }
             securities.EndUpdate();
             securities.FireChangeEvent(securities, securities, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited (now protected virtual - was private) ReadStockSplits to also
+        /// read back the Version column - same rationale as ReadCategories' override.
+        /// </summary>
+        protected override void ReadStockSplits(StockSplits splits, MyMoney money)
+        {
+            splits.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Date],[Security],[Numerator],[Denominator],[" + this.VersionColumnName + "] FROM StockSplits");
+            splits.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("StockSplits");
+
+                long id = reader.GetInt64(0);
+                StockSplit s = splits.AddStockSplit(id);
+                s.Date = reader.SafeGetDateTime(1);
+                s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
+                s.Numerator = reader.GetDecimal(3);
+                s.Denominator = reader.GetDecimal(4);
+                s.RowVersion = reader.GetInt64(5);
+                s.OnUpdated();
+            }
+            splits.EndUpdate();
+            splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
             reader.Close();
         }
 

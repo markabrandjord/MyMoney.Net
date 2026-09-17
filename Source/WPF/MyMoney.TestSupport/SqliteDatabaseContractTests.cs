@@ -728,6 +728,103 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.Securities.FindSecurity("MSFT", false), Is.Null);
         }
 
+        private static MyMoney BuildOneStockSplitMoney(out Security security, out StockSplit stockSplit)
+        {
+            MyMoney money = new MyMoney();
+            security = money.Securities.FindSymbol("MSFT", true);
+            stockSplit = money.StockSplits.NewStockSplit();
+            stockSplit.Security = security;
+            stockSplit.Date = new DateTime(2020, 1, 1);
+            stockSplit.Numerator = 2;
+            stockSplit.Denominator = 1;
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewStockSplit_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneStockSplitMoney(out Security security, out StockSplit stockSplit);
+            this.Database.SaveOne(security);
+
+            this.Database.SaveOne(stockSplit);
+
+            Assert.That(stockSplit.RowVersion, Is.EqualTo(1));
+            Assert.That(stockSplit.IsInserted, Is.False);
+            Assert.That(stockSplit.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            StockSplit found = reloaded.StockSplits.FindStockSplitById(stockSplit.Id);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateStockSplitAfterReload_IncrementsRowVersion()
+        {
+            BuildOneStockSplitMoney(out Security security, out StockSplit stockSplit);
+            this.Database.SaveOne(security);
+            this.Database.SaveOne(stockSplit);
+            long id = stockSplit.Id;
+
+            MyMoney reloaded = this.Database.Load(null);
+            StockSplit found = reloaded.StockSplits.FindStockSplitById(id);
+            found.Numerator = 3;
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            StockSplit foundAgain = reloadedAgain.StockSplits.FindStockSplitById(id);
+            Assert.That(foundAgain.Numerator, Is.EqualTo(3));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleStockSplitRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneStockSplitMoney(out Security security, out StockSplit stockSplit);
+            this.Database.SaveOne(security);
+            this.Database.SaveOne(stockSplit);
+            long id = stockSplit.Id;
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            StockSplit splitA = readerA.StockSplits.FindStockSplitById(id);
+            splitA.Numerator = 3;
+            this.Database.SaveOne(splitA);
+
+            StockSplit splitB = readerB.StockSplits.FindStockSplitById(id);
+            splitB.Numerator = 4;
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(splitB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.StockSplits.FindStockSplitById(id).Numerator, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void SaveOne_DeleteStockSplit_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneStockSplitMoney(out Security security, out StockSplit stockSplit);
+            this.Database.SaveOne(security);
+            this.Database.SaveOne(stockSplit);
+            long id = stockSplit.Id;
+
+            MyMoney reloaded = this.Database.Load(null);
+            StockSplit toDelete = reloaded.StockSplits.FindStockSplitById(id);
+            reloaded.StockSplits.RemoveStockSplit(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.StockSplits.FindStockSplitById(id), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.StockSplits.FindStockSplitById(id), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {
