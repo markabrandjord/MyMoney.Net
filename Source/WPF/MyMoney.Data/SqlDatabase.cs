@@ -149,6 +149,14 @@ namespace Walkabout.Data
         /// </summary>
         public virtual bool SupportsParameterizedUpdate { get { return false; } }
 
+        /// <summary>
+        /// The per-flavor name of the optimistic-concurrency version column Phase 1 added to
+        /// every table: SQL Server's native ROWVERSION is named "RowVersion"; SQLite's
+        /// application-maintained INTEGER counter is named "Version" (SqliteDatabase overrides
+        /// this). See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+        /// </summary>
+        protected virtual string VersionColumnName { get { return "RowVersion"; } }
+
         public virtual bool Exists
         {
             get
@@ -633,7 +641,7 @@ namespace Walkabout.Data
         private int progressLastReport;
         private int progressValue;
 
-        private void IncrementProgress(string name)
+        protected void IncrementProgress(string name)
         {
             this.progressValue++;
             if ((100 * (this.progressValue - (double)this.progressLastReport) / this.progressMax) > 1.0 && this.status != null)
