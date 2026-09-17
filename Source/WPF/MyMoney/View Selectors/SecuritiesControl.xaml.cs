@@ -25,6 +25,9 @@ namespace Walkabout.Views.Controls
         #region PROPERTIES
 
         private MyMoney myMoney;
+        private UiThreadHandler onSecuritiesChangedUi;
+        private UiThreadHandler onBalanceChangedUi;
+        private UiThreadHandler onTransactionsChangedUi;
 
         public MyMoney MyMoney
         {
@@ -33,16 +36,16 @@ namespace Walkabout.Views.Controls
             {
                 if (this.myMoney != null)
                 {
-                    this.myMoney.Securities.Changed -= new EventHandler<ChangeEventArgs>(this.OnSecuritiesChanged);
-                    this.myMoney.Rebalanced -= new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
-                    this.myMoney.Transactions.Changed -= new EventHandler<ChangeEventArgs>(this.OnTransactionsChanged);
+                    this.myMoney.Securities.Changed -= this.onSecuritiesChangedUi.Handler;
+                    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+                    this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
                 }
                 this.myMoney = value;
                 if (value != null)
                 {
-                    this.myMoney.Securities.Changed += new EventHandler<ChangeEventArgs>(this.OnSecuritiesChanged);
-                    this.myMoney.Rebalanced += new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
-                    this.myMoney.Transactions.Changed += new EventHandler<ChangeEventArgs>(this.OnTransactionsChanged);
+                    this.myMoney.Securities.Changed += this.onSecuritiesChangedUi.Handler;
+                    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+                    this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
 
                     this.OnSecuritiesChanged(this, new ChangeEventArgs(this.myMoney.Securities, null, ChangeType.Reloaded));
                 }
@@ -74,6 +77,9 @@ namespace Walkabout.Views.Controls
 
         public SecuritiesControl()
         {
+            this.onSecuritiesChangedUi = new UiThreadHandler(this.OnSecuritiesChanged);
+            this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+            this.onTransactionsChangedUi = new UiThreadHandler(this.OnTransactionsChanged);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.SecuritiesControlInitialize))
 #endif
