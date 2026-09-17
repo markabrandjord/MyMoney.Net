@@ -7,6 +7,7 @@ using System.Data.SQLite;
 using System.Data.SqlTypes;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Walkabout.Utilities;
 
@@ -1006,7 +1007,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment || root is RentBuilding))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1065,6 +1066,10 @@ namespace Walkabout.Data
                         else if (root is LoanPayment loanPayment)
                         {
                             this.SaveOneLoanPayment(loanPayment, transaction, postCommitActions);
+                        }
+                        else if (root is RentBuilding rentBuilding)
+                        {
+                            this.SaveOneRentBuilding(rentBuilding, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1703,6 +1708,130 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one RentBuilding row - same shape as SaveOneCategory, plus (unconditionally,
+        /// regardless of which branch above ran or whether none did) processing this building's
+        /// owned RentUnits. RentBuilding.Units is a plain, non-tracked List&lt;RentUnit&gt; (a
+        /// materialized view populated only by Read); the real change-tracked RentUnits live in a
+        /// SIBLING global container, r.Parent-as-RentBuildings.Units, keyed by their own Id and
+        /// carrying a Building FK column (no ColumnObjectMapping, so no real FK constraint - order
+        /// doesn't matter for referential integrity, only for matching the codebase's existing
+        /// "write self, then owned children" convention). RentUnits gets no Version column of its
+        /// own: the whole building+units write is gated only by RentBuilding's own RowVersion.
+        /// </summary>
+        private void SaveOneRentBuilding(RentBuilding r, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = r.RowVersion;
+
+            if (r.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO RentBuildings (Id,Name,Address,PurchasedDate,PurchasedPrice,LandValue,EstimatedValue,CategoryForIncome,CategoryForTaxes,CategoryForInterest,CategoryForRepairs,CategoryForMaintenance,CategoryForManagement,OwnershipName1,OwnershipName2,OwnershipPercentage1,OwnershipPercentage2,Note) " +
+                    "VALUES (@Id,@Name,@Address,@PurchasedDate,@PurchasedPrice,@LandValue,@EstimatedValue,@CategoryForIncome,@CategoryForTaxes,@CategoryForInterest,@CategoryForRepairs,@CategoryForMaintenance,@CategoryForManagement,@OwnershipName1,@OwnershipName2,@OwnershipPercentage1,@OwnershipPercentage2,@Note);",
+                    ("@Id", r.Id), ("@Name", r.Name), ("@Address", r.Address), ("@PurchasedDate", DBDateTimeParam(r.PurchasedDate)),
+                    ("@PurchasedPrice", r.PurchasedPrice), ("@LandValue", r.LandValue), ("@EstimatedValue", r.EstimatedValue),
+                    ("@CategoryForIncome", r.CategoryForIncome), ("@CategoryForTaxes", r.CategoryForTaxes),
+                    ("@CategoryForInterest", r.CategoryForInterest), ("@CategoryForRepairs", r.CategoryForRepairs),
+                    ("@CategoryForMaintenance", r.CategoryForMaintenance), ("@CategoryForManagement", r.CategoryForManagement),
+                    ("@OwnershipName1", r.OwnershipName1), ("@OwnershipName2", r.OwnershipName2),
+                    ("@OwnershipPercentage1", r.OwnershipPercentage1), ("@OwnershipPercentage2", r.OwnershipPercentage2),
+                    ("@Note", r.Note));
+                postCommitActions.Add(() =>
+                {
+                    r.RowVersion = 1;
+                    r.OnUpdated();
+                });
+            }
+            else if (r.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE RentBuildings SET Name=@Name,Address=@Address,PurchasedDate=@PurchasedDate,PurchasedPrice=@PurchasedPrice,LandValue=@LandValue," +
+                    "EstimatedValue=@EstimatedValue,CategoryForIncome=@CategoryForIncome,CategoryForTaxes=@CategoryForTaxes,CategoryForInterest=@CategoryForInterest," +
+                    "CategoryForRepairs=@CategoryForRepairs,CategoryForMaintenance=@CategoryForMaintenance,CategoryForManagement=@CategoryForManagement," +
+                    "OwnershipName1=@OwnershipName1,OwnershipName2=@OwnershipName2,OwnershipPercentage1=@OwnershipPercentage1,OwnershipPercentage2=@OwnershipPercentage2,Note=@Note," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", r.Name), ("@Address", r.Address), ("@PurchasedDate", DBDateTimeParam(r.PurchasedDate)),
+                    ("@PurchasedPrice", r.PurchasedPrice), ("@LandValue", r.LandValue), ("@EstimatedValue", r.EstimatedValue),
+                    ("@CategoryForIncome", r.CategoryForIncome), ("@CategoryForTaxes", r.CategoryForTaxes),
+                    ("@CategoryForInterest", r.CategoryForInterest), ("@CategoryForRepairs", r.CategoryForRepairs),
+                    ("@CategoryForMaintenance", r.CategoryForMaintenance), ("@CategoryForManagement", r.CategoryForManagement),
+                    ("@OwnershipName1", r.OwnershipName1), ("@OwnershipName2", r.OwnershipName2),
+                    ("@OwnershipPercentage1", r.OwnershipPercentage1), ("@OwnershipPercentage2", r.OwnershipPercentage2),
+                    ("@Note", r.Note), ("@Id", r.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(r, "RentBuildings", r.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    r.RowVersion = callerRowVersion + 1;
+                    r.OnUpdated();
+                });
+            }
+            else if (r.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM RentBuildings WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", r.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(r, "RentBuildings", r.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    r.OnUpdated();
+                    r.Parent.RemoveChild(r, true);
+                });
+            }
+
+            this.SaveRentUnitsForBuilding(r, transaction, postCommitActions);
+        }
+
+        /// <summary>
+        /// Writes every pending-change RentUnit belonging to r, found by filtering the sibling
+        /// global RentUnits container (r.Parent-as-RentBuildings.Units) by Building == r.Id - not
+        /// r.Units (a non-tracked List) and not RentUnits.GetList() (filters out IsDeleted units,
+        /// which would silently skip the DELETE this method needs to issue for them). No
+        /// conflict/Version check per unit - see SaveOneRentBuilding's summary for why.
+        /// </summary>
+        private void SaveRentUnitsForBuilding(RentBuilding r, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            RentUnits allUnits = ((RentBuildings)r.Parent).Units;
+            foreach (RentUnit u in allUnits)
+            {
+                if (u.Building != r.Id)
+                {
+                    continue;
+                }
+
+                if (u.IsInserted)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction,
+                        "INSERT INTO RentUnits (Id, Building, Name, Renter, Note) VALUES (@Id,@Building,@Name,@Renter,@Note);",
+                        ("@Id", u.Id), ("@Building", u.Building), ("@Name", u.Name), ("@Renter", u.Renter), ("@Note", u.Note));
+                    postCommitActions.Add(() => u.OnUpdated());
+                }
+                else if (u.IsChanged)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction,
+                        "UPDATE RentUnits SET Name=@Name, Renter=@Renter, Note=@Note WHERE Id=@Id AND Building=@Building;",
+                        ("@Name", u.Name), ("@Renter", u.Renter), ("@Note", u.Note), ("@Id", u.Id), ("@Building", u.Building));
+                    postCommitActions.Add(() => u.OnUpdated());
+                }
+                else if (u.IsDeleted)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction,
+                        "DELETE FROM RentUnits WHERE Id=@Id AND Building=@Building;", ("@Id", u.Id), ("@Building", u.Building));
+                    postCommitActions.Add(() =>
+                    {
+                        u.OnUpdated();
+                        u.Parent.RemoveChild(u, true);
+                    });
+                }
+            }
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -2094,6 +2223,59 @@ namespace Walkabout.Data
                     money.GetOrCreateLoanAccount(a);
                 }
             }
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadRentBuildings to also read back the Version column - same
+        /// rationale as ReadCategories' override. ReadRentUnits itself is untouched (no override
+        /// needed): RentUnits has no Version column per this phase's design.
+        /// </summary>
+        public override void ReadRentBuildings(RentBuildings collection, MyMoney money)
+        {
+            this.ReadRentUnits(collection.Units, money);
+
+            collection.Clear();
+
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Address],[PurchasedDate],[PurchasedPrice],[LandValue],[EstimatedValue]," +
+                "[CategoryForIncome],[CategoryForTaxes],[CategoryForInterest],[CategoryForRepairs],[CategoryForMaintenance],[CategoryForManagement]," +
+                "[OwnershipName1],[OwnershipName2],[OwnershipPercentage1],[OwnershipPercentage2],[Note],[" + this.VersionColumnName + "] FROM RentBuildings");
+            collection.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("RentBuildings");
+                RentBuilding r = new RentBuilding(collection);
+                r.Id = reader.GetInt32(0);
+                r.Name = ReadDbString(reader, 1);
+                r.Address = ReadDbString(reader, 2);
+                r.PurchasedDate = reader.SafeGetDateTime(3);
+                r.PurchasedPrice = reader.GetDecimal(4);
+                r.LandValue = reader.GetDecimal(5);
+                r.EstimatedValue = reader.GetDecimal(6);
+                r.CategoryForIncome = ReadInt32(reader, 7);
+                r.CategoryForTaxes = ReadInt32(reader, 8);
+                r.CategoryForInterest = ReadInt32(reader, 9);
+                r.CategoryForRepairs = ReadInt32(reader, 10);
+                r.CategoryForMaintenance = ReadInt32(reader, 11);
+                r.CategoryForManagement = ReadInt32(reader, 12);
+
+                r.OwnershipName1 = ReadDbString(reader, 13);
+                r.OwnershipName2 = ReadDbString(reader, 14);
+                r.OwnershipPercentage1 = ReadDbDecimal(reader, 15);
+                r.OwnershipPercentage2 = ReadDbDecimal(reader, 16);
+
+                r.Note = ReadDbString(reader, 17);
+                r.RowVersion = reader.GetInt64(18);
+
+                foreach (var unit in money.Buildings.Units.GetList().Where(x => x.Building == r.Id).OrderBy(x => x.Id))
+                {
+                    r.Units.Add(unit);
+                }
+
+                collection.AddRentBuilding(r);
+                r.OnUpdated();
+            }
+            collection.EndUpdate();
+            reader.Close();
         }
 
     }
