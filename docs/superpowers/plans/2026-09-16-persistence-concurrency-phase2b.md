@@ -765,6 +765,19 @@ shape for the other ~10 aggregate roots. The follow-up plan (not yet written) sh
   `StoredRowVersion` in the exception) is worth generalizing into a small per-entity-agnostic helper
   once 2-3 more entities exist to generalize from, or whether keeping it duplicated per entity (as
   `UpdateXxx` already is) matches this codebase's existing style better.
+- **Latent risk found during this plan's own review (Task 2), not yet fixed — pre-existing code,
+  untouched by this plan:** `CreateOrUpdateTable`'s `newTable`-rebuild branch (`SqliteDatabase.cs:711-789`)
+  copies data into a rebuilt table via `INSERT INTO new_table SELECT <cols> FROM old_table`, where
+  `<cols>` comes from `mapping.Columns` — and `Version`/`RowVersion` is deliberately excluded from
+  `mapping.Columns` (same exclusion Task 2's ALTER-path retrofit relies on). If a future schema
+  change ever forces `newTable = true` on a table that has accumulated real per-row `Version`
+  history (once more entity types than just `Category` have real `SaveOne` traffic), the rebuild
+  would silently reset every row's version to `DEFAULT 1`, discarding conflict-detection history —
+  a real data-integrity gap once it's load-bearing, though not exercised by anything in Phase 2b.
+  The follow-up plan should add an explicit carry-forward of the actual `Version`/`RowVersion`
+  values in that rebuild path (e.g. include the version column by name in the `INSERT ... SELECT`,
+  rather than relying on `mapping.Columns`), plus a regression test forcing a `newTable` rebuild on
+  a table with non-default version values.
 
 Phase 2c (SQL Server stored procs, not yet planned) follows the same shape again for the third
 engine, reusing `VersionColumnName`'s override point and needing its own transaction/row-count
