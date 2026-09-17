@@ -2,12 +2,41 @@ using System;
 using System.Linq;
 using NUnit.Framework;
 using Walkabout.Data;
+using Walkabout.TestSupport;
 
 namespace Walkabout.Tests
 {
     public class SqlServerStoredProcDatabaseTests
     {
         private const string EnvVarName = "MYMONEY_TEST_SQLSERVER_USER_CONNECTION";
+
+        /// <summary>
+        /// Short-term fix (see the WI tracking the real one - unifying this class with
+        /// DatabaseContractTests' per-engine SetUp/TearDown pattern and moving cleanup onto a
+        /// tiered-security-appropriate test-support stored proc instead of an admin-connection raw
+        /// DELETE): every test here previously relied entirely on its own manual delete-at-the-end
+        /// cleanup and several reuse fixed literal IDs (explicit sentinels like 999001, or an
+        /// implicit Id=0 from `new MyMoney(); money.Accounts.AddAccount("name")`), so any single
+        /// test failing before reaching its cleanup left a row behind that permanently collided
+        /// with every later run of any test reusing that ID - cascading one real failure into
+        /// unrelated ones. Wiping first, same as SqlServerDatabaseContractTests, makes each run
+        /// start from a known-clean table set regardless of what a previous run left behind. Skips
+        /// (does not fail) when SQL Server isn't configured at all, matching this class's existing
+        /// local-dev-friendly behavior - only escalates to SqlServerTestDatabase's fail-fast
+        /// admin/wipe-ack requirements once someone has actually pointed these tests at a real
+        /// server.
+        /// </summary>
+        [SetUp]
+        public void SetUp()
+        {
+            string connectionString = Environment.GetEnvironmentVariable(EnvVarName);
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                Assert.Ignore($"Set {EnvVarName} to a MyMoneyUser connection string to run this test against a real SQL Server.");
+            }
+
+            SqlServerTestDatabase.WipeAllTables();
+        }
 
         private string GetConnectionStringOrSkip()
         {

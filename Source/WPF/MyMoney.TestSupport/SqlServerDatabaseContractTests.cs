@@ -33,19 +33,10 @@ namespace Walkabout.TestSupport
     public class SqlServerDatabaseContractTests : DatabaseContractTests
     {
         private const string UserConnectionEnvVar = "MYMONEY_TEST_SQLSERVER_USER_CONNECTION";
-        private const string AdminConnectionEnvVar = "MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION";
-        private const string DestructiveWipeAckEnvVar = "MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE";
-
-        private static readonly string[] TablesToWipe =
-        {
-            "Splits", "Investments", "Transactions", "TransactionExtras", "StockSplits", "Aliases",
-            "AccountAliases", "LoanPayments", "RentUnits", "RentBuildings",
-            "Accounts", "OnlineAccounts", "Securities", "Currencies", "Categories", "Payees"
-        };
 
         public override void SetUp()
         {
-            WipeAllTables();
+            SqlServerTestDatabase.WipeAllTables();
             base.SetUp();
         }
 
@@ -60,38 +51,6 @@ namespace Walkabout.TestSupport
             }
             string catalogName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
             return new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString, DatabasePath = catalogName };
-        }
-
-        private static void WipeAllTables()
-        {
-            string ack = Environment.GetEnvironmentVariable(DestructiveWipeAckEnvVar);
-            if (ack != "1")
-            {
-                throw new InvalidOperationException(
-                    $"{DestructiveWipeAckEnvVar}=1 must be set to acknowledge that SqlServerDatabaseContractTests will " +
-                    "unconditionally DELETE all rows from every table in the target database before each test. " +
-                    "This is a safety guard against accidentally running this fixture against a real, populated database.");
-            }
-
-            string adminConnectionString = Environment.GetEnvironmentVariable(AdminConnectionEnvVar);
-            if (string.IsNullOrEmpty(adminConnectionString))
-            {
-                throw new InvalidOperationException(
-                    $"{AdminConnectionEnvVar} must be set to a MyMoneyAdmin connection string so SqlServerDatabaseContractTests can " +
-                    "clean up the shared test database between runs.");
-            }
-
-            using (var connection = new SqlConnection(adminConnectionString))
-            {
-                connection.Open();
-                foreach (string table in TablesToWipe)
-                {
-                    using (var command = new SqlCommand($"DELETE FROM dbo.[{table}];", connection))
-                    {
-                        command.ExecuteNonQuery();
-                    }
-                }
-            }
         }
     }
 }
