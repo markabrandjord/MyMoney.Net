@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlTypes;
 using System.Linq;
@@ -793,6 +794,7 @@ namespace Walkabout.Data
                         {
                             c.TaxRefNum = reader.GetInt32(9);
                         }
+                        c.RowVersion = reader.GetInt64(10);
                         c.OnUpdated();
                         if (c.Type == CategoryType.Reserved)
                         {
@@ -1600,6 +1602,201 @@ namespace Walkabout.Data
         private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
         {
             ExecuteProc(connection, procName, ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value));
+        }
+
+        public override void SaveOne<T>(T root)
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public override void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            List<PersistentObject> list = new List<PersistentObject>(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Every root in the batch must be the SAME type - a batch mixing types (e.g. one
+            // Category and one Currency) falls through to the inherited stub until a later task
+            // adds real cross-type atomicity (each entity's _SaveBatch proc owns its own
+            // transaction; mixing types safely needs an ambient ombudsman transaction the proc's
+            // internal BEGIN TRAN can nest inside - not needed for any currently-real caller).
+            Type firstType = list[0].GetType();
+            foreach (PersistentObject root in list)
+            {
+                if (root.GetType() != firstType)
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+            }
+
+            this.Connect();
+            using (SqlConnection connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                List<Action> postCommitActions = new List<Action>();
+                if (firstType == typeof(Category))
+                {
+                    this.SaveCategoryBatch(list.ConvertAll(r => (Category)r), connection, null, postCommitActions);
+                }
+                else
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Executes one of the new *_SaveBatch stored procs (Categories_SaveBatch,
+        /// Currencies_SaveBatch, etc.) and applies the shared two-result-set contract every one of
+        /// them follows: a row with Result='CONFLICT' means the proc's own conflict check found a
+        /// stale or missing row and already rolled back its own transaction server-side before
+        /// returning - this throws ConcurrencyConflictException for that row's Id (looked up in
+        /// rootsById, since the exception needs the actual PersistentObject, not just its Id).
+        /// Every other returned row is Result='OK' with that row's new Version, applied via
+        /// applyNewVersion. transaction may be null (the common single-type-group case, where the
+        /// proc's own internal BEGIN TRAN/COMMIT/ROLLBACK is a complete, standalone transaction) or
+        /// a real ambient SqlTransaction (a later task's multi-type case, where the proc's internal
+        /// BEGIN TRAN nests inside it).
+        /// </summary>
+        private void ExecuteSaveBatchProc(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string procName,
+            (string ParamName, string TvpTypeName, DataTable Rows)[] tvpParameters,
+            Dictionary<long, PersistentObject> rootsById,
+            Action<long, long> applyNewVersion)
+        {
+            using (SqlCommand command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+            {
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                foreach (var (paramName, tvpTypeName, rows) in tvpParameters)
+                {
+                    SqlParameter p = command.Parameters.AddWithValue(paramName, rows);
+                    p.SqlDbType = SqlDbType.Structured;
+                    p.TypeName = tvpTypeName;
+                }
+                using (SqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        // Id is INT for some entities (e.g. Category) and BIGINT for others (e.g.
+                        // Transaction) - Convert.ToInt64 handles either underlying SQL type,
+                        // whereas SqlDataReader.GetInt64 throws InvalidCastException on an INT
+                        // column.
+                        long id = Convert.ToInt64(reader.GetValue(reader.GetOrdinal("Id")));
+                        string result = reader.GetString(reader.GetOrdinal("Result"));
+                        if (result == "CONFLICT")
+                        {
+                            long storedVersion = reader.GetInt64(reader.GetOrdinal("StoredVersion"));
+                            long callerVersion = reader.GetInt64(reader.GetOrdinal("CallerVersion"));
+                            rootsById.TryGetValue(id, out PersistentObject conflictRoot);
+                            throw new ConcurrencyConflictException(conflictRoot, storedVersion, callerVersion);
+                        }
+                        long newVersion = reader.GetInt64(reader.GetOrdinal("NewVersion"));
+                        applyNewVersion(id, newVersion);
+                    }
+                }
+            }
+        }
+
+        private static DataTable NewCategoryRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Description", typeof(string));
+            table.Columns.Add("Type", typeof(int));
+            table.Columns.Add("ParentId", typeof(int));
+            table.Columns.Add("Budget", typeof(decimal));
+            table.Columns.Add("Frequency", typeof(int));
+            table.Columns.Add("Balance", typeof(decimal));
+            table.Columns.Add("Color", typeof(string));
+            table.Columns.Add("TaxRefNum", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        /// <summary>
+        /// Writes a batch of Category rows via dbo.Categories_SaveBatch. Deletes get no row back
+        /// in the proc's result set (nothing to report a NewVersion for), so their postCommit
+        /// action is queued directly here, right after ExecuteSaveBatchProc returns without
+        /// throwing - which only happens once the whole batch (inserts, updates, AND deletes) has
+        /// already committed inside the proc's own transaction.
+        /// </summary>
+        private void SaveCategoryBatch(List<Category> categories, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewCategoryRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Category> byId = new Dictionary<long, Category>();
+            List<Category> deletedInThisBatch = new List<Category>();
+
+            foreach (Category c in categories)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add("I", c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add("U", c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add("D", c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Categories_SaveBatch",
+                new[] { ("@Rows", "dbo.CategorySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Category c = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Category c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
         }
     }
 }
