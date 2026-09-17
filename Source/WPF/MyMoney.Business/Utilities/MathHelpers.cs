@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Windows;
 
 namespace Walkabout.Utilities
 {
@@ -64,12 +63,12 @@ namespace Walkabout.Utilities
         /// Return the covariance in the given x,y values.
         /// The sum of the difference between x and its mean times the difference between y and its mean.
         /// </summary>
-        public static double Covariance(IEnumerable<Point> pts)
+        public static double Covariance(IEnumerable<(double X, double Y)> pts)
         {
             double xsum = 0;
             double ysum = 0;
             double count = 0;
-            foreach (Point d in pts)
+            foreach (var d in pts)
             {
                 xsum += d.X;
                 ysum += d.Y;
@@ -83,7 +82,7 @@ namespace Walkabout.Utilities
             double xMean = xsum / count;
             double yMean = ysum / count;
             double covariance = 0;
-            foreach (Point d in pts)
+            foreach (var d in pts)
             {
                 covariance += (d.X - xMean) * (d.Y - yMean);
             }
@@ -109,11 +108,11 @@ namespace Walkabout.Utilities
         /// <param name="b">The slope of the line</param>
         public static void LinearRegression(IEnumerable<double> pts, out double a, out double b)
         {
-            List<Point> pts2 = new List<Point>(pts.Count());
+            List<(double X, double Y)> pts2 = new List<(double X, double Y)>(pts.Count());
             double x = 1;
             foreach (double y in pts)
             {
-                pts2.Add(new Point(x++, y));
+                pts2.Add((x++, y));
             }
             LinearRegression(pts2, out a, out b);
         }
@@ -125,7 +124,7 @@ namespace Walkabout.Utilities
         /// <param name="pts">The data to analyze</param>
         /// <param name="a">The y-coordinate of the line at x = 0</param>
         /// <param name="b">The slope of the line</param>
-        public static void LinearRegression(IEnumerable<Point> pts, out double a, out double b)
+        public static void LinearRegression(IEnumerable<(double X, double Y)> pts, out double a, out double b)
         {
             double xMean = Mean(from p in pts select p.X);
             double yMean = Mean(from p in pts select p.Y);
