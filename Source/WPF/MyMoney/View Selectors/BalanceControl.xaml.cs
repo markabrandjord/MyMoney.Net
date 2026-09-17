@@ -531,7 +531,7 @@ namespace Walkabout.Views.Controls
             bool hasStatement = false;
             try
             {
-                this.myMoney.Transactions.Changed -= new EventHandler<ChangeEventArgs>(this.Transactions_Changed);
+                this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
 
                 if (!cancelled)
                 {
