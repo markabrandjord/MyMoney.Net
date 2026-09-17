@@ -3456,7 +3456,7 @@ namespace Walkabout.Data
 
         #region TABLE INVESTMENTS
 
-        private IDataReader ReadInvestments(Transactions transactions, MyMoney money)
+        protected IDataReader ReadInvestments(Transactions transactions, MyMoney money)
         {
             // Load investment transaction details.
             IDataReader reader = this.ExecuteReader("SELECT Id,Security,UnitPrice,Units,Commission,InvestmentType,TradeType,TaxExempt,Withholding,MarkUpDown,Taxes,Fees,[Load]  FROM Investments");
