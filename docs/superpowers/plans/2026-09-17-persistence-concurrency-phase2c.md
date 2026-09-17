@@ -3051,13 +3051,18 @@ non-entity-specific test, alongside `SaveAndReload_ResolvesAccountCategoryAndInv
             Assert.That(reloaded.Categories.FindCategory("MixedBatchCategory"), Is.Not.Null);
             Assert.That(reloaded.Accounts.FindAccount("MixedBatchAccount"), Is.Not.Null);
 
-            MyMoney readerA = this.Database.Load(null);
-            MyMoney readerB = this.Database.Load(null);
-
-            Account staleAccount = readerA.Accounts.FindAccount("MixedBatchAccount");
+            // Both conflicting roots come from ONE shared reader graph - not two separate Load()
+            // calls - matching SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState's
+            // pattern above. Two different graphs would trip MockDatabase.SaveBatch's own
+            // same-graph guard (MockDatabase.cs's "SaveBatch roots belong to different MyMoney
+            // graphs" InvalidOperationException) before the RowVersion conflict check ever runs -
+            // an earlier draft of this test used readerA/readerB and failed against Mock for
+            // exactly that reason, caught during Task 13's implementation.
+            MyMoney reader = this.Database.Load(null);
+            Account staleAccount = reader.Accounts.FindAccount("MixedBatchAccount");
             staleAccount.Description = "Attempted stale";
 
-            Category freshCategory = readerB.Categories.FindCategory("MixedBatchCategory");
+            Category freshCategory = reader.Categories.FindCategory("MixedBatchCategory");
             freshCategory.Description = "Attempted fresh";
 
             // Someone else updates the account first, so staleAccount's RowVersion is now behind.

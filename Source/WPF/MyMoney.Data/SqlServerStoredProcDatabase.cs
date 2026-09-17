@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlTypes;
 using System.Linq;
@@ -75,6 +76,7 @@ namespace Walkabout.Data
                         {
                             i.UserKeyExpireDate = reader.GetDateTime(20);
                         }
+                        i.RowVersion = reader.GetInt64(21);
                         i.OnUpdated();
                     }
                     onlineAccounts.EndUpdate();
@@ -306,6 +308,7 @@ namespace Walkabout.Data
                         x.Memo = reader.IsDBNull(5) ? null : reader.GetString(5);
                         x.BatchMode = false;
                         collection.AddLoan(x);
+                        x.RowVersion = reader.GetInt64(6);
                         x.OnUpdated();
                     }
                     collection.EndUpdate();
@@ -471,6 +474,7 @@ namespace Walkabout.Data
                         }
 
                         collection.AddRentBuilding(r);
+                        r.RowVersion = reader.GetInt64(18);
                         r.OnUpdated();
                     }
                     collection.EndUpdate();
@@ -585,6 +589,7 @@ namespace Walkabout.Data
                         int id = reader.GetInt32(0);
                         Payee p = payees.AddPayee(id);
                         p.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        p.RowVersion = reader.GetInt64(2);
                         p.OnUpdated();
                     }
                     payees.EndUpdate();
@@ -688,6 +693,7 @@ namespace Walkabout.Data
                         {
                             a.CategoryForInterest = money.Categories.FindCategoryById(reader.GetInt32(16));
                         }
+                        a.RowVersion = reader.GetInt64(17);
                         a.OnUpdated();
                     }
                     accts.EndUpdate();
@@ -793,6 +799,7 @@ namespace Walkabout.Data
                         {
                             c.TaxRefNum = reader.GetInt32(9);
                         }
+                        c.RowVersion = reader.GetInt64(10);
                         c.OnUpdated();
                         if (c.Type == CategoryType.Reserved)
                         {
@@ -873,6 +880,7 @@ namespace Walkabout.Data
                             s.LastRatio = reader.GetDecimal(4);
                         }
                         s.CultureCode = reader.IsDBNull(5) ? "en-US" : reader.GetString(5);
+                        s.RowVersion = reader.GetInt64(6);
                         s.OnUpdated();
                     }
                     currencies.EndUpdate();
@@ -955,6 +963,7 @@ namespace Walkabout.Data
                         {
                             s.PriceDate = reader.GetDateTime(8);
                         }
+                        s.RowVersion = reader.GetInt64(9);
                         s.OnUpdated();
                     }
                     securities.EndUpdate();
@@ -1026,6 +1035,7 @@ namespace Walkabout.Data
                         s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
                         s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        s.RowVersion = reader.GetInt64(5);
                         s.OnUpdated();
                     }
                     splits.EndUpdate();
@@ -1102,6 +1112,7 @@ namespace Walkabout.Data
                         {
                             a.AliasType = (AliasType)reader.GetInt32(3);
                         }
+                        a.RowVersion = reader.GetInt64(4);
                         a.OnUpdated();
                     }
                     aliases.EndUpdate();
@@ -1213,6 +1224,7 @@ namespace Walkabout.Data
                             t.OriginalPayee = reader.GetString(15);
                         }
                         t.BatchMode = false;
+                        t.RowVersion = reader.GetInt64(18);
                         t.OnUpdated();
                     }
                     transactions.EndUpdate();
@@ -1600,6 +1612,1373 @@ namespace Walkabout.Data
         private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
         {
             ExecuteProc(connection, procName, ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value));
+        }
+
+        public override void SaveOne<T>(T root)
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public override void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
+        public override void SaveBatch(IEnumerable<PersistentObject> roots)
+        {
+            List<PersistentObject> list = new List<PersistentObject>(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Roots are grouped by type (one _SaveBatch proc call per type), so typeOrder only
+            // preserves the caller's ordering ACROSS type-groups, not the original interleaving of
+            // individual roots of different types. E.g. [Category A, Account X, Category B] is
+            // processed as one Category-group call (A, B) then one Account-group call (X), not in
+            // the caller's literal A, X, B order. This is an inherent consequence of the
+            // one-proc-call-per-type design, not a bug - roots of the same type still save in
+            // their original relative order within their group.
+            List<Type> typeOrder = new List<Type>();
+            Dictionary<Type, List<PersistentObject>> groupedByType = new Dictionary<Type, List<PersistentObject>>();
+            foreach (PersistentObject root in list)
+            {
+                Type type = root.GetType();
+                if (!IsSupportedSaveBatchType(type))
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+                if (!groupedByType.TryGetValue(type, out List<PersistentObject> group))
+                {
+                    group = new List<PersistentObject>();
+                    groupedByType[type] = group;
+                    typeOrder.Add(type);
+                }
+                group.Add(root);
+            }
+
+            this.Connect();
+            using (SqlConnection connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                List<Action> postCommitActions = new List<Action>();
+
+                if (groupedByType.Count == 1)
+                {
+                    // Common case: one entity type, no ambient transaction needed - the proc's own
+                    // internal BEGIN TRAN/COMMIT/ROLLBACK is already a complete, standalone
+                    // transaction.
+                    foreach (Type type in typeOrder)
+                    {
+                        this.DispatchSaveBatchForType(type, groupedByType[type], connection, null, postCommitActions);
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
+                    return;
+                }
+
+                using (SqlTransaction ambientTransaction = connection.BeginTransaction())
+                {
+                    try
+                    {
+                        foreach (Type type in typeOrder)
+                        {
+                            this.DispatchSaveBatchForType(type, groupedByType[type], connection, ambientTransaction, postCommitActions);
+                        }
+                        ambientTransaction.Commit();
+                    }
+                    catch (Exception originalException)
+                    {
+                        try
+                        {
+                            ambientTransaction.Rollback();
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // A _SaveBatch proc's own internal ROLLBACK TRANSACTION on conflict
+                            // already unwound the WHOLE ambient transaction (SQL Server's
+                            // nested-transaction rule: ROLLBACK always targets the outermost
+                            // BEGIN, regardless of nesting depth) - by the time control returns
+                            // here, @@TRANCOUNT is already 0 and this SqlTransaction object is
+                            // "zombied". That's success, not a new failure: only a genuinely new
+                            // rollback failure (any other exception type) should mask/wrap the
+                            // original exception, matching SqliteDatabase.SaveBatch's identical
+                            // never-hide-the-original-exception rule.
+                            _ = originalException;
+                        }
+                        throw;
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
+                }
+            }
+        }
+
+        // Exact type == matching (not `is`), unlike some other patterns in this codebase - so a
+        // future subclass of any of these 11 aggregate root types would fall through to
+        // DispatchSaveBatchForType's inherited NotImplementedException stub here even if it works
+        // fine on SqliteDatabase (which matches with `is`). A known, narrow limitation: not
+        // something to fix now, just something for whoever adds a new entity type later to know.
+        private static bool IsSupportedSaveBatchType(Type type)
+        {
+            return type == typeof(Category) || type == typeof(Currency) || type == typeof(OnlineAccount)
+                || type == typeof(Account) || type == typeof(Payee) || type == typeof(Alias)
+                || type == typeof(Security) || type == typeof(StockSplit) || type == typeof(LoanPayment)
+                || type == typeof(RentBuilding) || type == typeof(Transaction);
+        }
+
+        private void DispatchSaveBatchForType(Type type, List<PersistentObject> roots, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            if (type == typeof(Category))
+            {
+                this.SaveCategoryBatch(roots.ConvertAll(r => (Category)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Currency))
+            {
+                this.SaveCurrencyBatch(roots.ConvertAll(r => (Currency)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(OnlineAccount))
+            {
+                this.SaveOnlineAccountBatch(roots.ConvertAll(r => (OnlineAccount)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Account))
+            {
+                this.SaveAccountBatch(roots.ConvertAll(r => (Account)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Payee))
+            {
+                this.SavePayeeBatch(roots.ConvertAll(r => (Payee)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Alias))
+            {
+                this.SaveAliasBatch(roots.ConvertAll(r => (Alias)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Security))
+            {
+                this.SaveSecurityBatch(roots.ConvertAll(r => (Security)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(StockSplit))
+            {
+                this.SaveStockSplitBatch(roots.ConvertAll(r => (StockSplit)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(LoanPayment))
+            {
+                this.SaveLoanPaymentBatch(roots.ConvertAll(r => (LoanPayment)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(RentBuilding))
+            {
+                this.SaveRentBuildingBatch(roots.ConvertAll(r => (RentBuilding)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Transaction))
+            {
+                this.SaveTransactionBatch(roots.ConvertAll(r => (Transaction)r), connection, transaction, postCommitActions);
+            }
+        }
+
+        /// <summary>
+        /// Executes one of the new *_SaveBatch stored procs (Categories_SaveBatch,
+        /// Currencies_SaveBatch, etc.) and applies the shared two-result-set contract every one of
+        /// them follows: a row with Result='CONFLICT' means the proc's own conflict check found a
+        /// stale or missing row and already rolled back its own transaction server-side before
+        /// returning - this throws ConcurrencyConflictException for that row's Id (looked up in
+        /// rootsById, since the exception needs the actual PersistentObject, not just its Id).
+        /// Every other returned row is Result='OK' with that row's new Version, applied via
+        /// applyNewVersion. transaction may be null (the common single-type-group case, where the
+        /// proc's own internal BEGIN TRAN/COMMIT/ROLLBACK is a complete, standalone transaction) or
+        /// a real ambient SqlTransaction (a later task's multi-type case, where the proc's internal
+        /// BEGIN TRAN nests inside it).
+        /// </summary>
+        private void ExecuteSaveBatchProc(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string procName,
+            (string ParamName, string TvpTypeName, DataTable Rows)[] tvpParameters,
+            Dictionary<long, PersistentObject> rootsById,
+            Action<long, long> applyNewVersion)
+        {
+            using (SqlCommand command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+            {
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                foreach (var (paramName, tvpTypeName, rows) in tvpParameters)
+                {
+                    SqlParameter p = command.Parameters.AddWithValue(paramName, rows);
+                    p.SqlDbType = SqlDbType.Structured;
+                    p.TypeName = tvpTypeName;
+                }
+                using (SqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        // Id is INT for some entities (e.g. Category) and BIGINT for others (e.g.
+                        // Transaction) - Convert.ToInt64 handles either underlying SQL type,
+                        // whereas SqlDataReader.GetInt64 throws InvalidCastException on an INT
+                        // column.
+                        long id = Convert.ToInt64(reader.GetValue(reader.GetOrdinal("Id")));
+                        string result = reader.GetString(reader.GetOrdinal("Result"));
+                        if (result == "CONFLICT")
+                        {
+                            long storedVersion = reader.GetInt64(reader.GetOrdinal("StoredVersion"));
+                            long callerVersion = reader.GetInt64(reader.GetOrdinal("CallerVersion"));
+                            if (!rootsById.TryGetValue(id, out PersistentObject conflictRoot))
+                            {
+                                // ConcurrencyConflictException's constructor calls
+                                // root.GetType() unconditionally, so a null root would surface as
+                                // a raw NullReferenceException instead of the intended, well-typed
+                                // exception. rootsById is supposed to contain every id that could
+                                // come back from the proc's result set (it's built from the same
+                                // batch that was sent), so a miss here means the caller broke that
+                                // invariant - fail fast with a clear diagnostic naming the proc and
+                                // the id, rather than let it degrade into an NRE.
+                                throw new InvalidOperationException(string.Format(
+                                    "{0} reported a CONFLICT for Id {1}, but no matching root was found in rootsById. " +
+                                    "The caller must populate rootsById with every root in the batch before calling ExecuteSaveBatchProc.",
+                                    procName, id));
+                            }
+                            throw new ConcurrencyConflictException(conflictRoot, storedVersion, callerVersion);
+                        }
+                        long newVersion = reader.GetInt64(reader.GetOrdinal("NewVersion"));
+                        applyNewVersion(id, newVersion);
+                    }
+                }
+            }
+        }
+
+        private static DataTable NewCategoryRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Description", typeof(string));
+            table.Columns.Add("Type", typeof(int));
+            table.Columns.Add("ParentId", typeof(int));
+            table.Columns.Add("Budget", typeof(decimal));
+            table.Columns.Add("Frequency", typeof(int));
+            table.Columns.Add("Balance", typeof(decimal));
+            table.Columns.Add("Color", typeof(string));
+            table.Columns.Add("TaxRefNum", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        /// <summary>
+        /// Writes a batch of Category rows via dbo.Categories_SaveBatch. Deletes get no row back
+        /// in the proc's result set (nothing to report a NewVersion for), so their postCommit
+        /// action is queued directly here, right after ExecuteSaveBatchProc returns without
+        /// throwing - which only happens once the whole batch (inserts, updates, AND deletes) has
+        /// already committed inside the proc's own transaction.
+        /// </summary>
+        private void SaveCategoryBatch(List<Category> categories, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewCategoryRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Category> byId = new Dictionary<long, Category>();
+            List<Category> deletedInThisBatch = new List<Category>();
+
+            foreach (Category c in categories)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add("I", c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add("U", c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add("D", c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Categories_SaveBatch",
+                new[] { ("@Rows", "dbo.CategorySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Category c = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Category c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+
+        private static DataTable NewCurrencyRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Symbol", typeof(string));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Ratio", typeof(decimal));
+            table.Columns.Add("LastRatio", typeof(decimal));
+            table.Columns.Add("CultureCode", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveCurrencyBatch(List<Currency> currencies, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewCurrencyRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Currency> byId = new Dictionary<long, Currency>();
+            List<Currency> deletedInThisBatch = new List<Currency>();
+
+            foreach (Currency c in currencies)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add("I", c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add("U", c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add("D", c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Currencies_SaveBatch",
+                new[] { ("@Rows", "dbo.CurrencySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Currency c = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Currency c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+
+        private static DataTable NewOnlineAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Institution", typeof(string));
+            table.Columns.Add("OFX", typeof(string));
+            table.Columns.Add("FID", typeof(string));
+            table.Columns.Add("UserId", typeof(string));
+            table.Columns.Add("Password", typeof(string));
+            table.Columns.Add("BankId", typeof(string));
+            table.Columns.Add("BranchId", typeof(string));
+            table.Columns.Add("BrokerId", typeof(string));
+            table.Columns.Add("OfxVersion", typeof(string));
+            table.Columns.Add("LogoUrl", typeof(string));
+            table.Columns.Add("AppId", typeof(string));
+            table.Columns.Add("AppVersion", typeof(string));
+            table.Columns.Add("ClientUid", typeof(string));
+            table.Columns.Add("UserCred1", typeof(string));
+            table.Columns.Add("UserCred2", typeof(string));
+            table.Columns.Add("AuthToken", typeof(string));
+            table.Columns.Add("AccessKey", typeof(string));
+            table.Columns.Add("UserKey", typeof(string));
+            table.Columns.Add("UserKeyExpireDate", typeof(DateTime));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveOnlineAccountBatch(List<OnlineAccount> accounts, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewOnlineAccountRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, OnlineAccount> byId = new Dictionary<long, OnlineAccount>();
+            List<OnlineAccount> deletedInThisBatch = new List<OnlineAccount>();
+
+            foreach (OnlineAccount i in accounts)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object expireDate = SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add("I", i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add("U", i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.OnlineAccounts_SaveBatch",
+                new[] { ("@Rows", "dbo.OnlineAccountSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    OnlineAccount i = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (OnlineAccount i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+            }
+        }
+
+        private static DataTable NewAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("AccountId", typeof(string));
+            table.Columns.Add("OfxAccountId", typeof(string));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Type", typeof(int));
+            table.Columns.Add("Description", typeof(string));
+            table.Columns.Add("OnlineAccount", typeof(int));
+            table.Columns.Add("OpeningBalance", typeof(decimal));
+            table.Columns.Add("LastSync", typeof(DateTime));
+            table.Columns.Add("LastBalance", typeof(DateTime));
+            table.Columns.Add("SyncGuid", typeof(Guid));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("Currency", typeof(string));
+            table.Columns.Add("WebSite", typeof(string));
+            table.Columns.Add("ReconcileWarning", typeof(int));
+            table.Columns.Add("CategoryIdForPrincipal", typeof(int));
+            table.Columns.Add("CategoryIdForInterest", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveAccountBatch(List<Account> accounts, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewAccountRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Account> byId = new Dictionary<long, Account>();
+            List<Account> deletedInThisBatch = new List<Account>();
+
+            foreach (Account a in accounts)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+                object onlineAccountId = a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value;
+                object categoryForPrincipal = a.CategoryForPrincipal != null ? (object)a.CategoryForPrincipal.Id : DBNull.Value;
+                object categoryForInterest = a.CategoryForInterest != null ? (object)a.CategoryForInterest.Id : DBNull.Value;
+                object lastSync = SqlServerDatabase.DBDateTimeParam(a.LastSync);
+                object lastBalance = SqlServerDatabase.DBDateTimeParam(a.LastBalance);
+                object syncGuid = SqlServerDatabase.DBGuidParam(a.SyncGuid);
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add("I", a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add("U", a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add("D", a.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Accounts_SaveBatch",
+                new[] { ("@Rows", "dbo.AccountSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Account a = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Account a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+
+        private static DataTable NewPayeeRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SavePayeeBatch(List<Payee> payees, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewPayeeRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Payee> byId = new Dictionary<long, Payee>();
+            List<Payee> deletedInThisBatch = new List<Payee>();
+
+            foreach (Payee p in payees)
+            {
+                long id = p.Id;
+                rootsById[id] = p;
+                byId[id] = p;
+                long callerRowVersion = p.RowVersion;
+
+                if (p.IsInserted)
+                {
+                    rows.Rows.Add("I", p.Id, p.Name, DBNull.Value);
+                }
+                else if (p.IsChanged)
+                {
+                    rows.Rows.Add("U", p.Id, p.Name, callerRowVersion);
+                }
+                else if (p.IsDeleted)
+                {
+                    rows.Rows.Add("D", p.Id, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(p);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Payees_SaveBatch",
+                new[] { ("@Rows", "dbo.PayeeSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Payee p = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        p.RowVersion = newVersion;
+                        p.OnUpdated();
+                    });
+                });
+
+            foreach (Payee p in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    p.OnUpdated();
+                    p.Parent.RemoveChild(p, true);
+                });
+            }
+        }
+
+        private static DataTable NewAliasRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Pattern", typeof(string));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveAliasBatch(List<Alias> aliases, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewAliasRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Alias> byId = new Dictionary<long, Alias>();
+            List<Alias> deletedInThisBatch = new List<Alias>();
+
+            foreach (Alias a in aliases)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add("I", a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add("U", a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add("D", a.Id, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Aliases_SaveBatch",
+                new[] { ("@Rows", "dbo.AliasSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Alias a = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Alias a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+
+        private static DataTable NewSecurityRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Symbol", typeof(string));
+            table.Columns.Add("Price", typeof(decimal));
+            table.Columns.Add("LastPrice", typeof(decimal));
+            table.Columns.Add("CuspId", typeof(string));
+            table.Columns.Add("SecurityType", typeof(int));
+            table.Columns.Add("Taxable", typeof(byte));
+            table.Columns.Add("PriceDate", typeof(DateTime));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveSecurityBatch(List<Security> securities, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewSecurityRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Security> byId = new Dictionary<long, Security>();
+            List<Security> deletedInThisBatch = new List<Security>();
+
+            foreach (Security s in securities)
+            {
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object priceDate = SqlServerDatabase.DBDateTimeParam(s.PriceDate);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add("I", s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add("U", s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add("D", s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Securities_SaveBatch",
+                new[] { ("@Rows", "dbo.SecuritySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Security s = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (Security s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+
+        private static DataTable NewStockSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Security", typeof(int));
+            table.Columns.Add("Numerator", typeof(decimal));
+            table.Columns.Add("Denominator", typeof(decimal));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveStockSplitBatch(List<StockSplit> stockSplits, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewStockSplitRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, StockSplit> byId = new Dictionary<long, StockSplit>();
+            List<StockSplit> deletedInThisBatch = new List<StockSplit>();
+
+            foreach (StockSplit s in stockSplits)
+            {
+                if ((s.IsChanged || s.IsInserted) && s.Date == DateTime.MinValue)
+                {
+                    continue;
+                }
+
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object securityId = s.Security != null ? (object)s.Security.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(s.Date);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add("I", s.Id, date, securityId, s.Numerator, s.Denominator, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add("U", s.Id, date, securityId, s.Numerator, s.Denominator, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add("D", s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.StockSplits_SaveBatch",
+                new[] { ("@Rows", "dbo.StockSplitSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    StockSplit s = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (StockSplit s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+
+        private static DataTable NewLoanPaymentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("AccountId", typeof(int));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Principal", typeof(decimal));
+            table.Columns.Add("Interest", typeof(decimal));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveLoanPaymentBatch(List<LoanPayment> loanPayments, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewLoanPaymentRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, LoanPayment> byId = new Dictionary<long, LoanPayment>();
+            List<LoanPayment> deletedInThisBatch = new List<LoanPayment>();
+
+            foreach (LoanPayment i in loanPayments)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object date = SqlServerDatabase.DBDateTimeParam(i.Date);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add("I", i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add("U", i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.LoanPayments_SaveBatch",
+                new[] { ("@Rows", "dbo.LoanPaymentSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    LoanPayment i = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (LoanPayment i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+            }
+        }
+
+        private static DataTable NewRentBuildingRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Address", typeof(string));
+            table.Columns.Add("PurchasedDate", typeof(DateTime));
+            table.Columns.Add("PurchasedPrice", typeof(decimal));
+            table.Columns.Add("LandValue", typeof(decimal));
+            table.Columns.Add("EstimatedValue", typeof(decimal));
+            table.Columns.Add("CategoryForIncome", typeof(int));
+            table.Columns.Add("CategoryForTaxes", typeof(int));
+            table.Columns.Add("CategoryForInterest", typeof(int));
+            table.Columns.Add("CategoryForRepairs", typeof(int));
+            table.Columns.Add("CategoryForMaintenance", typeof(int));
+            table.Columns.Add("CategoryForManagement", typeof(int));
+            table.Columns.Add("OwnershipName1", typeof(string));
+            table.Columns.Add("OwnershipName2", typeof(string));
+            table.Columns.Add("OwnershipPercentage1", typeof(decimal));
+            table.Columns.Add("OwnershipPercentage2", typeof(decimal));
+            table.Columns.Add("Note", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private static DataTable NewRentUnitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Building", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Renter", typeof(string));
+            table.Columns.Add("Note", typeof(string));
+            return table;
+        }
+
+        private void SaveRentBuildingBatch(List<RentBuilding> buildings, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable buildingRows = NewRentBuildingRowTable();
+            DataTable unitRows = NewRentUnitRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, RentBuilding> byId = new Dictionary<long, RentBuilding>();
+            List<RentBuilding> deletedBuildings = new List<RentBuilding>();
+            List<RentUnit> deletedUnits = new List<RentUnit>();
+            List<RentUnit> savedUnits = new List<RentUnit>();
+
+            HashSet<int> buildingIds = new HashSet<int>();
+            RentBuildings buildingsContainer = null;
+            foreach (RentBuilding r in buildings)
+            {
+                buildingIds.Add(r.Id);
+                buildingsContainer = (RentBuildings)r.Parent;
+            }
+
+            if (buildingsContainer != null && buildingsContainer.Units != null)
+            {
+                List<RentUnit> unitsSnapshot = new List<RentUnit>();
+                foreach (RentUnit u in buildingsContainer.Units)
+                {
+                    unitsSnapshot.Add(u);
+                }
+
+                foreach (RentUnit u in unitsSnapshot)
+                {
+                    if (!buildingIds.Contains(u.Building))
+                    {
+                        continue;
+                    }
+
+                    if (u.IsInserted)
+                    {
+                        unitRows.Rows.Add("I", u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsChanged)
+                    {
+                        unitRows.Rows.Add("U", u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsDeleted)
+                    {
+                        unitRows.Rows.Add("D", u.Id, u.Building, DBNull.Value, DBNull.Value, DBNull.Value);
+                        deletedUnits.Add(u);
+                    }
+                }
+            }
+
+            foreach (RentBuilding r in buildings)
+            {
+                long id = r.Id;
+                rootsById[id] = r;
+                byId[id] = r;
+                long callerRowVersion = r.RowVersion;
+                object purchasedDate = SqlServerDatabase.DBDateTimeParam(r.PurchasedDate);
+
+                if (r.IsInserted)
+                {
+                    buildingRows.Rows.Add("I", r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, DBNull.Value);
+                }
+                else if (r.IsChanged)
+                {
+                    buildingRows.Rows.Add("U", r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, callerRowVersion);
+                }
+                else if (r.IsDeleted)
+                {
+                    // 17 DBNull.Value placeholders between Id and ExpectedVersion, matching the
+                    // table's 17 nullable data columns (Name through Note) - count carefully if
+                    // touching this line, it's easy to drop one.
+                    buildingRows.Rows.Add("D", r.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedBuildings.Add(r);
+                }
+            }
+
+            if (buildingRows.Rows.Count == 0 && unitRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.RentBuildings_SaveBatch",
+                new[]
+                {
+                    ("@Buildings", "dbo.RentBuildingSaveBatchRow", buildingRows),
+                    ("@Units", "dbo.RentUnitRow", unitRows)
+                },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    RentBuilding r = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        r.RowVersion = newVersion;
+                        r.OnUpdated();
+                    });
+                });
+
+            foreach (RentBuilding r in deletedBuildings)
+            {
+                postCommitActions.Add(() =>
+                {
+                    r.OnUpdated();
+                    r.Parent.RemoveChild(r, true);
+                });
+            }
+
+            foreach (RentUnit u in savedUnits)
+            {
+                postCommitActions.Add(() => u.OnUpdated());
+            }
+
+            foreach (RentUnit u in deletedUnits)
+            {
+                // No OnUpdated() call here - matches MockDatabase.MarkOwnedChildrenClean's
+                // established precedent for deleted owned children (see the deleted-Investment
+                // case in SaveTransactionBatch), and is verified inert since RemoveChild(u, true)
+                // removes the object from its container regardless. (SqliteDatabase diverges here
+                // and does call OnUpdated() for deleted children - a known, accepted divergence.)
+                postCommitActions.Add(() => u.Parent.RemoveChild(u, true));
+            }
+        }
+
+        private static DataTable NewTransactionRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Number", typeof(string));
+            table.Columns.Add("Account", typeof(int));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Amount", typeof(decimal));
+            table.Columns.Add("Status", typeof(int));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Category", typeof(int));
+            table.Columns.Add("FITID", typeof(string));
+            table.Columns.Add("SalesTax", typeof(decimal));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("ReconciledDate", typeof(DateTime));
+            table.Columns.Add("BudgetBalanceDate", typeof(DateTime));
+            table.Columns.Add("MergeDate", typeof(DateTime));
+            table.Columns.Add("OriginalPayee", typeof(string));
+            table.Columns.Add("Transfer", typeof(long));
+            table.Columns.Add("TransferSplit", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private static DataTable NewSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Transaction", typeof(long));
+            table.Columns.Add("Amount", typeof(decimal));
+            table.Columns.Add("Category", typeof(int));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("Transfer", typeof(long));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("BudgetBalanceDate", typeof(DateTime));
+            return table;
+        }
+
+        private static DataTable NewInvestmentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Security", typeof(int));
+            table.Columns.Add("UnitPrice", typeof(decimal));
+            table.Columns.Add("Units", typeof(decimal));
+            table.Columns.Add("Commission", typeof(decimal));
+            table.Columns.Add("InvestmentType", typeof(int));
+            table.Columns.Add("TradeType", typeof(int));
+            table.Columns.Add("TaxExempt", typeof(bool));
+            table.Columns.Add("Withholding", typeof(decimal));
+            table.Columns.Add("MarkUpDown", typeof(decimal));
+            table.Columns.Add("Taxes", typeof(decimal));
+            table.Columns.Add("Fees", typeof(decimal));
+            table.Columns.Add("Load", typeof(decimal));
+            return table;
+        }
+
+        private void SaveTransactionBatch(List<Transaction> transactions, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable transactionRows = NewTransactionRowTable();
+            DataTable splitRows = NewSplitRowTable();
+            DataTable investmentRows = NewInvestmentRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Transaction> byId = new Dictionary<long, Transaction>();
+            List<Transaction> deletedTransactions = new List<Transaction>();
+            List<Split> savedSplits = new List<Split>();
+            List<Split> deletedSplits = new List<Split>();
+            List<Investment> savedInvestments = new List<Investment>();
+
+            foreach (Transaction t in transactions)
+            {
+                if (t.Account == null)
+                {
+                    // Matches UpdateTransactions' existing guard: a dangling transaction with no
+                    // account isn't written - skip the whole transaction (and its owned
+                    // Splits/Investment) rather than sending Account as DBNull, which would
+                    // violate dbo.Transactions.Account's NOT NULL constraint.
+                    continue;
+                }
+
+                long id = t.Id;
+                rootsById[id] = t;
+                byId[id] = t;
+                long callerRowVersion = t.RowVersion;
+                object account = t.Account != null ? (object)t.Account.Id : DBNull.Value;
+                object payee = t.Payee != null ? (object)t.Payee.Id : DBNull.Value;
+                object category = t.Category != null ? (object)t.Category.Id : DBNull.Value;
+                object transferTarget = t.Transfer != null && t.Transfer.Transaction != null ? (object)t.Transfer.Transaction.Id : DBNull.Value;
+                object transferSplit = t.Transfer != null && t.Transfer.Split != null ? (object)t.Transfer.Split.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(t.Date);
+                object reconciledDate = SqlServerDatabase.DBNullableDateTimeParam(t.ReconciledDate);
+                object budgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate);
+                object mergeDate = SqlServerDatabase.DBNullableDateTimeParam(t.MergeDate);
+
+                if (t.IsInserted)
+                {
+                    transactionRows.Rows.Add("I", t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, DBNull.Value);
+                }
+                else if (t.IsChanged)
+                {
+                    transactionRows.Rows.Add("U", t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, callerRowVersion);
+                }
+                else if (t.IsDeleted)
+                {
+                    transactionRows.Rows.Add("D", t.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedTransactions.Add(t);
+                }
+
+                if (t.Splits != null)
+                {
+                    List<Split> splitsSnapshot = new List<Split>();
+                    foreach (Split s in t.Splits)
+                    {
+                        splitsSnapshot.Add(s);
+                    }
+
+                    foreach (Split s in splitsSnapshot)
+                    {
+                        object splitCategory = s.Category != null ? (object)s.Category.Id : DBNull.Value;
+                        object splitPayee = s.Payee != null ? (object)s.Payee.Id : DBNull.Value;
+                        object splitTransfer = s.Transfer != null && s.Transfer.Transaction != null ? (object)s.Transfer.Transaction.Id : DBNull.Value;
+                        object splitBudgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate);
+
+                        if (s.IsInserted)
+                        {
+                            splitRows.Rows.Add("I", s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsChanged)
+                        {
+                            splitRows.Rows.Add("U", s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsDeleted)
+                        {
+                            splitRows.Rows.Add("D", s.Id, t.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                                DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                            deletedSplits.Add(s);
+                        }
+                    }
+                }
+
+                if (t.Investment != null)
+                {
+                    Investment i = t.Investment;
+                    object security = i.Security != null ? (object)i.Security.Id : DBNull.Value;
+
+                    if (i.IsInserted)
+                    {
+                        investmentRows.Rows.Add("I", i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsChanged)
+                    {
+                        investmentRows.Rows.Add("U", i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        investmentRows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                        // No savedInvestments.Add here and no separate "deleted" tracking either -
+                        // Investment has no Parent/RemoveChild (unlike Split/RentUnit), and
+                        // MockDatabase.MarkOwnedChildrenClean's own established behavior does
+                        // nothing at all for a deleted investment. Match that exactly.
+                    }
+                }
+            }
+
+            if (transactionRows.Rows.Count == 0 && splitRows.Rows.Count == 0 && investmentRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Transactions_SaveBatch",
+                new[]
+                {
+                    ("@Transactions", "dbo.TransactionSaveBatchRow", transactionRows),
+                    ("@Splits", "dbo.SplitRow", splitRows),
+                    ("@Investments", "dbo.InvestmentRow", investmentRows)
+                },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Transaction t = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        t.RowVersion = newVersion;
+                        t.OnUpdated();
+                    });
+                });
+
+            foreach (Transaction t in deletedTransactions)
+            {
+                postCommitActions.Add(() =>
+                {
+                    t.OnUpdated();
+                    t.Parent.RemoveChild(t, true);
+                });
+            }
+
+            foreach (Split s in savedSplits)
+            {
+                postCommitActions.Add(() => s.OnUpdated());
+            }
+
+            foreach (Split s in deletedSplits)
+            {
+                // No OnUpdated() call here - matches MockDatabase.MarkOwnedChildrenClean's
+                // established precedent for deleted owned children (see the deleted-Investment
+                // case above), and is verified inert since RemoveChild(s, true) removes the object
+                // from its container regardless. (SqliteDatabase diverges here and does call
+                // OnUpdated() for deleted children - a known, accepted divergence.)
+                postCommitActions.Add(() => s.Parent.RemoveChild(s, true));
+            }
+
+            foreach (Investment i in savedInvestments)
+            {
+                postCommitActions.Add(() => i.OnUpdated());
+            }
         }
     }
 }

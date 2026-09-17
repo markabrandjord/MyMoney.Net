@@ -179,5 +179,49 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedTransaction.Investment.Security, Is.Not.Null);
             Assert.That(reloadedTransaction.Investment.Security.Name, Is.EqualTo("ACME"));
         }
+
+        [Test]
+        public void SaveBatch_MixedEntityTypesAcrossOneBatch_CommitsOrRollsBackTogether()
+        {
+            MyMoney money = new MyMoney();
+            Category category = money.Categories.GetOrCreateCategory("MixedBatchCategory", CategoryType.Expense);
+            Account account = money.Accounts.AddAccount("MixedBatchAccount");
+            this.Database.SaveBatch(new PersistentObject[] { category, account });
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Categories.FindCategory("MixedBatchCategory"), Is.Not.Null);
+            Assert.That(reloaded.Accounts.FindAccount("MixedBatchAccount"), Is.Not.Null);
+
+            // Both conflicting roots come from ONE shared reader graph - not two separate Load()
+            // calls - matching SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState's
+            // pattern above. Two different graphs would trip MockDatabase.SaveBatch's own
+            // same-graph guard (MockDatabase.cs's "SaveBatch roots belong to different MyMoney
+            // graphs" InvalidOperationException) before the RowVersion conflict check ever runs -
+            // an earlier draft of this test used readerA/readerB and failed against Mock for
+            // exactly that reason, caught during Task 13's implementation.
+            MyMoney reader = this.Database.Load(null);
+            Account staleAccount = reader.Accounts.FindAccount("MixedBatchAccount");
+            staleAccount.Description = "Attempted stale";
+
+            Category freshCategory = reader.Categories.FindCategory("MixedBatchCategory");
+            freshCategory.Description = "Attempted fresh";
+
+            // Someone else updates the account first, so staleAccount's RowVersion is now behind.
+            MyMoney otherWriter = this.Database.Load(null);
+            Account otherAccount = otherWriter.Accounts.FindAccount("MixedBatchAccount");
+            otherAccount.Description = "Changed elsewhere";
+            this.Database.SaveOne(otherAccount);
+
+            // freshCategory listed FIRST deliberately - same reasoning as
+            // SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState: its
+            // own type-group's proc call "succeeds" (commits, or nests-and-decrements under an
+            // ambient transaction) before staleAccount's type-group conflicts on the next call.
+            Assert.Throws<ConcurrencyConflictException>(
+                () => this.Database.SaveBatch(new PersistentObject[] { freshCategory, staleAccount }));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Categories.FindCategory("MixedBatchCategory").Description, Is.Not.EqualTo("Attempted fresh"));
+            Assert.That(freshCategory.IsChanged, Is.True);
+        }
     }
 }

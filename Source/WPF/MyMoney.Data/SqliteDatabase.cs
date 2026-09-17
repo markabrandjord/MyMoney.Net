@@ -2058,9 +2058,11 @@ namespace Walkabout.Data
 
         /// <summary>
         /// Overrides the inherited (shared-with-SqlServerDatabase) ReadCategories to also read
-        /// back the Version column - deliberately a full override, not a shared generic change,
-        /// so SQL Server's read path (which will need ROWVERSION's binary(8)-to-long conversion,
-        /// not a plain integer read) is untouched until Phase 2c actually needs it.
+        /// back the Version column - deliberately a full override, not a shared generic change.
+        /// SQL Server's read path (SqlServerStoredProcDatabase.ReadCategories) also reads a plain
+        /// BIGINT Version column the same way - Phase 2c settled on an application-managed
+        /// column, not SQL Server's native ROWVERSION type, so no binary(8)-to-long conversion
+        /// was ever needed.
         /// </summary>
         public override void ReadCategories(Categories categories, MyMoney money)
         {
