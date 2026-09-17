@@ -98,6 +98,7 @@ namespace Walkabout.Views
         private IServiceProvider site;
 
         private MyMoney myMoney;
+        private UiThreadHandler onMoneyChangedUi;
         private TypeToFind ttf;
         private readonly DelayedActions delayedUpdates = new DelayedActions();
         private ILogger log;
@@ -411,6 +412,7 @@ namespace Walkabout.Views
         /// </summary>
         public TransactionsView()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.TransactionViewInitialize))
             {
@@ -1327,14 +1329,18 @@ namespace Walkabout.Views
                 {
                     return;
                 }
+                // Wrapped once in the ctor and reused for both subscribe and unsubscribe below - see
+                // UiThreadHandler's doc comment for why a bare re-wrap or a mismatched raw method group here
+                // would silently break unsubscription (a mistake a Roslyn analyzer could catch at compile time
+                // if this class of bug recurs - deferred for now, see issue #49).
                 if (this.myMoney != null)
                 {
-                    this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.myMoney.Changed -= this.onMoneyChangedUi.Handler;
                 }
                 this.myMoney = value;
                 if (value != null)
                 {
-                    this.myMoney.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.myMoney.Changed += this.onMoneyChangedUi.Handler;
                 }
                 this.TheActiveGrid.ClearItemsSource();
 
