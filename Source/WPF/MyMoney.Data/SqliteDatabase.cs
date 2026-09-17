@@ -1,5 +1,6 @@
 ﻿// #define DEBUG_DATABASE
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -993,6 +994,18 @@ namespace Walkabout.Data
             this.SaveBatch(new PersistentObject[] { root });
         }
 
+        /// <summary>
+        /// Maps directly onto SaveBatch (matching MockDatabase.SaveTransfer and the design spec's
+        /// own description of this method - "maps directly onto TransformTwoTransactionIntoTransfer's
+        /// existing logic") - a named two-argument method purely for call-site clarity ("exactly two,
+        /// not an arbitrary N"), not different transactional mechanics. SaveBatch's existing
+        /// multi-root transaction already gives both sides the atomicity this needs.
+        /// </summary>
+        public override void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
         public override void SaveBatch(IEnumerable<PersistentObject> roots)
         {
             List<PersistentObject> list = new List<PersistentObject>(roots);
@@ -1007,7 +1020,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment || root is RentBuilding))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment || root is RentBuilding || root is Transaction))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1017,6 +1030,16 @@ namespace Walkabout.Data
             this.Connect();
             using (SQLiteTransaction transaction = this.sqliteConnection.BeginTransaction())
             {
+                // Transaction.Transfer/Split.Transfer are ColumnObjectMapping columns resolving to
+                // Transactions, so GetCreateTableScript generates a real, self-referential
+                // FOREIGN KEY (Transfer) REFERENCES Transactions(Id) constraint. Two brand-new
+                // mutually-referencing transactions (SaveTransfer's whole reason to exist) can't
+                // both satisfy that FK in either insert order under SQLite's default immediate
+                // (per-statement) checking. Deferring FK checks to commit time - automatically
+                // reset after this transaction ends, per SQLite's own semantics - lets both rows
+                // land first and only validates the FK once both exist, with no schema change.
+                this.ExecuteNonQueryInTransaction(transaction, "PRAGMA defer_foreign_keys = ON;");
+
                 // Every in-memory side effect (RowVersion assignment, OnUpdated, RemoveChild) is
                 // deferred into this list and only run AFTER Commit() succeeds. If any later root in
                 // this batch conflicts, the catch below rolls back EVERY write this transaction made -
@@ -1070,6 +1093,10 @@ namespace Walkabout.Data
                         else if (root is RentBuilding rentBuilding)
                         {
                             this.SaveOneRentBuilding(rentBuilding, transaction, postCommitActions);
+                        }
+                        else if (root is Transaction transactionRoot)
+                        {
+                            this.SaveOneTransaction(transactionRoot, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1832,6 +1859,190 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Transaction row - same shape as SaveOneCategory, plus owned Splits/Investment
+        /// (directly attached via t.Splits/t.Investment, unlike RentBuilding's sibling-container
+        /// case). Splits.Transaction is a real [ColumnObjectMapping] FK to Transactions.Id (unlike
+        /// RentUnit.Building, which is a plain int), so ordering matters: children must be written
+        /// AFTER the parent on insert/update (parent must exist first) but BEFORE the parent on
+        /// delete (or the parent DELETE violates the FK with children still pointing at it - the
+        /// same bug class fixed in SqlServerStoredProcDatabase.UpdateTransactions earlier this
+        /// session). Transfer/TransferSplit are plain columns read from t.Transfer at write time -
+        /// no FK, no special linking logic; SaveTransfer's atomicity comes entirely from SaveBatch's
+        /// existing multi-root transaction, not anything here. Splits/Investment get no Version
+        /// column of their own - part of the Transaction's aggregate, gated by its RowVersion only
+        /// (docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2).
+        /// </summary>
+        private void SaveOneTransaction(Transaction t, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            if (t.Account == null)
+            {
+                // Matches UpdateTransactions' existing guard: a dangling transaction with no
+                // account isn't written.
+                return;
+            }
+
+            long callerRowVersion = t.RowVersion;
+
+            if (t.IsDeleted)
+            {
+                this.SaveTransactionSplitsAndInvestment(t, transaction, postCommitActions);
+            }
+
+            if (t.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Transactions ([Id],[Number],[Account],[Date],[Amount],[Status],[Memo],[Payee],[Category],[Transfer],[TransferSplit],[FITID],[SalesTax],[Flags],[ReconciledDate],[BudgetBalanceDate],[MergeDate],[OriginalPayee]) " +
+                    "VALUES (@Id,@Number,@Account,@Date,@Amount,@Status,@Memo,@Payee,@Category,@Transfer,@TransferSplit,@FITID,@SalesTax,@Flags,@ReconciledDate,@BudgetBalanceDate,@MergeDate,@OriginalPayee);",
+                    ("@Id", t.Id), ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)),
+                    ("@Amount", t.Amount), ("@Status", (int)t.Status), ("@Memo", t.Memo),
+                    ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value), ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
+                    ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                    ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                    ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
+                    ("@ReconciledDate", DBNullableDateTimeParam(t.ReconciledDate)),
+                    ("@BudgetBalanceDate", DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                    ("@MergeDate", DBNullableDateTimeParam(t.MergeDate)), ("@OriginalPayee", t.OriginalPayee));
+                postCommitActions.Add(() =>
+                {
+                    t.RowVersion = 1;
+                    t.OnUpdated();
+                });
+            }
+            else if (t.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Transactions SET Number=@Number,Account=@Account,Date=@Date,Amount=@Amount,Status=@Status,Memo=@Memo," +
+                    "Payee=@Payee,Category=@Category,Transfer=@Transfer,TransferSplit=@TransferSplit,FITID=@FITID,SalesTax=@SalesTax," +
+                    "Flags=@Flags,ReconciledDate=@ReconciledDate,BudgetBalanceDate=@BudgetBalanceDate,MergeDate=@MergeDate," +
+                    "OriginalPayee=@OriginalPayee," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Number", t.Number), ("@Account", t.Account.Id), ("@Date", DBDateTimeParam(t.Date)), ("@Amount", t.Amount),
+                    ("@Status", (int)t.Status), ("@Memo", t.Memo),
+                    ("@Payee", t.Payee != null ? (object)t.Payee.Id : DBNull.Value), ("@Category", t.Category != null ? (object)t.Category.Id : DBNull.Value),
+                    ("@Transfer", t.Transfer != null && t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                    ("@TransferSplit", t.Transfer != null && t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                    ("@FITID", t.FITID), ("@SalesTax", t.SalesTax), ("@Flags", (int)t.Flags),
+                    ("@ReconciledDate", DBNullableDateTimeParam(t.ReconciledDate)),
+                    ("@BudgetBalanceDate", DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                    ("@MergeDate", DBNullableDateTimeParam(t.MergeDate)), ("@OriginalPayee", t.OriginalPayee),
+                    ("@Id", t.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(t, "Transactions", t.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    t.RowVersion = callerRowVersion + 1;
+                    t.OnUpdated();
+                });
+            }
+            else if (t.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Transactions WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", t.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(t, "Transactions", t.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    t.OnUpdated();
+                    t.Parent.RemoveChild(t, true);
+                });
+            }
+
+            if (!t.IsDeleted)
+            {
+                this.SaveTransactionSplitsAndInvestment(t, transaction, postCommitActions);
+            }
+        }
+
+        /// <summary>
+        /// Writes every pending-change Split in t.Splits (directly-owned, unlike RentBuilding's
+        /// sibling-container RentUnits - iterating it yields every split including deleted-but-not-
+        /// yet-removed ones, same as every other owned-child container this session), plus t's
+        /// optional 1:1 Investment. No conflict/Version check per child - see SaveOneTransaction's
+        /// summary for why.
+        /// </summary>
+        private void SaveTransactionSplitsAndInvestment(Transaction t, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            if (t.Splits != null)
+            {
+                foreach (Split s in t.Splits)
+                {
+                    if (s.IsInserted)
+                    {
+                        this.ExecuteNonQueryInTransaction(transaction,
+                            "INSERT INTO [Splits] ([Id],[Transaction],[Amount],[Category],[Memo],[Transfer],[Payee],[Flags],[BudgetBalanceDate]) " +
+                            "VALUES (@Id,@Transaction,@Amount,@Category,@Memo,@Transfer,@Payee,@Flags,@BudgetBalanceDate);",
+                            ("@Id", s.Id), ("@Transaction", s.Transaction.Id), ("@Amount", s.Amount),
+                            ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", s.Memo),
+                            ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                            ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)));
+                        postCommitActions.Add(() => s.OnUpdated());
+                    }
+                    else if (s.IsChanged)
+                    {
+                        this.ExecuteNonQueryInTransaction(transaction,
+                            "UPDATE [Splits] SET [Amount]=@Amount,[Category]=@Category,[Memo]=@Memo,[Transfer]=@Transfer,[Payee]=@Payee," +
+                            "Flags=@Flags,BudgetBalanceDate=@BudgetBalanceDate WHERE [Id]=@Id AND [Transaction]=@Transaction;",
+                            ("@Amount", s.Amount), ("@Category", s.Category != null ? (object)s.Category.Id : DBNull.Value), ("@Memo", s.Memo),
+                            ("@Transfer", s.Transfer != null && s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                            ("@Payee", s.Payee != null ? (object)s.Payee.Id : DBNull.Value), ("@Flags", (int)s.Flags),
+                            ("@BudgetBalanceDate", DBNullableDateTimeParam(s.BudgetBalanceDate)), ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                        postCommitActions.Add(() => s.OnUpdated());
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        this.ExecuteNonQueryInTransaction(transaction,
+                            "DELETE FROM [Splits] WHERE [Id]=@Id AND [Transaction]=@Transaction;",
+                            ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                        postCommitActions.Add(() =>
+                        {
+                            s.OnUpdated();
+                            s.Parent.RemoveChild(s, true);
+                        });
+                    }
+                }
+            }
+
+            Investment i = t.Investment;
+            if (i != null)
+            {
+                if (i.IsInserted)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction,
+                        "INSERT INTO Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load]) " +
+                        "VALUES (@Id,@Security,@UnitPrice,@Units,@Commission,@InvestmentType,@TradeType,@TaxExempt,@Withholding,@MarkUpDown,@Taxes,@Fees,@Load);",
+                        ("@Id", i.Id), ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice),
+                        ("@Units", i.Units), ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type),
+                        ("@TradeType", (int)i.TradeType), ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding),
+                        ("@MarkUpDown", i.MarkUpDown), ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load));
+                    postCommitActions.Add(() => i.OnUpdated());
+                }
+                else if (i.IsChanged)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction,
+                        "UPDATE Investments SET Security=@Security,UnitPrice=@UnitPrice,Units=@Units,Commission=@Commission," +
+                        "InvestmentType=@InvestmentType,TradeType=@TradeType,TaxExempt=@TaxExempt,Withholding=@Withholding," +
+                        "MarkUpDown=@MarkUpDown,Taxes=@Taxes,Fees=@Fees,[Load]=@Load WHERE Id=@Id;",
+                        ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice), ("@Units", i.Units),
+                        ("@Commission", i.Commission), ("@InvestmentType", (int)i.Type), ("@TradeType", (int)i.TradeType),
+                        ("@TaxExempt", i.TaxExempt ? 1 : 0), ("@Withholding", i.Withholding), ("@MarkUpDown", i.MarkUpDown),
+                        ("@Taxes", i.Taxes), ("@Fees", i.Fees), ("@Load", i.Load), ("@Id", i.Id));
+                    postCommitActions.Add(() => i.OnUpdated());
+                }
+                else if (i.IsDeleted)
+                {
+                    this.ExecuteNonQueryInTransaction(transaction, "DELETE FROM Investments WHERE Id=@Id;", ("@Id", i.Id));
+                    postCommitActions.Add(() => i.OnUpdated());
+                }
+            }
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -2276,6 +2487,231 @@ namespace Walkabout.Data
             }
             collection.EndUpdate();
             reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadTransactions to also read back the Version column - same
+        /// rationale as ReadCategories' override. Everything else (Splits loading, the two-pass
+        /// transfer resolution, Payee-stats recompute) mirrors the base implementation exactly;
+        /// only the Transaction row's own SELECT/read-back changes.
+        /// </summary>
+        public override ArrayList ReadTransactions(Transactions transactions, MyMoney money)
+        {
+            transactions.Clear();
+
+            ArrayList errors = new ArrayList();
+
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Number],[Date],[Amount],[Account],[Status],[Memo],[Payee],[Category],[FITID],[SalesTax],[Flags],[ReconciledDate],[BudgetBalanceDate],[MergeDate],[OriginalPayee],[" + this.VersionColumnName + "] FROM Transactions");
+            transactions.BeginUpdate(false);
+
+            while (reader.Read())
+            {
+                this.IncrementProgress("Transactions");
+                long id = reader.GetInt64(0);
+                Transaction t = transactions.AddTransaction(id);
+
+                t.BatchMode = true;
+
+                t.Number = ReadDbString(reader, 1);
+                t.Date = reader.SafeGetDateTime(2);
+                t.Amount = reader.GetDecimal(3);
+                t.Account = money.Accounts.FindAccountAt(reader.GetInt32(4));
+                t.Status = (TransactionStatus)reader.GetInt32(5);
+                t.Memo = ReadDbString(reader, 6);
+                t.Payee = reader.IsDBNull(7) ? null : money.Payees.FindPayeeAt(reader.GetInt32(7));
+                t.Category = reader.IsDBNull(8) ? null : money.Categories.FindCategoryById(reader.GetInt32(8));
+                t.FITID = ReadDbString(reader, 9);
+                if (!reader.IsDBNull(10))
+                {
+                    t.SalesTax = reader.GetDecimal(10);
+                }
+
+                if (!reader.IsDBNull(11))
+                {
+                    t.Flags = (TransactionFlags)reader.GetInt32(11);
+                }
+
+                if (!reader.IsDBNull(12))
+                {
+                    t.ReconciledDate = reader.SafeGetDateTime(12);
+                }
+
+                if (!reader.IsDBNull(13))
+                {
+                    t.BudgetBalanceDate = reader.SafeGetDateTime(13);
+                }
+
+                if (!reader.IsDBNull(14))
+                {
+                    t.MergeDate = reader.SafeGetDateTime(14);
+                }
+
+                if (!reader.IsDBNull(15))
+                {
+                    t.OriginalPayee = reader.GetString(15);
+                }
+
+                t.RowVersion = reader.GetInt64(16);
+
+                t.BatchMode = false;
+
+                t.OnUpdated();
+            }
+
+            reader.Close();
+            // Load the splits.
+            reader = this.ExecuteReader("SELECT [Id],[Transaction],[Amount],[Category],[Memo],[Transfer],[Payee],[Flags],[BudgetBalanceDate] FROM Splits ORDER BY [Transaction],[Id]");
+            while (reader.Read())
+            {
+                this.IncrementProgress("Splits");
+                int id = reader.GetInt32(0);
+                long transactionid = reader.GetInt64(1);
+                Transaction t = transactions.FindTransactionById(transactionid);
+                Split s = null;
+                if (t == null)
+                {
+                    // Yikes! -- this just needs to be deleted then.
+                    Trace.WriteLine("Dangling split: " + id + "," + transactionid);
+                    continue;
+                }
+                else
+                {
+                    if (!t.IsSplit)
+                    {
+                        t.Splits = new Splits(t, t);
+                    }
+                    s = t.Splits.AddSplit(id);
+                }
+                s.BatchMode = true;
+                t.Splits.BeginUpdate(false);
+                s.Amount = reader.GetDecimal(2);
+                s.Category = reader.IsDBNull(3) ? null : money.Categories.FindCategoryById(reader.GetInt32(3));
+                s.Memo = ReadDbString(reader, 4);
+                long tid = reader.GetInt64(5);
+                if (tid != -1)
+                {
+                    Transaction u = transactions.FindTransactionById(tid);
+                    if (u == null)
+                    {
+                        errors.Add(new DataError(transactionid, id, "Other side of split transfer not found"));
+                    }
+                    else
+                    {
+                        if (u.Transfer != null && (u.Transfer.Transaction != t || u.Transfer.Split != s))
+                        {
+                            errors.Add(new DataError(transactionid, id, "Duplicate transfer found"));
+                        }
+                        s.Transfer = new Transfer(tid, t, s, u);
+                    }
+                }
+                if (!reader.IsDBNull(6))
+                {
+                    int pid = reader.GetInt32(6);
+                    s.Payee = money.Payees.FindPayeeAt(pid);
+                }
+
+                if (!reader.IsDBNull(7))
+                {
+                    s.Flags = (SplitFlags)reader.GetInt32(7);
+                }
+
+                if (!reader.IsDBNull(8))
+                {
+                    s.BudgetBalanceDate = reader.SafeGetDateTime(8);
+                }
+
+                t.Splits.EndUpdate();
+
+                s.BatchMode = false;
+                s.OnUpdated();
+                if (t != null)
+                {
+                    t.OnUpdated();
+                }
+            }
+
+            reader.Close();
+            // now we can resolve the transfers
+            reader = this.ExecuteReader("SELECT Id,Transfer,TransferSplit FROM Transactions WHERE NOT Transfer = -1 ");
+            while (reader.Read())
+            {
+                long id = reader.GetInt64(0);
+                Transaction t = transactions.FindTransactionById(id);
+                Debug.Assert(t != null); // since we just loaded it above.
+                long tid = reader.GetInt64(1);
+                Transaction u = transactions.FindTransactionById(tid);
+                if (u == null)
+                {
+                    errors.Add(new DataError(id, "Transaction is marked as a transfer, but other side of transfer was not found"));
+                }
+                if (t != null && u != null)
+                {
+                    int sid = reader.GetInt32(2);
+                    if (sid == -1)
+                    {
+                        if (u.Transfer != null)
+                        {
+                            if (u.Transfer.Transaction != t)
+                            {
+                                // already have a transfer for this transaction!
+                                errors.Add(new DataError(id, string.Format("Already have a transfer for this transaction, so transfer {0} is a duplicate of transfer {1}", id, u.Transfer.Id)));
+                            }
+                        }
+                        t.Transfer = new Transfer(id, t, u);
+                    }
+                    else
+                    {
+                        Split s = u.FindSplit(sid);
+                        if (s == null)
+                        {
+                            errors.Add(new DataError(id, sid, "Transaction contains a split marked as a transfer, but other side of transfer was not found"));
+                        }
+                        else
+                        {
+                            if (t.Transfer != null)
+                            {
+                                // already have a transfer for this split!
+                                errors.Add(new DataError(id, string.Format("Already have a transfer for this split, so {0} is a duplicate of {1}", id, t.Transfer.Id)));
+                            }
+                            t.Transfer = new Transfer(id, t, u, s);
+                        }
+                    }
+                    t.OnUpdated();
+                }
+            }
+
+            reader.Close();
+
+            this.ReadInvestments(transactions, money);
+
+            // recompute state of Payee objects
+            foreach (Transaction t in transactions)
+            {
+                t.BatchMode = true;
+
+                Payee p = t.Payee;
+                if (p != null)
+                {
+                    // setup initial counts
+                    if (t.Category == null && t.Transfer == null && !t.IsSplit)
+                    {
+                        p.UncategorizedTransactions++;
+                        p.OnUpdated();
+                    }
+                    if ((t.Flags & TransactionFlags.Unaccepted) != 0)
+                    {
+                        p.UnacceptedTransactions++;
+                        p.OnUpdated();
+                    }
+                }
+
+                t.BatchMode = false;
+            }
+
+            transactions.EndUpdate();
+
+            transactions.FireChangeEvent(transactions, transactions, null, ChangeType.Reloaded);
+            return errors;
         }
 
     }
