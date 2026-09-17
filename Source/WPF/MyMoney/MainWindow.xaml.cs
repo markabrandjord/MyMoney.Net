@@ -93,17 +93,20 @@ namespace Walkabout
         private readonly RecentFilesMenu recentFilesMenu;
         private AnimatedMessage animatedStatus;
         private OfxDownloadController ofxController;
+        private UiThreadHandler onChangedUiHandler;
         #endregion
 
         #region CONSTRUCTORS
 
         public MainWindow()
         {
+            this.onChangedUiHandler = new UiThreadHandler(this.OnChangedUI);
             UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
         }
 
         public MainWindow(Settings settings)
         {
+            this.onChangedUiHandler = new UiThreadHandler(this.OnChangedUI);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.MainWindowInitialize))
             {
@@ -582,7 +585,7 @@ namespace Walkabout
             this.statementManager.Stop();
             if (this.myMoney != null)
             {
-                this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnChangedUI);
+                this.myMoney.Changed -= this.onChangedUiHandler.Handler;
             }
         }
 
@@ -594,8 +597,8 @@ namespace Walkabout
             this.attachmentManager.Start();
             this.statementManager.StatementsDirectory = this.settings.StatementsDirectory;
             this.statementManager.Start();
-            this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnChangedUI);
-            this.myMoney.Changed += new EventHandler<ChangeEventArgs>(this.OnChangedUI);
+            this.myMoney.Changed -= this.onChangedUiHandler.Handler;
+            this.myMoney.Changed += this.onChangedUiHandler.Handler;
         }
 
         private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
