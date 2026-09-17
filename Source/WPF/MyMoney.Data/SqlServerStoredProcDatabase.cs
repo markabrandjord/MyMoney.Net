@@ -1632,19 +1632,21 @@ namespace Walkabout.Data
                 return;
             }
 
-            // Every root in the batch must be the SAME type - a batch mixing types (e.g. one
-            // Category and one Currency) falls through to the inherited stub until a later task
-            // adds real cross-type atomicity (each entity's _SaveBatch proc owns its own
-            // transaction; mixing types safely needs an ambient ombudsman transaction the proc's
-            // internal BEGIN TRAN can nest inside - not needed for any currently-real caller).
-            Type firstType = list[0].GetType();
+            Dictionary<Type, List<PersistentObject>> groupedByType = new Dictionary<Type, List<PersistentObject>>();
             foreach (PersistentObject root in list)
             {
-                if (root.GetType() != firstType)
+                Type type = root.GetType();
+                if (!IsSupportedSaveBatchType(type))
                 {
                     base.SaveBatch(list);
                     return;
                 }
+                if (!groupedByType.TryGetValue(type, out List<PersistentObject> group))
+                {
+                    group = new List<PersistentObject>();
+                    groupedByType[type] = group;
+                }
+                group.Add(root);
             }
 
             this.Connect();
@@ -1652,59 +1654,115 @@ namespace Walkabout.Data
             {
                 connection.Open();
                 List<Action> postCommitActions = new List<Action>();
-                if (firstType == typeof(Category))
+
+                if (groupedByType.Count == 1)
                 {
-                    this.SaveCategoryBatch(list.ConvertAll(r => (Category)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Currency))
-                {
-                    this.SaveCurrencyBatch(list.ConvertAll(r => (Currency)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(OnlineAccount))
-                {
-                    this.SaveOnlineAccountBatch(list.ConvertAll(r => (OnlineAccount)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Account))
-                {
-                    this.SaveAccountBatch(list.ConvertAll(r => (Account)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Payee))
-                {
-                    this.SavePayeeBatch(list.ConvertAll(r => (Payee)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Alias))
-                {
-                    this.SaveAliasBatch(list.ConvertAll(r => (Alias)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Security))
-                {
-                    this.SaveSecurityBatch(list.ConvertAll(r => (Security)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(StockSplit))
-                {
-                    this.SaveStockSplitBatch(list.ConvertAll(r => (StockSplit)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(LoanPayment))
-                {
-                    this.SaveLoanPaymentBatch(list.ConvertAll(r => (LoanPayment)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(RentBuilding))
-                {
-                    this.SaveRentBuildingBatch(list.ConvertAll(r => (RentBuilding)r), connection, null, postCommitActions);
-                }
-                else if (firstType == typeof(Transaction))
-                {
-                    this.SaveTransactionBatch(list.ConvertAll(r => (Transaction)r), connection, null, postCommitActions);
-                }
-                else
-                {
-                    base.SaveBatch(list);
+                    // Common case: one entity type, no ambient transaction needed - the proc's own
+                    // internal BEGIN TRAN/COMMIT/ROLLBACK is already a complete, standalone
+                    // transaction.
+                    foreach (var group in groupedByType)
+                    {
+                        this.DispatchSaveBatchForType(group.Key, group.Value, connection, null, postCommitActions);
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
                     return;
                 }
-                foreach (Action action in postCommitActions)
+
+                using (SqlTransaction ambientTransaction = connection.BeginTransaction())
                 {
-                    action();
+                    try
+                    {
+                        foreach (var group in groupedByType)
+                        {
+                            this.DispatchSaveBatchForType(group.Key, group.Value, connection, ambientTransaction, postCommitActions);
+                        }
+                        ambientTransaction.Commit();
+                    }
+                    catch (Exception originalException)
+                    {
+                        try
+                        {
+                            ambientTransaction.Rollback();
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // A _SaveBatch proc's own internal ROLLBACK TRANSACTION on conflict
+                            // already unwound the WHOLE ambient transaction (SQL Server's
+                            // nested-transaction rule: ROLLBACK always targets the outermost
+                            // BEGIN, regardless of nesting depth) - by the time control returns
+                            // here, @@TRANCOUNT is already 0 and this SqlTransaction object is
+                            // "zombied". That's success, not a new failure: only a genuinely new
+                            // rollback failure (any other exception type) should mask/wrap the
+                            // original exception, matching SqliteDatabase.SaveBatch's identical
+                            // never-hide-the-original-exception rule.
+                            _ = originalException;
+                        }
+                        throw;
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
                 }
+            }
+        }
+
+        private static bool IsSupportedSaveBatchType(Type type)
+        {
+            return type == typeof(Category) || type == typeof(Currency) || type == typeof(OnlineAccount)
+                || type == typeof(Account) || type == typeof(Payee) || type == typeof(Alias)
+                || type == typeof(Security) || type == typeof(StockSplit) || type == typeof(LoanPayment)
+                || type == typeof(RentBuilding) || type == typeof(Transaction);
+        }
+
+        private void DispatchSaveBatchForType(Type type, List<PersistentObject> roots, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            if (type == typeof(Category))
+            {
+                this.SaveCategoryBatch(roots.ConvertAll(r => (Category)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Currency))
+            {
+                this.SaveCurrencyBatch(roots.ConvertAll(r => (Currency)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(OnlineAccount))
+            {
+                this.SaveOnlineAccountBatch(roots.ConvertAll(r => (OnlineAccount)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Account))
+            {
+                this.SaveAccountBatch(roots.ConvertAll(r => (Account)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Payee))
+            {
+                this.SavePayeeBatch(roots.ConvertAll(r => (Payee)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Alias))
+            {
+                this.SaveAliasBatch(roots.ConvertAll(r => (Alias)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Security))
+            {
+                this.SaveSecurityBatch(roots.ConvertAll(r => (Security)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(StockSplit))
+            {
+                this.SaveStockSplitBatch(roots.ConvertAll(r => (StockSplit)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(LoanPayment))
+            {
+                this.SaveLoanPaymentBatch(roots.ConvertAll(r => (LoanPayment)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(RentBuilding))
+            {
+                this.SaveRentBuildingBatch(roots.ConvertAll(r => (RentBuilding)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Transaction))
+            {
+                this.SaveTransactionBatch(roots.ConvertAll(r => (Transaction)r), connection, transaction, postCommitActions);
             }
         }
 
