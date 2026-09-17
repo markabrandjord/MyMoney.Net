@@ -20,6 +20,7 @@ namespace Walkabout.Views.Controls
     public partial class BalanceControl : UserControl
     {
         private MyMoney myMoney;
+        private UiThreadHandler onTransactionsChangedUi;
         private Account account;
         private StatementManager statements;
         private Category interestCategory;
@@ -36,6 +37,8 @@ namespace Walkabout.Views.Controls
 
         public BalanceControl()
         {
+            this.onTransactionsChangedUi = new UiThreadHandler(this.Transactions_Changed);
+
             this.InitializeComponent();
 
             this.TextBoxStatementBalance.LostFocus += new RoutedEventHandler(this.StatementBalance_LostFocus);
@@ -149,8 +152,8 @@ namespace Walkabout.Views.Controls
 
             this.StatementDate = estdate;
 
-            this.myMoney.Transactions.Changed -= new EventHandler<ChangeEventArgs>(this.Transactions_Changed);
-            this.myMoney.Transactions.Changed += new EventHandler<ChangeEventArgs>(this.Transactions_Changed);
+            this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
+            this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
 
             this.interestCategory = (this.account.Type == AccountType.Brokerage) ?
                 this.myMoney.Categories.InvestmentInterest : this.myMoney.Categories.InterestEarned;
