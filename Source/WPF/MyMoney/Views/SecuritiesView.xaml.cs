@@ -35,6 +35,7 @@ namespace Walkabout.Views
 
         public SecuritiesView()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
             this.InitializeComponent();
             this.SetupGrid(this.SecuritiesDataGrid);            
         }        
@@ -467,6 +468,7 @@ namespace Walkabout.Views
         #region IView
 
         private MyMoney money;
+        private UiThreadHandler onMoneyChangedUi;
 
         public MyMoney Money
         {
@@ -477,12 +479,12 @@ namespace Walkabout.Views
             {
                 if (this.money != null)
                 {
-                    this.money.Changed -= this.OnMoneyChanged;
+                    this.money.Changed -= this.onMoneyChangedUi.Handler;
                 }
                 this.money = value;
                 if (this.money != null)
                 {
-                    this.money.Changed += this.OnMoneyChanged;
+                    this.money.Changed += this.onMoneyChangedUi.Handler;
                 }
                 this.ShowSecurities();
             }
