@@ -1436,6 +1436,22 @@ namespace Walkabout.Data
                         continue;
                     }
 
+                    // Splits/Investment carry a FK back to this Transaction. On delete, the child
+                    // rows must go first or SQL Server rejects the parent DELETE with them still
+                    // pointing at it (FK_Splits_Transaction) - unlike insert/update, where the
+                    // parent must exist first, so this ordering only flips for the delete case.
+                    if (t.IsDeleted)
+                    {
+                        if (t.Splits != null)
+                        {
+                            this.UpdateSplits(t.Splits);
+                        }
+                        if (t.Investment != null)
+                        {
+                            this.UpdateInvestment(t.Investment);
+                        }
+                    }
+
                     connection.Open();
                     (string Name, object Value)[] parameters =
                     {
@@ -1471,13 +1487,16 @@ namespace Walkabout.Data
                     }
                     connection.Close();
 
-                    if (t.Splits != null)
+                    if (!t.IsDeleted)
                     {
-                        this.UpdateSplits(t.Splits);
-                    }
-                    if (t.Investment != null)
-                    {
-                        this.UpdateInvestment(t.Investment);
+                        if (t.Splits != null)
+                        {
+                            this.UpdateSplits(t.Splits);
+                        }
+                        if (t.Investment != null)
+                        {
+                            this.UpdateInvestment(t.Investment);
+                        }
                     }
                 }
             }

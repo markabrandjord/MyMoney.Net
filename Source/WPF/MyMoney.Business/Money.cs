@@ -4209,7 +4209,6 @@ namespace Walkabout.Data
                     this.nextAlias = a.Id + 1;
                 }
                 a.Parent = this;
-                a.OnInserted();
                 this.aliases[a.Id] = a;
             }
 
@@ -5676,7 +5675,6 @@ namespace Walkabout.Data
                 this.OnTransactionIdChanged(-1, extra.Transaction, extra);
 
                 extra.Parent = this;
-                extra.OnInserted();
                 this.items[extra.Id] = extra;
             }
 
