@@ -276,6 +276,92 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.Currencies.FindCurrency("EUR"), Is.Null);
         }
 
+        private static MyMoney BuildOneOnlineAccountMoney(out OnlineAccount onlineAccount)
+        {
+            MyMoney money = new MyMoney();
+            onlineAccount = money.OnlineAccounts.AddOnlineAccount("Chase");
+            onlineAccount.Institution = "Chase Bank";
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewOnlineAccount_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneOnlineAccountMoney(out OnlineAccount onlineAccount);
+
+            this.Database.SaveOne(onlineAccount);
+
+            Assert.That(onlineAccount.RowVersion, Is.EqualTo(1));
+            Assert.That(onlineAccount.IsInserted, Is.False);
+            Assert.That(onlineAccount.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            OnlineAccount found = reloaded.OnlineAccounts.FindOnlineAccount("Chase");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateOnlineAccountAfterReload_IncrementsRowVersion()
+        {
+            BuildOneOnlineAccountMoney(out OnlineAccount onlineAccount);
+            this.Database.SaveOne(onlineAccount);
+
+            MyMoney reloaded = this.Database.Load(null);
+            OnlineAccount found = reloaded.OnlineAccounts.FindOnlineAccount("Chase");
+            found.Institution = "Updated Bank";
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            OnlineAccount foundAgain = reloadedAgain.OnlineAccounts.FindOnlineAccount("Chase");
+            Assert.That(foundAgain.Institution, Is.EqualTo("Updated Bank"));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleOnlineAccountRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneOnlineAccountMoney(out OnlineAccount onlineAccount);
+            this.Database.SaveOne(onlineAccount);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            OnlineAccount accountA = readerA.OnlineAccounts.FindOnlineAccount("Chase");
+            accountA.Institution = "From A";
+            this.Database.SaveOne(accountA);
+
+            OnlineAccount accountB = readerB.OnlineAccounts.FindOnlineAccount("Chase");
+            accountB.Institution = "From B";
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(accountB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.OnlineAccounts.FindOnlineAccount("Chase").Institution, Is.EqualTo("From A"));
+        }
+
+        [Test]
+        public void SaveOne_DeleteOnlineAccount_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneOnlineAccountMoney(out OnlineAccount onlineAccount);
+            this.Database.SaveOne(onlineAccount);
+
+            MyMoney reloaded = this.Database.Load(null);
+            OnlineAccount toDelete = reloaded.OnlineAccounts.FindOnlineAccount("Chase");
+            reloaded.OnlineAccounts.RemoveOnlineAccount(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.OnlineAccounts.FindOnlineAccount("Chase"), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.OnlineAccounts.FindOnlineAccount("Chase"), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {

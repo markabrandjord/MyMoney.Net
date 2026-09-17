@@ -8,6 +8,7 @@ using System.Data.SqlTypes;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
@@ -1005,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency))
+                if (!(root is Category || root is Currency || root is OnlineAccount))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1036,6 +1037,10 @@ namespace Walkabout.Data
                         else if (root is Currency currency)
                         {
                             this.SaveOneCurrency(currency, transaction, postCommitActions);
+                        }
+                        else if (root is OnlineAccount onlineAccount)
+                        {
+                            this.SaveOneOnlineAccount(onlineAccount, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1205,6 +1210,81 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one OnlineAccount row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateOnlineAccounts' existing parameterized branch (SqlDatabase.cs) exactly, plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneOnlineAccount(OnlineAccount i, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = i.RowVersion;
+
+            if (i.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO OnlineAccounts (Id,Name,Institution,OFX,FID,UserId,Password,BankId,BranchId,BrokerId,OfxVersion,LogoUrl,AppId,AppVersion,ClientUid,UserCred1,UserCred2,AuthToken,AccessKey,UserKey,UserKeyExpireDate) " +
+                    "VALUES (@Id,@Name,@Institution,@OFX,@FID,@UserId,@Password,@BankId,@BranchId,@BrokerId,@OfxVersion,@LogoUrl,@AppId,@AppVersion,@ClientUid,@UserCred1,@UserCred2,@AuthToken,@AccessKey,@UserKey,@UserKeyExpireDate);",
+                    ("@Id", i.Id), ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                    ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                    ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                    ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                    ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                    ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)));
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE OnlineAccounts SET Name=@Name,Institution=@Institution,OFX=@OFX,FID=@FID,UserId=@UserId,Password=@Password," +
+                    "BankId=@BankId,BranchId=@BranchId,BrokerId=@BrokerId,OfxVersion=@OfxVersion,LogoUrl=@LogoUrl,AppId=@AppId,AppVersion=@AppVersion," +
+                    "ClientUid=@ClientUid,UserCred1=@UserCred1,UserCred2=@UserCred2,AuthToken=@AuthToken,AccessKey=@AccessKey,UserKey=@UserKey," +
+                    "UserKeyExpireDate=@UserKeyExpireDate," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                    ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                    ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                    ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                    ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                    ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)),
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "OnlineAccounts", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = callerRowVersion + 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM OnlineAccounts WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "OnlineAccounts", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1316,6 +1396,51 @@ namespace Walkabout.Data
             }
             currencies.EndUpdate();
             currencies.FireChangeEvent(currencies, currencies, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadOnlineAccounts to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
+        {
+            onlineAccounts.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Institution],[OFX],[FID],[UserId],[Password],[BankId],[BranchId],[BrokerId],[OfxVersion],[LogoUrl],[AppId],[AppVersion],[ClientUid],[UserCred1],[UserCred2],[AuthToken],[AccessKey],[UserKey],[UserKeyExpireDate],[" + this.VersionColumnName + "] FROM OnlineAccounts");
+            onlineAccounts.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("OnlineAccounts");
+                int id = reader.GetInt32(0);
+                OnlineAccount i = onlineAccounts.AddOnlineAccount(id);
+                i.Name = ReadDbString(reader, 1);
+                i.Institution = ReadDbString(reader, 2);
+                i.Ofx = ReadDbString(reader, 3);
+                i.FID = ReadDbString(reader, 4);
+                i.UserId = ReadDbString(reader, 5);
+                i.Password = ReadDbString(reader, 6);
+                i.BankId = ReadDbString(reader, 7);
+                i.BranchId = ReadDbString(reader, 8);
+                i.BrokerId = ReadDbString(reader, 9);
+                i.OfxVersion = ReadDbString(reader, 10);
+                i.LogoUrl = ReadDbString(reader, 11);
+                i.AppId = ReadDbString(reader, 12);
+                i.AppVersion = ReadDbString(reader, 13);
+                i.ClientUid = ReadDbString(reader, 14);
+                i.UserCred1 = ReadDbString(reader, 15);
+                i.UserCred2 = ReadDbString(reader, 16);
+                i.AuthToken = ReadDbString(reader, 17);
+                i.AccessKey = ReadDbString(reader, 18);
+                i.UserKey = ReadDbString(reader, 19);
+                if (!reader.IsDBNull(20))
+                {
+                    i.UserKeyExpireDate = reader.SafeGetDateTime(20);
+                }
+                i.RowVersion = reader.GetInt64(21);
+                i.OnUpdated();
+            }
+            onlineAccounts.EndUpdate();
+            onlineAccounts.FireChangeEvent(this, this, null, ChangeType.Reloaded);
             reader.Close();
         }
 
