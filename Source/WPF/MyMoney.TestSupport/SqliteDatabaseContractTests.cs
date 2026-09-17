@@ -825,6 +825,125 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.StockSplits.FindStockSplitById(id), Is.Null);
         }
 
+        private static MyMoney BuildOneLoanPaymentMoney(out Account account, out LoanPayment loanPayment)
+        {
+            MyMoney money = new MyMoney();
+            account = money.Accounts.AddAccount("Mortgage");
+            loanPayment = new LoanPayment(money.LoanPayments)
+            {
+                AccountId = account.Id,
+                Date = new DateTime(2020, 1, 1),
+                Principal = 500m,
+                Interest = 100m,
+                Memo = "First payment"
+            };
+            money.LoanPayments.AddLoan(loanPayment);
+            return money;
+        }
+
+        private static LoanPayment FindLoanPaymentById(MyMoney money, int id)
+        {
+            foreach (LoanPayment l in money.LoanPayments.GetList())
+            {
+                if (l.Id == id)
+                {
+                    return l;
+                }
+            }
+            return null;
+        }
+
+        [Test]
+        public void SaveOne_NewLoanPayment_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneLoanPaymentMoney(out Account account, out LoanPayment loanPayment);
+            this.Database.SaveOne(account);
+
+            this.Database.SaveOne(loanPayment);
+
+            Assert.That(loanPayment.RowVersion, Is.EqualTo(1));
+            Assert.That(loanPayment.IsInserted, Is.False);
+            Assert.That(loanPayment.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            LoanPayment found = FindLoanPaymentById(reloaded, loanPayment.Id);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateLoanPaymentAfterReload_IncrementsRowVersion()
+        {
+            BuildOneLoanPaymentMoney(out Account account, out LoanPayment loanPayment);
+            this.Database.SaveOne(account);
+            this.Database.SaveOne(loanPayment);
+            int id = loanPayment.Id;
+
+            MyMoney reloaded = this.Database.Load(null);
+            LoanPayment found = FindLoanPaymentById(reloaded, id);
+            found.Memo = "Updated";
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            LoanPayment foundAgain = FindLoanPaymentById(reloadedAgain, id);
+            Assert.That(foundAgain.Memo, Is.EqualTo("Updated"));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleLoanPaymentRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneLoanPaymentMoney(out Account account, out LoanPayment loanPayment);
+            this.Database.SaveOne(account);
+            this.Database.SaveOne(loanPayment);
+            int id = loanPayment.Id;
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            LoanPayment paymentA = FindLoanPaymentById(readerA, id);
+            paymentA.Memo = "From A";
+            this.Database.SaveOne(paymentA);
+
+            LoanPayment paymentB = FindLoanPaymentById(readerB, id);
+            paymentB.Memo = "From B";
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(paymentB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(FindLoanPaymentById(reloaded, id).Memo, Is.EqualTo("From A"));
+        }
+
+        [Test]
+        public void SaveOne_DeleteLoanPayment_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneLoanPaymentMoney(out Account account, out LoanPayment loanPayment);
+            this.Database.SaveOne(account);
+            this.Database.SaveOne(loanPayment);
+            int id = loanPayment.Id;
+
+            MyMoney reloaded = this.Database.Load(null);
+            LoanPayment toDelete = FindLoanPaymentById(reloaded, id);
+            reloaded.LoanPayments.Remove(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            // LoanPayments has no secondary name-style index (unlike Category/Payee/Security), so
+            // Contains(item) - which checks the id-keyed dictionary directly - is unaffected by any
+            // vacuous-clearing concern; it's cleared only when IsInserted || forceRemoveAfterSave.
+            Assert.That(reloaded.LoanPayments.Contains(toDelete), Is.True,
+                "sanity check: the loan payment must still be in the underlying dictionary before SaveOne runs its postCommit RemoveChild");
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.LoanPayments.Contains(toDelete), Is.False);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(FindLoanPaymentById(reloadedAgain, id), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {

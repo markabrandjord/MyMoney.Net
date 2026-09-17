@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1061,6 +1061,10 @@ namespace Walkabout.Data
                         else if (root is StockSplit stockSplit)
                         {
                             this.SaveOneStockSplit(stockSplit, transaction, postCommitActions);
+                        }
+                        else if (root is LoanPayment loanPayment)
+                        {
+                            this.SaveOneLoanPayment(loanPayment, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1636,6 +1640,69 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one LoanPayment row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateLoanPayments' existing parameterized branch (SqlDatabase.cs) exactly, plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneLoanPayment(LoanPayment i, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = i.RowVersion;
+
+            if (i.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO LoanPayments (Id,AccountId,Date,Principal,Interest,Memo) VALUES (@Id,@AccountId,@Date,@Principal,@Interest,@Memo);",
+                    ("@Id", i.Id), ("@AccountId", i.AccountId), ("@Date", DBDateTimeParam(i.Date)),
+                    ("@Principal", i.Principal), ("@Interest", i.Interest), ("@Memo", i.Memo));
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE LoanPayments SET Date=@Date,AccountId=@AccountId,Principal=@Principal,Interest=@Interest,Memo=@Memo," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Date", DBDateTimeParam(i.Date)), ("@AccountId", i.AccountId), ("@Principal", i.Principal),
+                    ("@Interest", i.Interest), ("@Memo", i.Memo), ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "LoanPayments", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = callerRowVersion + 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM LoanPayments WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "LoanPayments", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1989,6 +2056,44 @@ namespace Walkabout.Data
             splits.EndUpdate();
             splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
             reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadLoanPayments to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadLoanPayments(LoanPayments collection, MyMoney money)
+        {
+            collection.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[AccountId],[Date],[Principal],[Interest],[Memo],[" + this.VersionColumnName + "] FROM LoanPayments");
+            collection.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("LoanPayments");
+                LoanPayment x = new LoanPayment(collection);
+                x.BatchMode = true;
+                x.Id = reader.GetInt32(0);
+                x.AccountId = reader.GetInt32(1);
+                x.Date = reader.SafeGetDateTime(2);
+                x.Principal = reader.GetDecimal(3);
+                x.Interest = reader.GetDecimal(4);
+                x.Memo = ReadDbString(reader, 5);
+                x.RowVersion = reader.GetInt64(6);
+                x.BatchMode = false;
+                collection.AddLoan(x);
+                x.OnUpdated();
+            }
+            collection.EndUpdate();
+            collection.FireChangeEvent(collection, collection, null, ChangeType.Reloaded);
+            reader.Close();
+
+            foreach (Account a in money.Accounts)
+            {
+                if (a.Type == AccountType.Loan)
+                {
+                    money.GetOrCreateLoanAccount(a);
+                }
+            }
         }
 
     }
