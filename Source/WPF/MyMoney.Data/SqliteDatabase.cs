@@ -32,13 +32,6 @@ namespace Walkabout.Data
 
         private SQLiteConnection sqliteConnection;
 
-        // Distinct from SqlServerDatabase's own `transaction` field (SqlDatabase.cs) - that one
-        // is private to the base class and SQL-Server-typed, so SQLite needs its own. Only
-        // SaveOne/SaveTransfer/SaveBatch's new code path uses this; Save(MyMoney) and every
-        // existing UpdateXxx/ReadXxx override are untouched and keep relying on
-        // System.Data.SQLite's connection-level auto-enlist behavior, same as today.
-        private SQLiteTransaction sqliteTransaction;
-
         protected override string VersionColumnName { get { return "Version"; } }
 
 
@@ -90,6 +83,16 @@ namespace Walkabout.Data
             {
                 File.Delete(this.DatabasePath);
             }
+            string walPath = this.DatabasePath + "-wal";
+            if (File.Exists(walPath))
+            {
+                File.Delete(walPath);
+            }
+            string shmPath = this.DatabasePath + "-shm";
+            if (File.Exists(shmPath))
+            {
+                File.Delete(shmPath);
+            }
         }
 
         public static SqliteDatabase Restore(string backup, string databaseFile, string password)
@@ -105,6 +108,20 @@ namespace Walkabout.Data
 
             result.Connect(); // make sure we can connect to it.
             result.Disconnect();
+
+            // Clear any stale WAL/SHM sidecars at the target before overwriting the main file -
+            // otherwise SQLite could replay a stale WAL from a previous session against the
+            // freshly restored database.
+            string targetWalPath = fullDatabasePath + "-wal";
+            if (File.Exists(targetWalPath))
+            {
+                File.Delete(targetWalPath);
+            }
+            string targetShmPath = fullDatabasePath + "-shm";
+            if (File.Exists(targetShmPath))
+            {
+                File.Delete(targetShmPath);
+            }
 
             // Ok, then we're good to copy it.
             File.Copy(fullBackupPath, fullDatabasePath, true);
@@ -589,6 +606,17 @@ namespace Walkabout.Data
         public override void Backup(string backupPath)
         {
             this.BackupPath = backupPath;
+            if (this.sqliteConnection != null && this.sqliteConnection.State == ConnectionState.Open)
+            {
+                // Under WAL mode, committed transactions can live in the "-wal" sidecar file until
+                // a checkpoint happens - a raw File.Copy of just the main .mmdb file can silently
+                // produce a backup missing the most recent transactions. Checkpoint (and truncate
+                // the WAL back to empty) before copying so the main file is fully up to date.
+                using (var checkpointCommand = new SQLiteCommand("PRAGMA wal_checkpoint(TRUNCATE);", this.sqliteConnection))
+                {
+                    checkpointCommand.ExecuteNonQuery();
+                }
+            }
             File.Copy(this.DatabasePath, backupPath);
         }
 
@@ -961,38 +989,51 @@ namespace Walkabout.Data
             }
 
             this.Connect();
-            this.sqliteTransaction = this.sqliteConnection.BeginTransaction();
-            // Every in-memory side effect (RowVersion assignment, OnUpdated, RemoveChild) is
-            // deferred into this list and only run AFTER Commit() succeeds. If any later root in
-            // this batch conflicts, the catch below rolls back EVERY write this transaction made -
-            // including ones whose own SQL statement already "succeeded" earlier in the loop. If
-            // this method mutated in-memory state immediately per-root instead, an earlier root's
-            // RowVersion/dirty-flag would end up claiming a commit that the rollback undid,
-            // violating R3 ("a failure leaves in-memory dirty-tracking state exactly matching
-            // what's actually in the database"). See SaveBatch_OneStaleRootAmongMany_
-            // RollsBackTransactionAndPreservesInMemoryState below, which fails without this.
-            List<Action> postCommitActions = new List<Action>();
-            try
+            using (SQLiteTransaction transaction = this.sqliteConnection.BeginTransaction())
             {
-                foreach (PersistentObject root in list)
+                // Every in-memory side effect (RowVersion assignment, OnUpdated, RemoveChild) is
+                // deferred into this list and only run AFTER Commit() succeeds. If any later root in
+                // this batch conflicts, the catch below rolls back EVERY write this transaction made -
+                // including ones whose own SQL statement already "succeeded" earlier in the loop. If
+                // this method mutated in-memory state immediately per-root instead, an earlier root's
+                // RowVersion/dirty-flag would end up claiming a commit that the rollback undid,
+                // violating R3 ("a failure leaves in-memory dirty-tracking state exactly matching
+                // what's actually in the database"). See SaveBatch_OneStaleRootAmongMany_
+                // RollsBackTransactionAndPreservesInMemoryState below, which fails without this.
+                List<Action> postCommitActions = new List<Action>();
+                try
                 {
-                    this.SaveOneCategory((Category)root, this.sqliteTransaction, postCommitActions);
+                    foreach (PersistentObject root in list)
+                    {
+                        this.SaveOneCategory((Category)root, transaction, postCommitActions);
+                    }
+                    transaction.Commit();
                 }
-                this.sqliteTransaction.Commit();
-            }
-            catch
-            {
-                this.sqliteTransaction.Rollback();
-                throw;
-            }
-            finally
-            {
-                this.sqliteTransaction = null;
-            }
+                catch (Exception originalException)
+                {
+                    // A failing Rollback() (plausible under WAL/busy_timeout - Commit() can fail
+                    // with SQLITE_BUSY, and rollback of an already-troubled transaction can fail
+                    // too) must never silently replace/hide the original exception (e.g. a
+                    // ConcurrencyConflictException the caller needs to see), and must never leave
+                    // the caller thinking the rollback happened when it didn't.
+                    try
+                    {
+                        transaction.Rollback();
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        throw new Exception("Rollback failed after: " + originalException.Message, rollbackException);
+                    }
+                    throw;
+                }
 
-            foreach (Action action in postCommitActions)
-            {
-                action();
+                // Only reached after Commit() succeeded - the catch above always rethrows before
+                // falling through here, so postCommitActions never runs against a rolled-back
+                // transaction. Runs inside the using block, before the transaction is disposed.
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
             }
         }
 
@@ -1092,7 +1133,7 @@ namespace Walkabout.Data
         public override void ReadCategories(Categories categories, MyMoney money)
         {
             categories.Clear();
-            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum],[Version] FROM Categories");
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum],[" + this.VersionColumnName + "] FROM Categories");
             categories.BeginUpdate(false);
             while (reader.Read())
             {

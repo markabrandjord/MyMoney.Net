@@ -110,12 +110,24 @@ namespace Walkabout.TestSupport
 
             MyMoney reloaded = this.Database.Load(null);
             Category toDelete = reloaded.Categories.FindCategory("Groceries");
+            int toDeleteId = toDelete.Id;
             reloaded.Categories.RemoveCategory(toDelete);
             Assert.That(toDelete.IsDeleted, Is.True);
 
+            // RemoveCategory(c, forceRemoveAfterSave: false) (its default here) always clears the
+            // name-based categoryIndex immediately, regardless of forceRemoveAfterSave - so
+            // FindCategory("Groceries") would already be null at this point even if SaveOne's
+            // postCommit RemoveChild(c, true) call never fired. The id-based `categories`
+            // dictionary backing FindCategoryById is different: it's only cleared when
+            // c.IsInserted || forceRemoveAfterSave is true, which isn't the case for this
+            // freshly-reloaded, non-inserted category - so it's untouched by RemoveCategory here
+            // and only genuinely proves SaveOne's deferred RemoveChild(c, true) ran.
+            Assert.That(reloaded.Categories.FindCategoryById(toDeleteId), Is.Not.Null,
+                "sanity check: id-based lookup must still find the category before SaveOne runs its postCommit RemoveChild");
+
             this.Database.SaveOne(toDelete);
 
-            Assert.That(reloaded.Categories.FindCategory("Groceries"), Is.Null);
+            Assert.That(reloaded.Categories.FindCategoryById(toDeleteId), Is.Null);
 
             MyMoney reloadedAgain = this.Database.Load(null);
             Assert.That(reloadedAgain.Categories.FindCategory("Groceries"), Is.Null);
@@ -167,6 +179,60 @@ namespace Walkabout.TestSupport
             // postCommitActions exists specifically to prevent this.
             Assert.That(freshB.RowVersion, Is.EqualTo(freshBOriginalRowVersion));
             Assert.That(freshB.IsChanged, Is.True);
+        }
+
+        [Test]
+        public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
+        {
+            string backupPath = Path.Combine(Path.GetTempPath(), $"ContractTest_Backup_{Guid.NewGuid():N}.mmdb");
+            string backupWalPath = backupPath + "-wal";
+            string backupShmPath = backupPath + "-shm";
+            try
+            {
+                BuildOneCategoryMoney(out Category category);
+                this.Database.SaveOne(category);
+
+                // Deliberately do NOT Disconnect() before Backup(): under WAL mode the just-committed
+                // row lives only in the "-wal" sidecar until something checkpoints it, and SQLite's
+                // default wal_autocheckpoint threshold (1000 pages) is nowhere near reached by this
+                // tiny amount of data - so nothing else would have flushed it. A raw File.Copy of the
+                // main .mmdb file at this point (i.e. Backup() without the checkpoint fix) would copy
+                // a file that's missing this row (or even the schema itself) - only Backup()'s own
+                // "PRAGMA wal_checkpoint(TRUNCATE);" makes the main file self-contained before the copy.
+                this.Database.Backup(backupPath);
+
+                Assert.That(File.Exists(backupPath), Is.True);
+
+                var backupDatabase = new SqliteDatabase { DatabasePath = backupPath };
+                try
+                {
+                    MyMoney fromBackup = backupDatabase.Load(null);
+                    Category found = fromBackup.Categories.FindCategory("Groceries");
+                    Assert.That(found, Is.Not.Null,
+                        "Backup() must checkpoint the WAL before copying, or the just-committed row " +
+                        "would be missing from the backup file entirely.");
+                    Assert.That(found.RowVersion, Is.EqualTo(1));
+                }
+                finally
+                {
+                    backupDatabase.Disconnect();
+                }
+            }
+            finally
+            {
+                if (File.Exists(backupPath))
+                {
+                    File.Delete(backupPath);
+                }
+                if (File.Exists(backupWalPath))
+                {
+                    File.Delete(backupWalPath);
+                }
+                if (File.Exists(backupShmPath))
+                {
+                    File.Delete(backupShmPath);
+                }
+            }
         }
     }
 }
