@@ -587,6 +587,7 @@ namespace Walkabout.Data
                         int id = reader.GetInt32(0);
                         Payee p = payees.AddPayee(id);
                         p.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        p.RowVersion = reader.GetInt64(2);
                         p.OnUpdated();
                     }
                     payees.EndUpdate();
@@ -1656,6 +1657,10 @@ namespace Walkabout.Data
                 {
                     this.SaveAccountBatch(list.ConvertAll(r => (Account)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(Payee))
+                {
+                    this.SavePayeeBatch(list.ConvertAll(r => (Payee)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -2088,6 +2093,73 @@ namespace Walkabout.Data
                 {
                     a.OnUpdated();
                     a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+
+        private static DataTable NewPayeeRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SavePayeeBatch(List<Payee> payees, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewPayeeRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Payee> byId = new Dictionary<long, Payee>();
+            List<Payee> deletedInThisBatch = new List<Payee>();
+
+            foreach (Payee p in payees)
+            {
+                long id = p.Id;
+                rootsById[id] = p;
+                byId[id] = p;
+                long callerRowVersion = p.RowVersion;
+
+                if (p.IsInserted)
+                {
+                    rows.Rows.Add("I", p.Id, p.Name, DBNull.Value);
+                }
+                else if (p.IsChanged)
+                {
+                    rows.Rows.Add("U", p.Id, p.Name, callerRowVersion);
+                }
+                else if (p.IsDeleted)
+                {
+                    rows.Rows.Add("D", p.Id, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(p);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Payees_SaveBatch",
+                new[] { ("@Rows", "dbo.PayeeSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Payee p = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        p.RowVersion = newVersion;
+                        p.OnUpdated();
+                    });
+                });
+
+            foreach (Payee p in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    p.OnUpdated();
+                    p.Parent.RemoveChild(p, true);
                 });
             }
         }
