@@ -1709,20 +1709,441 @@ git commit -m "Migrate MainWindow.xaml.cs's OnChangedUI subscription to UiThread
 
 ---
 
-### Task 16: Tighten `LayerBoundaryTests`, final full regression, and manual smoke-test callout
+### Task 16: Characterization tests for `MathHelpers` (write against current, unmigrated behavior)
+
+**Files:**
+- Create: `Source/WPF/UnitTests/MathHelpersTests.cs`
+
+**Interfaces:**
+- Consumes: `Walkabout.Utilities.MathHelpers` (existing, unmigrated — still `System.Windows.Point`-based at this point in the plan).
+- Produces: a fixed set of numeric expectations that Task 17 must continue to satisfy after migrating the type.
+
+**Context**: Task 16's original attempt (tightening `LayerBoundaryTests`) discovered mid-implementation
+that `MyMoney.Business` still needs `WindowsBase` for an unrelated reason — `System.Windows.Point` in
+`MathHelpers.cs`/`NativeMethods.cs`. See `docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md`'s
+"Characterization tests for `MathHelpers`" section for the full rationale: no test coverage exists
+anywhere for this code today, despite `Payments.cs` depending on it for real bill/loan amortization
+outlier detection. This task writes that coverage **before** Task 17 changes the type, so the
+migration can be verified as behavior-preserving.
+
+- [ ] **Step 1: Write the characterization tests**
+
+```csharp
+using NUnit.Framework;
+using System.Windows;
+using Walkabout.Utilities;
+
+namespace Walkabout.Tests
+{
+    public class MathHelpersTests
+    {
+        [Test]
+        public void LinearRegression_PerfectlyLinearSeries_ReturnsExactSlopeAndIntercept()
+        {
+            // x implied as 1..N; y = 1 + 2x for x=1..5 gives y = [3, 5, 7, 9, 11].
+            MathHelpers.LinearRegression(new double[] { 3, 5, 7, 9, 11 }, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(1.0).Within(0.0001));
+            Assert.That(b, Is.EqualTo(2.0).Within(0.0001));
+        }
+
+        [Test]
+        public void LinearRegression_NoisySeries_ReturnsHandComputedSlopeAndIntercept()
+        {
+            // x implied as 1..5, y = [2, 4, 5, 4, 5]. Hand-computed OLS: meanX=3, meanY=4,
+            // covariance-sum=6, variance-sum(x)=10, b=6/10=0.6, a=4-0.6*3=2.2.
+            MathHelpers.LinearRegression(new double[] { 2, 4, 5, 4, 5 }, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(2.2).Within(0.0001));
+            Assert.That(b, Is.EqualTo(0.6).Within(0.0001));
+        }
+
+        [Test]
+        public void Covariance_PerfectlyLinearPoints_ReturnsHandComputedSum()
+        {
+            // (1,3), (2,5), (3,7): meanX=2, meanY=5. Covariance is a raw sum of products of
+            // deviations (not divided by count, per this method's own implementation) =
+            // (-1*-2) + (0*0) + (1*2) = 4.
+            var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+            Assert.That(MathHelpers.Covariance(points), Is.EqualTo(4.0).Within(0.0001));
+        }
+
+        [Test]
+        public void LinearRegression_PointBasedOverload_MatchesHandComputedValues()
+        {
+            // Same (1,3), (2,5), (3,7) - perfectly linear y = 1 + 2x, so a=1, b=2.
+            var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+            MathHelpers.LinearRegression(points, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(1.0).Within(0.0001));
+            Assert.That(b, Is.EqualTo(2.0).Within(0.0001));
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they pass against the CURRENT (unmigrated) code**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~MathHelpersTests"`
+Expected: 4/4 pass. If any fail, the hand-computed expected values above are wrong — recompute them,
+do not adjust the assertions to match whatever the code currently outputs (that would validate
+nothing).
+
+- [ ] **Step 3: Run the full test suite**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj`
+Expected: full pass, no regressions (4 new tests added to the prior total).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add Source/WPF/UnitTests/MathHelpersTests.cs
+git commit -m "Add characterization tests for MathHelpers before migrating its Point usage"
+```
+
+---
+
+### Task 17: Migrate `System.Windows.Point` to `(double X, double Y)`
+
+**Files:**
+- Modify: `Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs`
+- Modify: `Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs`
+- Modify: `Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs`
+- Modify: `Source/WPF/MyMoney/Utilities/DragAndDrop.cs`
+- Modify: `Source/WPF/UnitTests/MathHelpersTests.cs` (from Task 16 — update inputs only, not expected outputs)
+
+**Interfaces:**
+- Consumes: Task 16's characterization tests as the correctness oracle for this migration.
+- Produces: `MathHelpers.Covariance(IEnumerable<(double X, double Y)>)`,
+  `MathHelpers.LinearRegression(IEnumerable<(double X, double Y)>, out double, out double)`,
+  `NativeMethods.GetMousePosition()` returning `(double X, double Y)` — no later task consumes these
+  further within this plan, but this is the actual completion of issue #7's stated goal.
+
+Full exact code for every file is in `docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md`'s
+"Design: `System.Windows.Point` → `(double X, double Y)` migration" section — read it before starting.
+
+- [ ] **Step 1: Re-verify the migration's scope before touching anything**
+
+The spec's own account of which files/callers are affected was itself discovered by exploration, not
+planned from the start — re-confirm it rather than assume it's exhaustive:
+
+Run: `grep -rln "System.Windows.Point\|using System.Windows;" Source/WPF/MyMoney.Business --include=*.cs`
+Expected: exactly `Utilities/MathHelpers.cs` and `Utilities/NativeMethods.cs`. If anything else
+appears, stop and report it before proceeding — it means the scope is larger than this task assumes.
+
+Run: `grep -rn "NativeMethods.GetMousePosition\(\)" Source/WPF --include=*.cs`
+Expected: exactly one call site, `Source/WPF/MyMoney/Utilities/DragAndDrop.cs`.
+
+Run: `grep -rn "MathHelpers\.\(Covariance\|LinearRegression\)" Source/WPF --include=*.cs`
+Expected: `Payments.cs` (double-only overload, 2 sites) and `HistoryBarChart.xaml.cs` (`Point`-based
+overload, 1 site). `Covariance` itself should have no external callers (only used internally by the
+`Point`-based `LinearRegression` overload).
+
+- [ ] **Step 2: Migrate `MathHelpers.cs`**
+
+Remove `using System.Windows;`. Change `Covariance(IEnumerable<Point> pts)` to
+`Covariance(IEnumerable<(double X, double Y)> pts)`:
+
+```csharp
+public static double Covariance(IEnumerable<(double X, double Y)> pts)
+{
+    double xsum = 0;
+    double ysum = 0;
+    double count = 0;
+    foreach (var d in pts)
+    {
+        xsum += d.X;
+        ysum += d.Y;
+        count++;
+    }
+    if (count == 0)
+    {
+        return 0;
+    }
+
+    double xMean = xsum / count;
+    double yMean = ysum / count;
+    double covariance = 0;
+    foreach (var d in pts)
+    {
+        covariance += (d.X - xMean) * (d.Y - yMean);
+    }
+    return covariance;
+}
+```
+
+Change the double-only `LinearRegression` overload's internal point list:
+
+```csharp
+public static void LinearRegression(IEnumerable<double> pts, out double a, out double b)
+{
+    List<(double X, double Y)> pts2 = new List<(double X, double Y)>(pts.Count());
+    double x = 1;
+    foreach (double y in pts)
+    {
+        pts2.Add((x++, y));
+    }
+    LinearRegression(pts2, out a, out b);
+}
+```
+
+Change the `Point`-based `LinearRegression` overload's signature only (body is unchanged — the LINQ
+projections `from p in pts select p.X` work identically on a named tuple):
+
+```csharp
+public static void LinearRegression(IEnumerable<(double X, double Y)> pts, out double a, out double b)
+{
+    double xMean = Mean(from p in pts select p.X);
+    double yMean = Mean(from p in pts select p.Y);
+    double xVariance = Variance(from p in pts select p.X);
+    double yVariance = Variance(from p in pts select p.Y);
+    double covariance = Covariance(pts);
+    if (xVariance == 0)
+    {
+        a = yMean;
+        b = 1;
+    }
+    else
+    {
+        b = covariance / xVariance;
+        a = yMean - (b * xMean);
+    }
+}
+```
+
+- [ ] **Step 3: Migrate `NativeMethods.cs`**
+
+```csharp
+// Before:
+public static System.Windows.Point GetMousePosition()
+{
+    NativeMethods.POINT p;
+    if (!NativeMethods.GetCursorPos(out p))
+    {
+        return new System.Windows.Point(0, 0);
+    }
+
+    // Convert pixels to device independent WPF coordinates
+    return new System.Windows.Point(ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
+}
+
+// After:
+public static (double X, double Y) GetMousePosition()
+{
+    NativeMethods.POINT p;
+    if (!NativeMethods.GetCursorPos(out p))
+    {
+        return (0, 0);
+    }
+
+    // Convert pixels to device independent WPF coordinates
+    return (ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
+}
+```
+
+- [ ] **Step 4: Update `HistoryBarChart.xaml.cs`'s `ComputeLinearRegression()`**
+
+`points` here is a purely local variable feeding `MathHelpers.LinearRegression` — never used for WPF
+rendering (confirmed by reading the full method during this plan's design):
+
+```csharp
+// Before:
+double x = 0;
+List<Point> points = new List<Point>();
+foreach (HistoryChartColumn c in this.collection)
+{
+    if ((c == last || c == last) && c.Values.Count() < (avg / 2))
+    {
+        // skip it.
+        continue;
+    }
+
+    points.Add(new Point(x++, (double)c.Amount));
+}
+
+// After:
+double x = 0;
+List<(double X, double Y)> points = new List<(double X, double Y)>();
+foreach (HistoryChartColumn c in this.collection)
+{
+    if ((c == last || c == last) && c.Values.Count() < (avg / 2))
+    {
+        // skip it.
+        continue;
+    }
+
+    points.Add((x++, (double)c.Amount));
+}
+```
+
+- [ ] **Step 5: Update `DragAndDrop.cs`'s `UpdateWindowLocation()`**
+
+```csharp
+// Before:
+private void UpdateWindowLocation()
+{
+    if (this.dragdropWindow != null)
+    {
+        Point pos = NativeMethods.GetMousePosition();
+        this.dragdropWindow.Left = pos.X + 10;
+        this.dragdropWindow.Top = pos.Y + 10;
+    }
+}
+
+// After:
+private void UpdateWindowLocation()
+{
+    if (this.dragdropWindow != null)
+    {
+        var pos = NativeMethods.GetMousePosition();
+        this.dragdropWindow.Left = pos.X + 10;
+        this.dragdropWindow.Top = pos.Y + 10;
+    }
+}
+```
+
+- [ ] **Step 6: Update `MathHelpersTests.cs`'s inputs (Task 16) — expected outputs do not change**
+
+```csharp
+// Before:
+using System.Windows;
+...
+var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+// After: remove the `using System.Windows;` line entirely, and everywhere `points` is
+// constructed in this file:
+var points = new[] { (1.0, 3.0), (2.0, 5.0), (3.0, 7.0) };
+```
+
+Apply this to both `Covariance_PerfectlyLinearPoints_ReturnsHandComputedSum` and
+`LinearRegression_PointBasedOverload_MatchesHandComputedValues`. Do not change any `Assert.That(...)`
+expected value in this file — identical results after this migration is exactly what proves it
+preserved behavior.
+
+- [ ] **Step 7: Add a minimal sanity test for `NativeMethods.GetMousePosition()`'s new signature**
+
+This method reads the real OS mouse position, so only its shape (doesn't throw, returns a
+well-formed pair) can be meaningfully asserted — not exact coordinates:
+
+```csharp
+[Test]
+public void GetMousePosition_ReturnsWithoutThrowing()
+{
+    Assert.DoesNotThrow(() => NativeMethods.GetMousePosition());
+}
+```
+
+Add this to `MathHelpersTests.cs` (add `using Walkabout.Utilities;` if not already present via
+`MathHelpers`'s own namespace — confirm `NativeMethods` is in the same namespace before assuming no
+new `using` is needed).
+
+- [ ] **Step 8: Build**
+
+Run: `dotnet build Source/WPF/MyMoney.sln`
+Expected: clean build. (`MyMoney.Business.csproj` still carries its `FrameworkReference` at this
+point — that's Task 18 — so this build should succeed without any csproj changes yet.)
+
+- [ ] **Step 9: Run the full test suite**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj`
+Expected: full pass. The 4 characterization tests from Task 16 must produce **identical** results to
+before this migration — that is the proof this change is behavior-preserving. The new
+`GetMousePosition_ReturnsWithoutThrowing` test also passes.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs Source/WPF/MyMoney/Utilities/DragAndDrop.cs Source/WPF/UnitTests/MathHelpersTests.cs
+git commit -m "Migrate System.Windows.Point usage to (double X, double Y) tuples"
+```
+
+---
+
+### Task 18: Remove `MyMoney.Business.csproj`'s WPF `FrameworkReference` and guard targets
+
+**Files:**
+- Modify: `Source/WPF/MyMoney.Business/MyMoney.Business.csproj`
+
+**Interfaces:**
+- Consumes: Task 17's completion (nothing in `MyMoney.Business` references `System.Windows.Point`
+  anymore) plus Tasks 1-15's completion (nothing references `Dispatcher`/`DependencyObject` anymore).
+
+- [ ] **Step 1: Re-verify nothing else in `MyMoney.Business` needs `WindowsBase`**
+
+Run: `grep -rln "System.Windows" Source/WPF/MyMoney.Business --include=*.cs`
+Expected: no output. If anything appears, stop — this task cannot proceed until that reference is
+also resolved (it means the scope mapped by this plan and its spec was incomplete).
+
+- [ ] **Step 2: Remove the FrameworkReference and both guard targets**
+
+In `Source/WPF/MyMoney.Business/MyMoney.Business.csproj`, remove:
+
+1. The `<ItemGroup>` containing `<FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />`.
+2. The doc comment immediately above the `RemoveWpfViewRenderingAssemblies` target, and the target
+   itself:
+   ```xml
+   <Target Name="RemoveWpfViewRenderingAssemblies" BeforeTargets="ResolveAssemblyReferences" AfterTargets="ResolveFrameworkReferences">
+     <ItemGroup>
+       <Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationUI'))" />
+     </ItemGroup>
+   </Target>
+   ```
+3. The doc comment immediately above the `VerifyNoWpfViewRenderingAssemblies` target (it references
+   issue #11 as its own rationale — leave issue #11 itself alone, it documented why the self-test
+   existed; the self-test's job is now `LayerBoundaryTests`' job), and the target itself:
+   ```xml
+   <Target Name="VerifyNoWpfViewRenderingAssemblies" AfterTargets="ResolveAssemblyReferences">
+     <ItemGroup>
+       <_LeakedWpfViewRenderingAssembly Include="@(ReferencePath)" Condition="$([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationUI'))" />
+     </ItemGroup>
+     <Error Condition="'@(_LeakedWpfViewRenderingAssembly)' != ''"
+            Text="MyMoney.Business must never reference WPF UI-rendering assemblies, but RemoveWpfViewRenderingAssemblies failed to strip: @(_LeakedWpfViewRenderingAssembly). This target's Remove condition may no longer match this SDK's ResolveAssemblyReferences/ResolveFrameworkReferences target ordering." />
+   </Target>
+   ```
+
+After removal, `MyMoney.Business.csproj` should have no `FrameworkReference` `ItemGroup` and no
+`Target` elements at all — structurally identical to `MyMoney.Data.csproj` in this respect (confirm
+this by reading `Source/WPF/MyMoney.Data/MyMoney.Data.csproj` for comparison if it exists in this
+solution).
+
+- [ ] **Step 3: Build**
+
+Run: `dotnet build Source/WPF/MyMoney.sln`
+Expected: clean build. If this fails with a missing-type error referencing anything in
+`WindowsBase`/`PresentationCore`/`PresentationFramework`, Step 1's verification missed something —
+do not re-add the `FrameworkReference` as a workaround; find and fix the actual remaining reference.
+
+- [ ] **Step 4: Run the full test suite**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj`
+Expected: full pass, no regressions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Source/WPF/MyMoney.Business/MyMoney.Business.csproj
+git commit -m "Remove MyMoney.Business's now-dead WPF FrameworkReference and guard targets"
+```
+
+---
+
+### Task 19: Tighten `LayerBoundaryTests`, final full regression, and manual smoke-test callout
 
 **Files:**
 - Modify: `Source/WPF/UnitTests/LayerBoundaryTests.cs`
 
 **Interfaces:**
-- Consumes: nothing new — this is the acceptance gate for the whole plan.
+- Consumes: Tasks 1-18's combined completion — this is the acceptance gate for the whole plan.
 
 - [ ] **Step 1: Verify there is no remaining WPF-family reference in `MyMoney.Business`**
 
-Before editing the test, confirm the claim it's about to assert is actually true:
+Before editing the test, confirm the claim it's about to assert is actually true. This should now
+genuinely pass, having failed at this exact point once already (Task 17/18 exist because of that):
 
 Run: `grep -rln "System.Windows" Source/WPF/MyMoney.Business --include=*.cs`
-Expected: no output (or only files unrelated to `WindowsBase`/`DependencyObject`/`Dispatcher` — inspect any hits before proceeding; a real remaining WPF-family reference here means a call site was missed in Tasks 1-15 and must be fixed before this task can proceed).
+Expected: no output. If anything appears, stop — Tasks 1-18 are not actually complete.
 
 - [ ] **Step 2: Tighten `MyMoneyBusiness_HasNoUiRenderingAssemblyReference`**
 
