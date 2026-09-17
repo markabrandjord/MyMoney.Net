@@ -50,6 +50,7 @@ namespace Walkabout.Views.Controls
 
         public CategoriesControl()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.CategoriesControlInitialize))
 #endif
@@ -81,6 +82,7 @@ namespace Walkabout.Views.Controls
         #region PROPERTIES
 
         private MyMoney money;
+        private UiThreadHandler onMoneyChangedUi;
         private Category delayedSelection;
         private bool programaticChange;
 
@@ -91,12 +93,12 @@ namespace Walkabout.Views.Controls
             {
                 if (this.money != null)
                 {
-                    this.money.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.money.Changed -= this.onMoneyChangedUi.Handler;
                 }
                 this.money = value;
                 if (value != null)
                 {
-                    this.money.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.money.Changed += this.onMoneyChangedUi.Handler;
                     this.OnMoneyChanged(this, new ChangeEventArgs(this.money.Categories, null, ChangeType.Reloaded));
                 }
             }
