@@ -999,12 +999,13 @@ namespace Walkabout.Data
                 return;
             }
 
-            // Only Category has a real implementation in this phase. If the batch contains
+            // Only these types have a real implementation so far (entity-extension follow-up to
+            // Phase 2b, adding one flat-row aggregate root at a time). If the batch contains
             // anything else, delegate the WHOLE call to the inherited Phase 2a stub rather than
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category))
+                if (!(root is Category || root is Currency))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1028,7 +1029,14 @@ namespace Walkabout.Data
                 {
                     foreach (PersistentObject root in list)
                     {
-                        this.SaveOneCategory((Category)root, transaction, postCommitActions);
+                        if (root is Category category)
+                        {
+                            this.SaveOneCategory(category, transaction, postCommitActions);
+                        }
+                        else if (root is Currency currency)
+                        {
+                            this.SaveOneCurrency(currency, transaction, postCommitActions);
+                        }
                     }
                     transaction.Commit();
                 }
@@ -1134,6 +1142,69 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Currency row - same shape as SaveOneCategory (see its comment for why the
+        /// in-memory side effect is deferred into postCommitActions). SQL mirrors UpdateCurrencies'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneCurrency(Currency c, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = c.RowVersion;
+
+            if (c.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Currencies (Id,Symbol,Name,Ratio,LastRatio,CultureCode) VALUES (@Id,@Symbol,@Name,@Ratio,@LastRatio,@CultureCode);",
+                    ("@Id", c.Id), ("@Symbol", c.Symbol), ("@Name", c.Name), ("@Ratio", c.Ratio), ("@LastRatio", c.LastRatio),
+                    ("@CultureCode", c.CultureCode));
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Currencies SET Symbol=@Symbol,Name=@Name,Ratio=@Ratio,LastRatio=@LastRatio,CultureCode=@CultureCode," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Symbol", c.Symbol), ("@Name", c.Name), ("@Ratio", c.Ratio), ("@LastRatio", c.LastRatio),
+                    ("@CultureCode", c.CultureCode), ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Currencies", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = callerRowVersion + 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Currencies WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Currencies", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1205,6 +1276,46 @@ namespace Walkabout.Data
             }
             categories.EndUpdate();
             categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadCurrencies to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadCurrencies(Currencies currencies, MyMoney money)
+        {
+            currencies.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Symbol],[Name],[Ratio],[LastRatio],[CultureCode],[" + this.VersionColumnName + "] FROM Currencies");
+            currencies.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Currencies");
+                int id = reader.GetInt32(0);
+                Currency c = currencies.AddCurrency(id);
+                c.Symbol = ReadDbString(reader, 1);
+                c.Name = ReadDbString(reader, 2);
+                if (!reader.IsDBNull(3))
+                {
+                    c.Ratio = reader.GetDecimal(3);
+                }
+                if (!reader.IsDBNull(4))
+                {
+                    c.LastRatio = reader.GetDecimal(4);
+                }
+                if (reader.IsDBNull(5))
+                {
+                    c.CultureCode = "en-US";
+                }
+                else
+                {
+                    c.CultureCode = ReadDbString(reader, 5);
+                }
+                c.RowVersion = reader.GetInt64(6);
+                c.OnUpdated();
+            }
+            currencies.EndUpdate();
+            currencies.FireChangeEvent(currencies, currencies, null, ChangeType.Reloaded);
             reader.Close();
         }
 

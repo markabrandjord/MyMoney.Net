@@ -181,6 +181,101 @@ namespace Walkabout.TestSupport
             Assert.That(freshB.IsChanged, Is.True);
         }
 
+        private static MyMoney BuildOneCurrencyMoney(out Currency currency)
+        {
+            MyMoney money = new MyMoney();
+            currency = new Currency(money.Currencies) { Symbol = "EUR", Name = "Euro", Ratio = 1.2m, LastRatio = 1.1m, CultureCode = "de-DE" };
+            money.Currencies.AddCurrency(currency);
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewCurrency_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneCurrencyMoney(out Currency currency);
+
+            this.Database.SaveOne(currency);
+
+            Assert.That(currency.RowVersion, Is.EqualTo(1));
+            Assert.That(currency.IsInserted, Is.False);
+            Assert.That(currency.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Currency found = reloaded.Currencies.FindCurrency("EUR");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateCurrencyAfterReload_IncrementsRowVersion()
+        {
+            BuildOneCurrencyMoney(out Currency currency);
+            this.Database.SaveOne(currency);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Currency found = reloaded.Currencies.FindCurrency("EUR");
+            found.Ratio = 1.3m;
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Currency foundAgain = reloadedAgain.Currencies.FindCurrency("EUR");
+            Assert.That(foundAgain.Ratio, Is.EqualTo(1.3m));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleCurrencyRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneCurrencyMoney(out Currency currency);
+            this.Database.SaveOne(currency);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Currency currencyA = readerA.Currencies.FindCurrency("EUR");
+            currencyA.Ratio = 1.3m;
+            this.Database.SaveOne(currencyA);
+
+            Currency currencyB = readerB.Currencies.FindCurrency("EUR");
+            currencyB.Ratio = 1.4m;
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(currencyB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Currencies.FindCurrency("EUR").Ratio, Is.EqualTo(1.3m));
+        }
+
+        [Test]
+        public void SaveOne_DeleteCurrency_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneCurrencyMoney(out Currency currency);
+            this.Database.SaveOne(currency);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Currency toDelete = reloaded.Currencies.FindCurrency("EUR");
+            reloaded.Currencies.RemoveCurrency(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            // RemoveCurrency(item, forceRemoveAfterSave: false) (its default here) calls
+            // ResetCache() unconditionally, which would make a symbol-based FindCurrency("EUR")
+            // return null immediately (the deleted item is filtered out of the rebuilt quickLookup
+            // cache) regardless of whether SaveOne's postCommit RemoveChild(c, true) ever fires.
+            // Contains() checks the underlying Id-keyed dictionary directly, unaffected by that
+            // cache, so it's the only way to genuinely prove SaveOne's deferred removal ran.
+            Assert.That(reloaded.Currencies.Contains(toDelete), Is.True,
+                "sanity check: the currency must still be in the underlying dictionary before SaveOne runs its postCommit RemoveChild");
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Currencies.Contains(toDelete), Is.False);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Currencies.FindCurrency("EUR"), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {
