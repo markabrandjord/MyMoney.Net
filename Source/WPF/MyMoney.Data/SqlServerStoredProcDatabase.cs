@@ -961,6 +961,7 @@ namespace Walkabout.Data
                         {
                             s.PriceDate = reader.GetDateTime(8);
                         }
+                        s.RowVersion = reader.GetInt64(9);
                         s.OnUpdated();
                     }
                     securities.EndUpdate();
@@ -1666,6 +1667,10 @@ namespace Walkabout.Data
                 {
                     this.SaveAliasBatch(list.ConvertAll(r => (Alias)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(Security))
+                {
+                    this.SaveSecurityBatch(list.ConvertAll(r => (Security)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -2234,6 +2239,84 @@ namespace Walkabout.Data
                 {
                     a.OnUpdated();
                     a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+
+        private static DataTable NewSecurityRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Symbol", typeof(string));
+            table.Columns.Add("Price", typeof(decimal));
+            table.Columns.Add("LastPrice", typeof(decimal));
+            table.Columns.Add("CuspId", typeof(string));
+            table.Columns.Add("SecurityType", typeof(int));
+            table.Columns.Add("Taxable", typeof(byte));
+            table.Columns.Add("PriceDate", typeof(DateTime));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveSecurityBatch(List<Security> securities, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewSecurityRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Security> byId = new Dictionary<long, Security>();
+            List<Security> deletedInThisBatch = new List<Security>();
+
+            foreach (Security s in securities)
+            {
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object priceDate = SqlServerDatabase.DBDateTimeParam(s.PriceDate);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add("I", s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add("U", s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add("D", s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Securities_SaveBatch",
+                new[] { ("@Rows", "dbo.SecuritySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Security s = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (Security s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
                 });
             }
         }
