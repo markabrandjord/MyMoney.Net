@@ -308,6 +308,7 @@ namespace Walkabout.Data
                         x.Memo = reader.IsDBNull(5) ? null : reader.GetString(5);
                         x.BatchMode = false;
                         collection.AddLoan(x);
+                        x.RowVersion = reader.GetInt64(6);
                         x.OnUpdated();
                     }
                     collection.EndUpdate();
@@ -1676,6 +1677,10 @@ namespace Walkabout.Data
                 {
                     this.SaveStockSplitBatch(list.ConvertAll(r => (StockSplit)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(LoanPayment))
+                {
+                    this.SaveLoanPaymentBatch(list.ConvertAll(r => (LoanPayment)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -2399,6 +2404,78 @@ namespace Walkabout.Data
                 {
                     s.OnUpdated();
                     s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+
+        private static DataTable NewLoanPaymentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("AccountId", typeof(int));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Principal", typeof(decimal));
+            table.Columns.Add("Interest", typeof(decimal));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveLoanPaymentBatch(List<LoanPayment> loanPayments, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewLoanPaymentRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, LoanPayment> byId = new Dictionary<long, LoanPayment>();
+            List<LoanPayment> deletedInThisBatch = new List<LoanPayment>();
+
+            foreach (LoanPayment i in loanPayments)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object date = SqlServerDatabase.DBDateTimeParam(i.Date);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add("I", i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add("U", i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.LoanPayments_SaveBatch",
+                new[] { ("@Rows", "dbo.LoanPaymentSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    LoanPayment i = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (LoanPayment i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
                 });
             }
         }
