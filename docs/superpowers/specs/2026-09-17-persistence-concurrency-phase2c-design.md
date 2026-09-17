@@ -30,9 +30,16 @@ whole shape of the work, not just its SQL dialect:
   (`Source/WPF/MyMoney.Data/SqlScripts/Access/*_AccessProcs.sql`); there is no raw parameterized
   SQL anywhere in that class, unlike `SqliteDatabase`'s direct SQL strings. Any new write path has
   to be new stored procedures, not new C#-side SQL text.
-- **No version-tracking column exists anywhere in the live schema.** Confirmed live against the
-  Redmond database: `SELECT ... FROM INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME LIKE '%ersion%'`
-  returns zero rows, on any table. This phase includes a schema migration, not just new procs.
+- **Every table already has an unused native `RowVersion timestamp NOT NULL` column** — confirmed
+  live against Redmond using the `MyMoneyAdmin` connection (an earlier check using `MyMoneyUser`
+  gave a false "no version column anywhere" reading, because `MyMoneyUser` is deliberately
+  execute-only and can't see `INFORMATION_SCHEMA.COLUMNS` for tables it has no direct grant on —
+  worth remembering for any future live-schema check against this database). This column was
+  almost certainly added by the generic `GetCreateTableScript` path (`SqlDatabase.cs`:
+  `sb.Append("  [RowVersion] ROWVERSION NOT NULL")`) when these tables were first created, and no
+  current `SqlServerStoredProcDatabase` proc selects or writes it — it's dead weight today. This
+  phase still needs a schema migration (a *new*, differently-named column — see below), just not
+  for the reason originally stated.
 - **SQL Server's native `ROWVERSION`/`TIMESTAMP` type is the wrong mechanism here, correcting this
   design's own earlier proposal.** The original persistence-concurrency design spec (R4) proposed
   SQL Server use its native `ROWVERSION` column — engine-maintained, auto-incrementing
@@ -64,10 +71,14 @@ whole shape of the work, not just its SQL dialect:
 
 `ALTER TABLE <Table> ADD Version BIGINT NOT NULL DEFAULT 1` for all 11 `IAggregateRoot` tables:
 `Categories`, `Currencies`, `OnlineAccounts`, `Accounts`, `Payees`, `Aliases`, `Securities`,
-`StockSplits`, `LoanPayments`, `RentBuildings`, `Transactions`. Metadata-only change on modern SQL
+`StockSplits`, `LoanPayments`, `RentBuildings`, `Transactions`. Named `Version`, not `RowVersion` —
+every one of these tables already has an existing, unused `RowVersion timestamp NOT NULL` column
+(SQL Server's native type, confirmed live), so the new column needs a distinct name; `Version`
+matches `SqliteDatabase`'s own column name for the same concept. Metadata-only change on modern SQL
 Server given a constant default — no full table rewrite. `Splits`, `Investments`, `RentUnits`
 (owned children, not `IAggregateRoot`) get no `Version` column of their own, matching the design
-spec's R2 and `SqliteDatabase`'s existing behavior: gated only by their parent's version.
+spec's R2 and `SqliteDatabase`'s existing behavior: gated only by their parent's version — they also
+already have their own unused native `RowVersion` column, left alone, same as the aggregate roots'.
 
 Run once, by hand, as `MyMoneyAdmin` against Redmond — same convention every existing
 `*_AccessProcs.sql` file already documents ("Run as the MyMoneyAdmin login"), not something app
