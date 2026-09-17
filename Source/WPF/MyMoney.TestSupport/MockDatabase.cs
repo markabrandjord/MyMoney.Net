@@ -129,6 +129,17 @@ namespace Walkabout.Data
             {
                 throw new InvalidOperationException("SaveBatch root is not attached to a loaded MyMoney graph.");
             }
+
+            // MarkOwnedChildrenClean's deleted-child removals must happen BEFORE the whole-graph
+            // Save() below, not after: a deleted owned child (Split/RentUnit) has to actually be
+            // gone from the graph by the time it's serialized, or the very next Load() will bring
+            // it right back (still flagged IsDeleted, since IsDeleted isn't part of the contract
+            // either - it would just look "undeleted" on reload).
+            foreach (PersistentObject root in list)
+            {
+                MarkOwnedChildrenClean(root);
+            }
+
             this.Save(sharedOwner);
 
             foreach (PersistentObject root in list)
@@ -145,6 +156,77 @@ namespace Walkabout.Data
                     this.committedVersions[key] = newVersion;
                     root.RowVersion = newVersion;
                     root.OnUpdated();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Real engines (SqliteDatabase) explicitly write and clean every owned child
+        /// (Transaction.Splits/Investment, RentBuilding's sibling RentUnits) as part of committing
+        /// their aggregate root - see the design spec's R2 ("a Transaction's splits are part of its
+        /// aggregate, not peers"). MockDatabase persists them for free via the whole-graph
+        /// re-serialize above, but without this, they'd stay marked IsInserted/IsChanged forever in
+        /// memory even though they're genuinely saved, and a deleted child would never actually be
+        /// removed from its container. Mirrors SqliteDatabase's SaveTransactionSplitsAndInvestment/
+        /// SaveRentUnitsForBuilding post-commit side effects, minus the SQL.
+        /// </summary>
+        private static void MarkOwnedChildrenClean(PersistentObject root)
+        {
+            if (root is Transaction t)
+            {
+                if (t.Splits != null)
+                {
+                    // Not `new List<Split>(t.Splits)`: the List<T>(IEnumerable<T>) constructor
+                    // special-cases ICollection<T> sources and calls CopyTo, which Splits (like
+                    // several sibling containers) leaves as an unimplemented stub. A plain foreach
+                    // copy avoids that path entirely.
+                    List<Split> splitsSnapshot = new List<Split>();
+                    foreach (Split s in t.Splits)
+                    {
+                        splitsSnapshot.Add(s);
+                    }
+
+                    foreach (Split s in splitsSnapshot)
+                    {
+                        if (s.IsDeleted)
+                        {
+                            s.Parent.RemoveChild(s, true);
+                        }
+                        else
+                        {
+                            s.OnUpdated();
+                        }
+                    }
+                }
+
+                if (t.Investment != null && !t.Investment.IsDeleted)
+                {
+                    t.Investment.OnUpdated();
+                }
+            }
+            else if (root is RentBuilding r && r.Parent is RentBuildings buildings && buildings.Units != null)
+            {
+                List<RentUnit> unitsSnapshot = new List<RentUnit>();
+                foreach (RentUnit u in buildings.Units)
+                {
+                    unitsSnapshot.Add(u);
+                }
+
+                foreach (RentUnit u in unitsSnapshot)
+                {
+                    if (u.Building != r.Id)
+                    {
+                        continue;
+                    }
+
+                    if (u.IsDeleted)
+                    {
+                        u.Parent.RemoveChild(u, true);
+                    }
+                    else
+                    {
+                        u.OnUpdated();
+                    }
                 }
             }
         }

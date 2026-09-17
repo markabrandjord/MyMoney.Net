@@ -828,6 +828,10 @@ namespace Walkabout.Data
             {
                 this.Buildings = new RentBuildings(this);
             }
+            if (this.Buildings.Units == null)
+            {
+                this.Buildings.Units = new RentUnits(this);
+            }
             if (this.LoanPayments == null)
             {
                 this.LoanPayments = new LoanPayments(this);
@@ -972,6 +976,35 @@ namespace Walkabout.Data
         {
             get { return this.buildings; }
             set { this.buildings = value; this.buildings.Parent = this; }
+        }
+
+        /// <summary>
+        /// Real top-level DataMember for the RentUnits collection normally reached via
+        /// Buildings.Units. RentBuildings is itself a [CollectionDataContract] (a collection of
+        /// RentBuilding), which cannot also carry an extra [DataMember] alongside its items - so
+        /// Buildings.Units (a plain, untagged auto-property) was never actually serialized by
+        /// DataContractSerializer at all. That's silent, real data loss for any RentUnit data on
+        /// every save/reload through XmlStore or MockDatabase (both DataContractSerializer-based) -
+        /// found while extending the shared contract-test suite to Mock. Defensive against
+        /// deserialization member ordering: this.buildings may still be null (its own constructor
+        /// never runs under DataContractSerializer) when this setter fires.
+        /// </summary>
+        [DataMember]
+        public RentUnits Units
+        {
+            get { return this.buildings?.Units; }
+            set
+            {
+                if (this.buildings == null)
+                {
+                    this.buildings = new RentBuildings(this);
+                }
+                this.buildings.Units = value;
+                if (value != null)
+                {
+                    value.Parent = this;
+                }
+            }
         }
 
         private EventHandlerCollection<ChangeEventArgs> balanceHandlers;
@@ -2029,6 +2062,25 @@ namespace Walkabout.Data
             {
                 Account a = this.Accounts.FindAccount(t.AccountName);
                 t.PostDeserializeFixup(this, this.Transactions, a, false);
+            }
+
+            // RentBuilding.Units is [XmlIgnore] - a per-building view over the real data, which
+            // lives in the flat Buildings.Units collection (keyed by RentUnit.Building, not
+            // nested under each building) - so it never round-trips through the serializer and
+            // has to be rebuilt here, the same way every SQL engine's ReadRentBuildings rebuilds
+            // it inline right after reading each building's rows.
+            foreach (RentBuilding r in this.Buildings)
+            {
+                List<RentUnit> unitsForBuilding = new List<RentUnit>();
+                foreach (RentUnit u in this.Buildings.Units.GetList())
+                {
+                    if (u.Building == r.Id)
+                    {
+                        unitsForBuilding.Add(u);
+                    }
+                }
+                unitsForBuilding.Sort((a, b) => a.Id.CompareTo(b.Id));
+                r.Units = unitsForBuilding;
             }
 
             CostBasisCalculator calculator = new CostBasisCalculator(this, DateTime.Now);
@@ -3367,6 +3419,7 @@ namespace Walkabout.Data
             {
                 this.NextOnlineAccount = oa.Id + 1;
             }
+            oa.Parent = this;
             this.onlineAccounts[oa.Id] = oa;
             if (!string.IsNullOrEmpty(oa.Name))
             {
@@ -6540,7 +6593,7 @@ namespace Walkabout.Data
     /// or when the user Add,Delete a RentalBuildingAllYears
     /// </summary>
     [CollectionDataContract(Namespace = "http://schemas.vteam.com/Money/2010")]
-    public class RentBuildings : PersistentContainer
+    public class RentBuildings : PersistentContainer, ICollection<RentBuilding>
     {
 
         private int nextRentBuilding;
@@ -7344,6 +7397,7 @@ namespace Walkabout.Data
             {
                 this.nextCategory = result.Id + 1;
             }
+            result.Parent = this;
             this.categories[result.Id] = result;
             if (!string.IsNullOrEmpty(result.Name))
             {

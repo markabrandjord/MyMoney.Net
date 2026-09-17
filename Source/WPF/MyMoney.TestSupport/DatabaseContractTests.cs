@@ -12,7 +12,7 @@ namespace Walkabout.TestSupport
     /// post-reload state only - see this plan's Global Constraints and the
     /// design spec's "Ruling" section for why.
     /// </summary>
-    public abstract class DatabaseContractTests
+    public abstract partial class DatabaseContractTests
     {
         protected IDatabase Database { get; private set; }
 
