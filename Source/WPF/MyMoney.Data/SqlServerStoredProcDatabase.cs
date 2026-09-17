@@ -1033,6 +1033,7 @@ namespace Walkabout.Data
                         s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
                         s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
                         s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        s.RowVersion = reader.GetInt64(5);
                         s.OnUpdated();
                     }
                     splits.EndUpdate();
@@ -1670,6 +1671,10 @@ namespace Walkabout.Data
                 else if (firstType == typeof(Security))
                 {
                     this.SaveSecurityBatch(list.ConvertAll(r => (Security)r), connection, null, postCommitActions);
+                }
+                else if (firstType == typeof(StockSplit))
+                {
+                    this.SaveStockSplitBatch(list.ConvertAll(r => (StockSplit)r), connection, null, postCommitActions);
                 }
                 else
                 {
@@ -2312,6 +2317,83 @@ namespace Walkabout.Data
                 });
 
             foreach (Security s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+
+        private static DataTable NewStockSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Security", typeof(int));
+            table.Columns.Add("Numerator", typeof(decimal));
+            table.Columns.Add("Denominator", typeof(decimal));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveStockSplitBatch(List<StockSplit> stockSplits, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewStockSplitRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, StockSplit> byId = new Dictionary<long, StockSplit>();
+            List<StockSplit> deletedInThisBatch = new List<StockSplit>();
+
+            foreach (StockSplit s in stockSplits)
+            {
+                if ((s.IsChanged || s.IsInserted) && s.Date == DateTime.MinValue)
+                {
+                    continue;
+                }
+
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object securityId = s.Security != null ? (object)s.Security.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(s.Date);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add("I", s.Id, date, securityId, s.Numerator, s.Denominator, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add("U", s.Id, date, securityId, s.Numerator, s.Denominator, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add("D", s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.StockSplits_SaveBatch",
+                new[] { ("@Rows", "dbo.StockSplitSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    StockSplit s = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (StockSplit s in deletedInThisBatch)
             {
                 postCommitActions.Add(() =>
                 {
