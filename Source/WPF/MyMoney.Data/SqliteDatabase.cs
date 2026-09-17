@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1049,6 +1049,10 @@ namespace Walkabout.Data
                         else if (root is Payee payee)
                         {
                             this.SaveOnePayee(payee, transaction, postCommitActions);
+                        }
+                        else if (root is Alias alias)
+                        {
+                            this.SaveOneAlias(alias, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1432,6 +1436,67 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Alias row - same shape as SaveOneCategory. SQL mirrors UpdateAliases' existing
+        /// parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneAlias(Alias a, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = a.RowVersion;
+
+            if (a.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Aliases (Id, Pattern, Payee, Flags) VALUES (@Id,@Pattern,@Payee,@Flags);",
+                    ("@Id", a.Id), ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType));
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Aliases SET Pattern=@Pattern,Payee=@Payee,Flags=@Flags," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType),
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Aliases", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = callerRowVersion + 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Aliases WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Aliases", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1675,6 +1740,42 @@ namespace Walkabout.Data
             }
             payees.EndUpdate();
             payees.FireChangeEvent(payees, payees, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadAliases to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadAliases(Aliases aliases, MyMoney money)
+        {
+            Payees payees = money.Payees;
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Pattern],[Payee],[Flags],[" + this.VersionColumnName + "] FROM Aliases");
+            aliases.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Aliases");
+                int id = reader.GetInt32(0);
+                Alias a = aliases.AddAlias(id);
+                string pattern = ReadDbString(reader, 1);
+                a.Pattern = pattern;
+                int payeeId = reader.GetInt32(2);
+                Payee p = payees.FindPayeeAt(payeeId);
+                Debug.Assert(p != null);
+                a.Payee = p;
+                try
+                {
+                    a.AliasType = (AliasType)reader.GetInt32(3);
+                }
+                catch
+                {
+                    // don't blow up if bad alias reg-ex got saved to DB.
+                }
+                a.RowVersion = reader.GetInt64(4);
+                a.OnUpdated();
+            }
+            aliases.EndUpdate();
+            aliases.FireChangeEvent(aliases, aliases, null, ChangeType.Reloaded);
             reader.Close();
         }
 

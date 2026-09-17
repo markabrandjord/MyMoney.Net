@@ -542,6 +542,97 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.Payees.FindPayee("Kroger", false), Is.Null);
         }
 
+        private static MyMoney BuildOneAliasMoney(out Payee payee, out Alias alias)
+        {
+            MyMoney money = new MyMoney();
+            payee = money.Payees.FindPayee("Kroger", true);
+            alias = new Alias(money.Aliases) { Payee = payee, Pattern = "KROGER", AliasType = AliasType.None };
+            money.Aliases.AddAlias(alias);
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewAlias_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneAliasMoney(out Payee payee, out Alias alias);
+            this.Database.SaveOne(payee);
+
+            this.Database.SaveOne(alias);
+
+            Assert.That(alias.RowVersion, Is.EqualTo(1));
+            Assert.That(alias.IsInserted, Is.False);
+            Assert.That(alias.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Alias found = reloaded.Aliases.FindAlias("KROGER");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateAliasAfterReload_IncrementsRowVersion()
+        {
+            BuildOneAliasMoney(out Payee payee, out Alias alias);
+            this.Database.SaveOne(payee);
+            this.Database.SaveOne(alias);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Alias found = reloaded.Aliases.FindAlias("KROGER");
+            found.Pattern = "KROGER UPDATED";
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Alias foundAgain = reloadedAgain.Aliases.FindAlias("KROGER UPDATED");
+            Assert.That(foundAgain, Is.Not.Null);
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleAliasRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneAliasMoney(out Payee payee, out Alias alias);
+            this.Database.SaveOne(payee);
+            this.Database.SaveOne(alias);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Alias aliasA = readerA.Aliases.FindAlias("KROGER");
+            aliasA.Pattern = "From A";
+            this.Database.SaveOne(aliasA);
+
+            Alias aliasB = readerB.Aliases.FindAlias("KROGER");
+            aliasB.Pattern = "From B";
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(aliasB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Aliases.FindAlias("From A"), Is.Not.Null);
+        }
+
+        [Test]
+        public void SaveOne_DeleteAlias_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneAliasMoney(out Payee payee, out Alias alias);
+            this.Database.SaveOne(payee);
+            this.Database.SaveOne(alias);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Alias toDelete = reloaded.Aliases.FindAlias("KROGER");
+            reloaded.Aliases.RemoveAlias(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Aliases.FindAlias("KROGER"), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Aliases.FindAlias("KROGER"), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {
