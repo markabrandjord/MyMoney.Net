@@ -85,10 +85,10 @@ against the real `Categories.Changed` event machinery:
    handler still delivers correctly while subscribed (ruling out a trivial "never delivers anything"
    implementation passing by accident). Stable across 4 consecutive full runs, no flakiness.
 
-This design — call it `UiThreadHandler` — is what this spec implements. It keeps every one of
-Option B's real wins (zero portability assumptions in `MyMoney.Business`, per-call-site locality,
-incremental rollout) while structurally closing the concurrency panelist's defect, rather than
-relying on developer discipline to avoid it.
+This design — `UiThreadHandler`/`UiThreadPropertyChangedHandler`, see below — is what this spec
+implements. It keeps every one of Option B's real wins (zero portability assumptions in
+`MyMoney.Business`, per-call-site locality, incremental rollout) while structurally closing the
+concurrency panelist's defect, rather than relying on developer discipline to avoid it.
 
 The ergonomics panelist's proposed Roslyn analyzer (compile-time detection of a forgotten wrap) is
 **explicitly out of scope for this work** — deferred as a separate, self-contained follow-up. A
@@ -103,11 +103,11 @@ is an acceptable interim safety net for this solo-maintainer codebase.
   type-sniffing, no marshaling decision of any kind inside `MyMoney.Business`.
 - Every WPF call site that today relies on `EventHandlerCollection`'s automatic `DependencyObject`
   marshaling continues to receive UI-thread delivery, unchanged in observable behavior, via an
-  explicit `UiThreadHandler` wrapper it owns.
+  explicit `UiThreadHandler`/`UiThreadPropertyChangedHandler` wrapper it owns.
 - The three landed cross-thread tests (PR #48) continue to prove the same properties they prove
   today (UI-thread marshaling, synchronous non-marshaled delivery, deadlock-avoidance) against the
-  new mechanism, plus new coverage for `UiThreadHandler`'s unsubscribe correctness (promoted directly
-  from the validation experiment).
+  new mechanism, plus new coverage for the wrapper's unsubscribe correctness (promoted directly from
+  the validation experiment).
 
 ## Non-goals
 
@@ -149,7 +149,7 @@ namespace Walkabout.Utilities
             if (context != null && Thread.CurrentThread.ManagedThreadId != uiThreadId)
             {
                 // Post, not Send: fire-and-forget avoids the same deadlock class documented
-                // below and proven via PR #48's regression test.
+                // above and proven via PR #48's regression test.
                 context.Post(_ => d.DynamicInvoke(args), null);
                 return null;
             }
@@ -182,10 +182,10 @@ The same-thread-bypass logic (capture `uiThreadId` at set-time, compare
 is no longer referenced anywhere in this file.
 
 **Callers of the setter** (all in WPF-family projects, never `MyMoney.Business` itself, so
-referencing WPF types here is fine): `Source/WPF/MyMoney/MainWindow.xaml.cs` (3 call sites, lines
-~102, ~111, ~127), `Source/WPF/PerformanceViewer/MainWindow.xaml.cs` (~line 41),
-`Source/WPF/UIControlsTest/MainWindow.xaml.cs` (~line 25) — each currently
-`UiDispatcher.CurrentDispatcher = this.Dispatcher;`. Update to:
+referencing WPF types here is fine): `Source/WPF/MyMoney/MainWindow.xaml.cs` (3 call sites, in the
+`MainWindow()` and `MainWindow(Settings)` constructors), `Source/WPF/PerformanceViewer/MainWindow.xaml.cs`
+(1 call site, its constructor), `Source/WPF/UIControlsTest/MainWindow.xaml.cs` (1 call site, its
+constructor) — each currently `UiDispatcher.CurrentDispatcher = this.Dispatcher;`. Update to:
 
 ```csharp
 UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
@@ -204,17 +204,18 @@ Remove `using System.Windows;` and the `DependencyObject` branch entirely. `Rais
 ```csharp
 // This collection has no concept of UI threads or marshaling - every handler is invoked
 // synchronously, directly, on whichever thread raises the event. A listener that needs UI-thread
-// delivery must opt in explicitly via UiThreadHandler (see Utilities/UiThreadHandler.cs) at its own
-// subscription site; this class deliberately does not - and must not - try to detect that need
-// itself (see docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md for why
-// an automatic per-listener check was removed from here).
+// delivery must opt in explicitly via UiThreadHandler/UiThreadPropertyChangedHandler (see
+// Utilities/UiThreadHandler.cs) at its own subscription site; this class deliberately does not -
+// and must not - try to detect that need itself (see
+// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md for why an automatic
+// per-listener check was removed from here).
 //
-// If bugs recur from callers forgetting to wrap a UI-bound subscription in UiThreadHandler, or from
-// unsubscribing with a different delegate than was subscribed, consider a Roslyn analyzer over a
-// runtime check here - both mistakes are structural and syntactic (visible in the subscription code
-// itself), which is exactly what an analyzer is well-suited to catch at compile time instead of at
-// whatever point in the future the mistake happens to surface at runtime. Deferred for now - see
-// issue #7.
+// If bugs recur from callers forgetting to wrap a UI-bound subscription in one of those wrappers, or
+// from unsubscribing with a different delegate than was subscribed, consider a Roslyn analyzer over
+// a runtime check here - both mistakes are structural and syntactic (visible in the subscription
+// code itself), which is exactly what an analyzer is well-suited to catch at compile time instead of
+// at whatever point in the future the mistake happens to surface at runtime. Deferred for now - see
+// issue #49.
 public void RaiseEvent(object sender, Q args)
 {
     object[] array = new object[] { sender, args };
@@ -238,12 +239,17 @@ object[] args) => d.Method.Invoke(d.Target, args);` is unchanged.
 
 ## Design: `UiThreadHandler` and `UiThreadPropertyChangedHandler` (new files, `Source/WPF/MyMoney.Business/Utilities/`)
 
-**Correction found while writing the implementation plan**: the full call-site audit (see "Migration:
-WPF call sites" below) found real subscriptions to `PersistentObject`'s actual `PropertyChanged`
-implementation (`PropertyChangedEventHandler`/`PropertyChangedEventArgs`) whose *subscribing* class is
-genuinely `DependencyObject`-derived — a different delegate type than `Changed`/`Rebalanced`'s
-`EventHandler<ChangeEventArgs>`, and not implicitly convertible to it despite the structurally similar
-signature. Two concrete wrapper classes are needed, not one:
+A full audit of every `EventHandlerCollection`-backed event across `MyMoney.Business` (see "Migration:
+WPF call sites" below) found exactly two distinct delegate shapes with real, live subscribers needing
+this wrapping — `EventHandler<ChangeEventArgs>` (`PersistentObject.Changed`,
+`PersistentContainer.Changed`, `MyMoney.Rebalanced`) and `PropertyChangedEventHandler`
+(`PersistentObject`'s actual `PropertyChanged` implementation). These are two concrete classes, not
+one generic class: `PropertyChangedEventHandler` predates generic `EventHandler<T>` in .NET and isn't
+assignable to/from `EventHandler<PropertyChangedEventArgs>` despite the matching signature, so a
+single `UiThreadHandler<T>` couldn't cover both shapes without an awkward adapter. (A third
+`EventHandlerCollection`-backed surface exists — `AsyncSqlQuery.Completed`,
+`EventHandler<SqlQueryResultArgs>` — but `AsyncSqlQuery` has zero subscribers anywhere in the
+solution; see below. No wrapper is needed for it.)
 
 ```csharp
 using System;
@@ -264,7 +270,7 @@ namespace Walkabout.Utilities
     /// original method group (or vice versa). Both mistakes are easy to make by hand and easy to
     /// miss in review; if they recur across enough call sites, a Roslyn analyzer flagging a
     /// subscribe/unsubscribe pair that doesn't reference the same UiThreadHandler instance would be
-    /// more reliable than continuing to catch these by hand. Deferred for now - see issue #7.
+    /// more reliable than continuing to catch these by hand. Deferred for now - see issue #49.
     /// </summary>
     public sealed class UiThreadHandler
     {
@@ -301,26 +307,37 @@ namespace Walkabout.Utilities
 }
 ```
 
-Two concrete classes, not one generic class — `PropertyChangedEventHandler` predates generic
-`EventHandler<T>` in .NET and isn't assignable to/from `EventHandler<PropertyChangedEventArgs>`
-despite the matching signature, so a single `UiThreadHandler<T>` couldn't cover both shapes without an
-awkward adapter. Every real usage in this codebase is one of exactly these two delegate shapes — no
-evidence a third is needed (YAGNI).
-
 ## Migration: WPF call sites
 
-**Correction found while writing the implementation plan**: the original audit only grepped for
-`\.Changed\s*\+=`. `EventHandlerCollection` also backs two other real event surfaces on
-`PersistentObject`-family types — `MyMoney.Rebalanced` (`EventHandler<ChangeEventArgs>`, same shape as
-`Changed`) and `PersistentObject`'s actual `PropertyChanged` implementation
-(`PropertyChangedEventHandler`, a different delegate shape — see `UiThreadPropertyChangedHandler`
-above). A full audit of all three found the true surface is **30 subscriptions across 13 files**, not
-16 across 12. Each `.PropertyChanged` hit was individually checked against its *subscribing* class
-(not the event source) to confirm it's genuinely `DependencyObject`-derived — e.g.
-`AccountsControl.xaml.cs`'s `this.account.PropertyChanged += this.OnPropertyChanged;` looked like a
-match but its enclosing class, `AccountItemViewModel`, is a plain (non-`DependencyObject`) view-model
-class with its own independent `INotifyPropertyChanged` implementation, so that one specific
-subscription is correctly excluded below.
+A complete audit of every `EventHandlerCollection`-backed event in `MyMoney.Business` — not just
+`.Changed`, which an initial narrower grep had assumed was the only one — found four real event
+surfaces:
+
+- `PersistentContainer.Changed` / `PersistentObject.Changed` — `EventHandler<ChangeEventArgs>`.
+- `MyMoney.Rebalanced` — `EventHandler<ChangeEventArgs>`, same shape as `Changed`, easy to miss by
+  grepping for `.Changed` specifically.
+- `PersistentObject.PropertyChanged` (the actual `INotifyPropertyChanged` implementation for
+  `Account`/`Transaction`/etc.) — `PropertyChangedEventHandler`. Note this is *not* the same thing as
+  WPF's own internal data-binding subscription to `PropertyChanged` (via
+  `PropertyChangedEventManager`, a `WeakEventManager`/`DispatcherObject` — not a `DependencyObject`),
+  which was never affected by the `DependencyObject` check in the first place and needs no migration;
+  only *manual*, explicit `.PropertyChanged +=` subscriptions from genuinely `DependencyObject`-derived
+  code are in scope.
+- `AsyncSqlQuery.Completed` — `EventHandler<SqlQueryResultArgs>`. Confirmed via
+  `grep -rln "AsyncSqlQuery" Source/WPF` to have **zero subscribers anywhere in the solution** — dead
+  code. No migration needed; noted here only for completeness of the audit.
+
+Grepping the WPF app for subscriptions to the first three surfaces (`.Changed +=`, `.Rebalanced +=`,
+and `.PropertyChanged +=` where the *subscribing* class — not the event source — is genuinely
+`DependencyObject`-derived) found **30 real subscriptions across 13 files**. Every `.PropertyChanged`
+hit was individually checked against its enclosing class: e.g. `AccountsControl.xaml.cs`'s
+`this.account.PropertyChanged += this.OnPropertyChanged;` looked like a match but its enclosing class,
+`AccountItemViewModel`, is a plain (non-`DependencyObject`) view-model class with its own independent
+`INotifyPropertyChanged` implementation, so that one specific subscription is correctly excluded.
+Likewise `Settings`/`DatabaseSettings`/`OnlineServiceSettings`'s `PropertyChanged` subscriptions
+(`OnlineServiceDialog.xaml.cs`, `MainWindow.xaml.cs`'s `databaseSettings`, `StockQuoteManager.cs`'s
+`ss`) are unaffected regardless of subscriber type, since those classes implement
+`INotifyPropertyChanged` directly and never go through `EventHandlerCollection` at all.
 
 Of the real subscriptions, 7 are on plain (non-`DependencyObject`) classes and need **no change**,
 since they already run synchronously today and this rewrite doesn't change that:
@@ -423,7 +440,9 @@ propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPr
 `this.propertyChangeSubscription.Subscribe(this.context);` — the `context` field itself, and every
 other place that reads it, is untouched.
 
-Migration shape per subscription (example from `AccountDialog.xaml.cs`):
+### Migration shape (non-`TransactionsView` sites)
+
+Example from `AccountDialog.xaml.cs`:
 
 ```csharp
 // Before:
@@ -433,7 +452,7 @@ money.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
 // Wrapped once in the ctor and reused for both subscribe and unsubscribe below - see
 // UiThreadHandler's doc comment for why a bare re-wrap or a mismatched raw method group here would
 // silently break unsubscription (a mistake a Roslyn analyzer could catch at compile time if this
-// class of bug recurs - deferred for now, see issue #7).
+// class of bug recurs - deferred for now, see issue #49).
 this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);   // field, ctor-initialized
 money.Changed += this.onMoneyChangedUi.Handler;
 ```
@@ -444,9 +463,9 @@ migrated call sites — not just this example — so a future reader at any one 
 context without needing to already know to go look at `UiThreadHandler.cs`.
 
 Any existing `-=` unsubscription for the same handler (check each site individually — not all
-subscribe sites currently unsubscribe) must use `this.onMoneyChangedUi.Handler` too, never the bare
-`this.OnMoneyChanged` method group, or it will silently fail to unsubscribe (this is precisely the
-bug class this design closes, but only for code written the new way).
+subscribe sites currently unsubscribe) must use the same wrapper field's `.Handler`, never the bare
+original method group, or it will silently fail to unsubscribe (this is precisely the bug class this
+design closes, but only for code written the new way).
 
 **Two pre-existing anomalies found during the audit — migrate as-is, do not "fix" them** (out of scope
 for this rewrite; behavior preservation is the goal):
@@ -477,21 +496,24 @@ commit** that removes the `DependencyObject` check from `EventHandlerCollection`
 for an unaddressed reason (migration panelist's finding):
 
 - `RaiseEvent_DependencyObjectListener_RunsOnDispatcherThreadNotCallingThread` — obsolete (asserts
-  automatic `DependencyObject`-based marshaling, which no longer exists). Replace with a test
-  subscribing via `new UiThreadHandler(listener.OnChanged).Handler` instead of a raw
-  `DependencyObject`-derived listener, asserting the same "runs on dispatcher thread, not calling
-  thread" property.
+  automatic `DependencyObject`-based marshaling, which no longer exists). Replace with
+  `RaiseEvent_DependencyObjectListener_NoLongerAutoMarshals_RunsSynchronouslyOnCallingThread`: subscribe
+  a raw `DependencyObject`-derived listener *directly* (no wrapper), and assert it now runs on the
+  *calling* thread, not the dispatcher thread — the direct, meaningful proof that the automatic
+  `DependencyObject` check is gone.
 - `RaiseEvent_PlainListener_RunsSynchronouslyOnCallingThread` — still valid, now trivially true for
   *every* unwrapped listener (not just non-`DependencyObject` ones); keep as basic coverage of the
   base synchronous-by-default behavior.
-- `RaiseEvent_FromThreadHoldingALockTheUiThreadWants_DoesNotDeadlock` — re-validate unchanged against
-  the new `SynchronizationContext`-backed `UiDispatcher.BeginInvoke`; should behave identically
-  (still `Post`-based, still non-blocking).
+- `RaiseEvent_FromThreadHoldingALockTheUiThreadWants_DoesNotDeadlock` — update its subscription to use
+  `new UiThreadHandler(listener.OnChanged).Handler` instead of subscribing the raw `DependencyObject`
+  listener directly (which would no longer be marshaled at all under the new design); the deadlock-
+  avoidance property itself is unchanged, still `Post`-based, still non-blocking.
 - **New**: promote the validation experiment's proof directly into permanent coverage —
   `UiThreadHandler_Unsubscribe_ActuallyStopsDelivery` (subscribe and unsubscribe via the same
-  `.Handler` reference; listener must not fire) and a companion sanity check that it still delivers
-  while subscribed. This is the actual load-bearing property of the new production API and must be a
-  real regression test, not just a deleted experiment.
+  `.Handler` reference; listener must not fire) and `UiThreadHandler_StillMarshalsToUiThreadWhileSubscribed`
+  (a companion sanity check that it still delivers while subscribed, ruling out a trivial "never
+  delivers anything" implementation passing by accident). This is the actual load-bearing property of
+  the new production API and must be a real regression test, not just a deleted experiment.
 
 ## `LayerBoundaryTests` (`Source/WPF/UnitTests/LayerBoundaryTests.cs`)
 
@@ -511,11 +533,12 @@ accordingly (it currently documents the WindowsBase allowance as intentional).
 - Full-solution regression matching this session's established baseline.
 - **Manual interactive smoke pass** through the main app (`MyMoney.exe`), specifically exercising
   every migrated view/dialog (Accounts, Transactions, Securities, Currencies, Aliases, Categories,
-  Payees, rename-payee dialog, account dialog) to confirm UI updates still arrive correctly after
-  migration — this is the migration panelist's explicit completion gate and cannot be done by an
-  agent without a real interactive desktop; flag this to the user as a manual step before merge.
+  Payees, Rents, rename-payee dialog, account dialog) to confirm UI updates still arrive correctly
+  after migration — this is the migration panelist's explicit completion gate and cannot be done by
+  an agent without a real interactive desktop; flag this to the user as a manual step before merge.
 
 ## Known deferred items
 
-- Roslyn analyzer for compile-time detection of a forgotten `UiThreadHandler` wrap (ergonomics
-  panelist's proposal) — separate follow-up, not part of this work.
+- Roslyn analyzer for compile-time detection of a forgotten `UiThreadHandler`/
+  `UiThreadPropertyChangedHandler` wrap (ergonomics panelist's proposal) — separate follow-up, not
+  part of this work. Tracked as issue #49 (low priority).
