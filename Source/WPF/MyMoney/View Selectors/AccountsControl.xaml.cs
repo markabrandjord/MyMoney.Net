@@ -72,6 +72,10 @@ namespace Walkabout.Views.Controls
 
         private MyMoney myMoney;
 
+        private UiThreadHandler onAccountsChangedUi;
+        private UiThreadHandler onMoneyChangedUi;
+        private UiThreadHandler onBalanceChangedUi;
+
         private readonly ObservableCollection<AccountViewModel> items = new ObservableCollection<AccountViewModel>();
 
         private DatabaseSettings databaseSettings;
@@ -118,18 +122,18 @@ namespace Walkabout.Views.Controls
             {
                 if (this.myMoney != null)
                 {
-                    this.myMoney.Accounts.Changed -= new EventHandler<ChangeEventArgs>(this.OnAccountsChanged);
-                    this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
-                    this.myMoney.Rebalanced -= new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
+                    this.myMoney.Accounts.Changed -= this.onAccountsChangedUi.Handler;
+                    this.myMoney.Changed -= this.onMoneyChangedUi.Handler;
+                    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
                 }
                 this.myMoney = value;
                 this.Select(null);
 
                 if (value != null)
                 {
-                    this.myMoney.Accounts.Changed += new EventHandler<ChangeEventArgs>(this.OnAccountsChanged);
-                    this.myMoney.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
-                    this.myMoney.Rebalanced += new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
+                    this.myMoney.Accounts.Changed += this.onAccountsChangedUi.Handler;
+                    this.myMoney.Changed += this.onMoneyChangedUi.Handler;
+                    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
                     this.OnAccountsChanged(this, new ChangeEventArgs(this.myMoney.Accounts, null, ChangeType.Reloaded));
                 }
             }
@@ -292,6 +296,9 @@ namespace Walkabout.Views.Controls
 
         public AccountsControl()
         {
+            this.onAccountsChangedUi = new UiThreadHandler(this.OnAccountsChanged);
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+            this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
 
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.AccountsControlInitialize))
