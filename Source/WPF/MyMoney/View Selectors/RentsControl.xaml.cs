@@ -17,6 +17,7 @@ namespace Walkabout.Views.Controls
 
         public RentsControl()
         {
+            this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
             this.InitializeComponent();
             MouseUp += new MouseButtonEventHandler(this.OnMouseUp);
             this.treeView1.SelectedItemChanged += new RoutedPropertyChangedEventHandler<object>(this.OnTreeView_SelectedItemChanged);
@@ -27,6 +28,7 @@ namespace Walkabout.Views.Controls
         #region PROPERTIES
 
         private MyMoney myMoney;
+        private UiThreadHandler onBalanceChangedUi;
 
         public MyMoney MyMoney
         {
@@ -38,7 +40,7 @@ namespace Walkabout.Views.Controls
                     // First stop monitoring changes on the existing Money type
                     if (this.myMoney != null)
                     {
-                        this.myMoney.Rebalanced -= new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
+                        this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
                     }
 
                     this.myMoney = value;
@@ -49,7 +51,7 @@ namespace Walkabout.Views.Controls
                     }
                     else
                     {
-                        this.myMoney.Rebalanced += new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
+                        this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
 
                         // Fire initial change to display the Buildings in they new Money db
                         this.OnBalanceChanged(value.Buildings, new ChangeEventArgs(value.Buildings, null, ChangeType.Reloaded));
