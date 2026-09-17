@@ -448,6 +448,100 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.Accounts.FindAccount("Checking"), Is.Null);
         }
 
+        private static MyMoney BuildOnePayeeMoney(out Payee payee)
+        {
+            MyMoney money = new MyMoney();
+            payee = money.Payees.FindPayee("Kroger", true);
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewPayee_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOnePayeeMoney(out Payee payee);
+
+            this.Database.SaveOne(payee);
+
+            Assert.That(payee.RowVersion, Is.EqualTo(1));
+            Assert.That(payee.IsInserted, Is.False);
+            Assert.That(payee.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Payee found = reloaded.Payees.FindPayee("Kroger", false);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdatePayeeAfterReload_IncrementsRowVersion()
+        {
+            BuildOnePayeeMoney(out Payee payee);
+            this.Database.SaveOne(payee);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Payee found = reloaded.Payees.FindPayee("Kroger", false);
+            found.Name = "Kroger Updated";
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Payee foundAgain = reloadedAgain.Payees.FindPayee("Kroger Updated", false);
+            Assert.That(foundAgain, Is.Not.Null);
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StalePayeeRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOnePayeeMoney(out Payee payee);
+            this.Database.SaveOne(payee);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Payee payeeA = readerA.Payees.FindPayee("Kroger", false);
+            payeeA.Name = "From A";
+            this.Database.SaveOne(payeeA);
+
+            Payee payeeB = readerB.Payees.FindPayee("Kroger", false);
+            payeeB.Name = "From B";
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(payeeB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Payees.FindPayee("From A", false), Is.Not.Null);
+        }
+
+        [Test]
+        public void SaveOne_DeletePayee_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOnePayeeMoney(out Payee payee);
+            this.Database.SaveOne(payee);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Payee toDelete = reloaded.Payees.FindPayee("Kroger", false);
+            int toDeleteId = toDelete.Id;
+            reloaded.Payees.RemovePayee(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            // RemovePayee(p, forceRemoveAfterSave: false) (its default here) removes the name-based
+            // payeeIndex entry unconditionally, so FindPayee("Kroger", false) would already be null
+            // here even if SaveOne's postCommit RemoveChild(p, true) never fires. FindPayeeAt(id)
+            // indexes the id-keyed `payees` dictionary directly, only cleared when IsInserted ||
+            // forceRemoveAfterSave, so it's the genuine proof.
+            Assert.That(reloaded.Payees.FindPayeeAt(toDeleteId), Is.Not.Null,
+                "sanity check: id-based lookup must still find the payee before SaveOne runs its postCommit RemoveChild");
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Payees.FindPayeeAt(toDeleteId), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Payees.FindPayee("Kroger", false), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {

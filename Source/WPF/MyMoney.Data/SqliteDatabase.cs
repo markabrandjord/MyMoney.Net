@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1045,6 +1045,10 @@ namespace Walkabout.Data
                         else if (root is Account account)
                         {
                             this.SaveOneAccount(account, transaction, postCommitActions);
+                        }
+                        else if (root is Payee payee)
+                        {
+                            this.SaveOnePayee(payee, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1369,6 +1373,65 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Payee row - same shape as SaveOneCategory. SQL mirrors UpdatePayees' existing
+        /// parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOnePayee(Payee p, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = p.RowVersion;
+
+            if (p.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Payees (Id, Name) VALUES (@Id, @Name);",
+                    ("@Id", p.Id), ("@Name", p.Name));
+                postCommitActions.Add(() =>
+                {
+                    p.RowVersion = 1;
+                    p.OnUpdated();
+                });
+                return;
+            }
+
+            if (p.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Payees SET Name=@Name," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", p.Name), ("@Id", p.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(p, "Payees", p.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    p.RowVersion = callerRowVersion + 1;
+                    p.OnUpdated();
+                });
+                return;
+            }
+
+            if (p.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Payees WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", p.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(p, "Payees", p.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    p.OnUpdated();
+                    p.Parent.RemoveChild(p, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1589,6 +1652,29 @@ namespace Walkabout.Data
             }
             accts.EndUpdate();
             accts.FireChangeEvent(accts, accts, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadPayees to also read back the Version column - same rationale
+        /// as ReadCategories' override.
+        /// </summary>
+        public override void ReadPayees(Payees payees, MyMoney money)
+        {
+            payees.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[" + this.VersionColumnName + "] FROM Payees");
+            payees.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Payees");
+                int id = reader.GetInt32(0);
+                Payee p = payees.AddPayee(id);
+                p.Name = ReadDbString(reader, 1);
+                p.RowVersion = reader.GetInt64(2);
+                p.OnUpdated();
+            }
+            payees.EndUpdate();
+            payees.FireChangeEvent(payees, payees, null, ChangeType.Reloaded);
             reader.Close();
         }
 
