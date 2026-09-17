@@ -1224,6 +1224,7 @@ namespace Walkabout.Data
                             t.OriginalPayee = reader.GetString(15);
                         }
                         t.BatchMode = false;
+                        t.RowVersion = reader.GetInt64(18);
                         t.OnUpdated();
                     }
                     transactions.EndUpdate();
@@ -1618,6 +1619,11 @@ namespace Walkabout.Data
             this.SaveBatch(new PersistentObject[] { root });
         }
 
+        public override void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
         public override void SaveBatch(IEnumerable<PersistentObject> roots)
         {
             List<PersistentObject> list = new List<PersistentObject>(roots);
@@ -1685,6 +1691,10 @@ namespace Walkabout.Data
                 else if (firstType == typeof(RentBuilding))
                 {
                     this.SaveRentBuildingBatch(list.ConvertAll(r => (RentBuilding)r), connection, null, postCommitActions);
+                }
+                else if (firstType == typeof(Transaction))
+                {
+                    this.SaveTransactionBatch(list.ConvertAll(r => (Transaction)r), connection, null, postCommitActions);
                 }
                 else
                 {
@@ -2650,6 +2660,233 @@ namespace Walkabout.Data
             foreach (RentUnit u in deletedUnits)
             {
                 postCommitActions.Add(() => u.Parent.RemoveChild(u, true));
+            }
+        }
+
+        private static DataTable NewTransactionRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Number", typeof(string));
+            table.Columns.Add("Account", typeof(int));
+            table.Columns.Add("Date", typeof(DateTime));
+            table.Columns.Add("Amount", typeof(decimal));
+            table.Columns.Add("Status", typeof(int));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Category", typeof(int));
+            table.Columns.Add("FITID", typeof(string));
+            table.Columns.Add("SalesTax", typeof(decimal));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("ReconciledDate", typeof(DateTime));
+            table.Columns.Add("BudgetBalanceDate", typeof(DateTime));
+            table.Columns.Add("MergeDate", typeof(DateTime));
+            table.Columns.Add("OriginalPayee", typeof(string));
+            table.Columns.Add("Transfer", typeof(long));
+            table.Columns.Add("TransferSplit", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private static DataTable NewSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Transaction", typeof(long));
+            table.Columns.Add("Amount", typeof(decimal));
+            table.Columns.Add("Category", typeof(int));
+            table.Columns.Add("Memo", typeof(string));
+            table.Columns.Add("Transfer", typeof(long));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("BudgetBalanceDate", typeof(DateTime));
+            return table;
+        }
+
+        private static DataTable NewInvestmentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(long));
+            table.Columns.Add("Security", typeof(int));
+            table.Columns.Add("UnitPrice", typeof(decimal));
+            table.Columns.Add("Units", typeof(decimal));
+            table.Columns.Add("Commission", typeof(decimal));
+            table.Columns.Add("InvestmentType", typeof(int));
+            table.Columns.Add("TradeType", typeof(int));
+            table.Columns.Add("TaxExempt", typeof(bool));
+            table.Columns.Add("Withholding", typeof(decimal));
+            table.Columns.Add("MarkUpDown", typeof(decimal));
+            table.Columns.Add("Taxes", typeof(decimal));
+            table.Columns.Add("Fees", typeof(decimal));
+            table.Columns.Add("Load", typeof(decimal));
+            return table;
+        }
+
+        private void SaveTransactionBatch(List<Transaction> transactions, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable transactionRows = NewTransactionRowTable();
+            DataTable splitRows = NewSplitRowTable();
+            DataTable investmentRows = NewInvestmentRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Transaction> byId = new Dictionary<long, Transaction>();
+            List<Transaction> deletedTransactions = new List<Transaction>();
+            List<Split> savedSplits = new List<Split>();
+            List<Split> deletedSplits = new List<Split>();
+            List<Investment> savedInvestments = new List<Investment>();
+
+            foreach (Transaction t in transactions)
+            {
+                long id = t.Id;
+                rootsById[id] = t;
+                byId[id] = t;
+                long callerRowVersion = t.RowVersion;
+                object account = t.Account != null ? (object)t.Account.Id : DBNull.Value;
+                object payee = t.Payee != null ? (object)t.Payee.Id : DBNull.Value;
+                object category = t.Category != null ? (object)t.Category.Id : DBNull.Value;
+                object transferTarget = t.Transfer != null && t.Transfer.Transaction != null ? (object)t.Transfer.Transaction.Id : DBNull.Value;
+                object transferSplit = t.Transfer != null && t.Transfer.Split != null ? (object)t.Transfer.Split.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(t.Date);
+                object reconciledDate = SqlServerDatabase.DBNullableDateTimeParam(t.ReconciledDate);
+                object budgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate);
+                object mergeDate = SqlServerDatabase.DBNullableDateTimeParam(t.MergeDate);
+
+                if (t.IsInserted)
+                {
+                    transactionRows.Rows.Add("I", t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, DBNull.Value);
+                }
+                else if (t.IsChanged)
+                {
+                    transactionRows.Rows.Add("U", t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, callerRowVersion);
+                }
+                else if (t.IsDeleted)
+                {
+                    transactionRows.Rows.Add("D", t.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedTransactions.Add(t);
+                }
+
+                if (t.Splits != null)
+                {
+                    List<Split> splitsSnapshot = new List<Split>();
+                    foreach (Split s in t.Splits)
+                    {
+                        splitsSnapshot.Add(s);
+                    }
+
+                    foreach (Split s in splitsSnapshot)
+                    {
+                        object splitCategory = s.Category != null ? (object)s.Category.Id : DBNull.Value;
+                        object splitPayee = s.Payee != null ? (object)s.Payee.Id : DBNull.Value;
+                        object splitTransfer = s.Transfer != null && s.Transfer.Transaction != null ? (object)s.Transfer.Transaction.Id : DBNull.Value;
+                        object splitBudgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate);
+
+                        if (s.IsInserted)
+                        {
+                            splitRows.Rows.Add("I", s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsChanged)
+                        {
+                            splitRows.Rows.Add("U", s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsDeleted)
+                        {
+                            splitRows.Rows.Add("D", s.Id, t.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                                DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                            deletedSplits.Add(s);
+                        }
+                    }
+                }
+
+                if (t.Investment != null)
+                {
+                    Investment i = t.Investment;
+                    object security = i.Security != null ? (object)i.Security.Id : DBNull.Value;
+
+                    if (i.IsInserted)
+                    {
+                        investmentRows.Rows.Add("I", i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsChanged)
+                    {
+                        investmentRows.Rows.Add("U", i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        investmentRows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                        // No savedInvestments.Add here and no separate "deleted" tracking either -
+                        // Investment has no Parent/RemoveChild (unlike Split/RentUnit), and
+                        // MockDatabase.MarkOwnedChildrenClean's own established behavior does
+                        // nothing at all for a deleted investment. Match that exactly.
+                    }
+                }
+            }
+
+            if (transactionRows.Rows.Count == 0 && splitRows.Rows.Count == 0 && investmentRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Transactions_SaveBatch",
+                new[]
+                {
+                    ("@Transactions", "dbo.TransactionSaveBatchRow", transactionRows),
+                    ("@Splits", "dbo.SplitRow", splitRows),
+                    ("@Investments", "dbo.InvestmentRow", investmentRows)
+                },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Transaction t = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        t.RowVersion = newVersion;
+                        t.OnUpdated();
+                    });
+                });
+
+            foreach (Transaction t in deletedTransactions)
+            {
+                postCommitActions.Add(() =>
+                {
+                    t.OnUpdated();
+                    t.Parent.RemoveChild(t, true);
+                });
+            }
+
+            foreach (Split s in savedSplits)
+            {
+                postCommitActions.Add(() => s.OnUpdated());
+            }
+
+            foreach (Split s in deletedSplits)
+            {
+                postCommitActions.Add(() => s.Parent.RemoveChild(s, true));
+            }
+
+            foreach (Investment i in savedInvestments)
+            {
+                postCommitActions.Add(() => i.OnUpdated());
             }
         }
     }
