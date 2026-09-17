@@ -95,6 +95,47 @@ The ergonomics panelist's proposed Roslyn analyzer (compile-time detection of a 
 missed wrap fails loudly via WPF's own cross-thread exception during ordinary interactive use, which
 is an acceptable interim safety net for this solo-maintainer codebase.
 
+### A second, unrelated `WindowsBase` dependency found during implementation
+
+While implementing the final task (tightening `LayerBoundaryTests` to assert the actual goal below),
+`MyMoney.Business` was found to still reference `WindowsBase` after the `UiDispatcher`/
+`EventHandlerCollection` rewrite landed — for a reason entirely unrelated to event marshaling:
+`System.Windows.Point` is used in two files' public API surface.
+
+`Point` is just two numbers glued together (an X and a Y). WPF has its own `Point` type for tracking
+screen positions, and this codebase borrows that same type in three places, only two of which are
+actually about the screen:
+
+- `Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs` (drawing a trend line on a chart) and
+  `Source/WPF/MyMoney/Utilities/DragAndDrop.cs` (the mouse pointer's position for drag-and-drop) are
+  genuine screen-coordinate uses.
+- `Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs` (`Covariance`, `LinearRegression`), consumed
+  by `Payments.cs`'s loan/bill amortization outlier-detection logic, uses `Point` purely as a
+  convenient "two numbers together" shape — "X" is "which payment number," "Y" is "how much it
+  cost." This has nothing to do with a screen; `Point` was just already there.
+
+Because `MyMoney.Business` is meant to be the portable "brain" of the app (accounts, transactions,
+the math around them) with no assumption that a screen-drawing toolkit is even present — the entire
+reason this issue exists, to unblock the Uno/Xamarin thin clients (item #5) — borrowing WPF's `Point`
+type here for convenience secretly requires that whole toolkit (`WindowsBase.dll`) just to compile,
+even though this specific code never draws anything.
+
+**Decision**: replace `System.Windows.Point` with a `(double X, double Y)` value tuple throughout
+`MathHelpers.cs` and `NativeMethods.cs` — a core, fully portable .NET type requiring no new type
+definition, with named-tuple `.X`/`.Y` access reading almost identically to `Point.X`/`.Y` at call
+sites. Once this is the only reason `MyMoney.Business` needed `WindowsBase`, the
+`<FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />` in `MyMoney.Business.csproj` —
+along with the two MSBuild targets that strip `PresentationCore`/`PresentationFramework`/
+`PresentationUI` back out while deliberately keeping `WindowsBase` — become dead configuration and
+are removed entirely (see "Design: removing the `MyMoney.Business.csproj` WPF `FrameworkReference`"
+below). `MyMoney.Business` ends up structurally identical to `MyMoney.Data`: no WPF-related MSBuild
+machinery at all, just `LayerBoundaryTests` as the ongoing automated check.
+
+No existing test coverage exists anywhere for `MathHelpers.Covariance`/`LinearRegression`/
+`DistancesToLine` or for `Payments.cs`'s bill-detection/outlier logic — real financial-logic-adjacent
+code with zero characterization today. See "Characterization tests for `MathHelpers`" below for how
+this migration proves it doesn't change that behavior.
+
 ## Goals
 
 - `MyMoney.Business` has zero references to any WPF-family assembly (`PresentationFramework`,
@@ -108,6 +149,15 @@ is an acceptable interim safety net for this solo-maintainer codebase.
   today (UI-thread marshaling, synchronous non-marshaled delivery, deadlock-avoidance) against the
   new mechanism, plus new coverage for the wrapper's unsubscribe correctness (promoted directly from
   the validation experiment).
+- `MathHelpers.cs`/`NativeMethods.cs` no longer reference `System.Windows.Point` (the second,
+  unrelated `WindowsBase` dependency found during implementation — see above), and
+  `MyMoney.Business.csproj` no longer carries any WPF-related `FrameworkReference` or MSBuild target
+  at all. This is what actually makes the first bullet true — the dispatcher rewrite alone wasn't
+  sufficient.
+- `MathHelpers.LinearRegression`/`Covariance`/`DistancesToLine`'s numeric behavior — real logic
+  `Payments.cs` depends on for bill/loan amortization outlier detection, with zero prior test
+  coverage — is proven unchanged by this migration via characterization tests written against the
+  current behavior before the type changes.
 
 ## Non-goals
 
@@ -489,6 +539,84 @@ Migrate by changing the field's declared type to `UiThreadHandler` and its initi
 `new UiThreadHandler(this.OnPayees_Changed)`, then use `this.handler.Handler` at both the `+=` and
 `-=` call sites in place of the bare field.
 
+## Design: `System.Windows.Point` → `(double X, double Y)` migration
+
+Four files change:
+
+**`Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs`** — remove `using System.Windows;`. Change
+`Covariance(IEnumerable<Point> pts)` to `Covariance(IEnumerable<(double X, double Y)> pts)` (body
+unchanged beyond `foreach (Point d in pts)` becoming `foreach (var d in pts)` — `.X`/`.Y` access is
+identical on a named tuple). Change `LinearRegression(IEnumerable<Point> pts, out double a, out
+double b)` the same way. The double-only `LinearRegression(IEnumerable<double> pts, ...)` overload's
+internal `List<Point> pts2` becomes `List<(double X, double Y)> pts2`, and
+`pts2.Add(new Point(x++, y));` becomes `pts2.Add((x++, y));`. The LINQ projections inside
+`LinearRegression(IEnumerable<(double X, double Y)>, ...)` (`from p in pts select p.X`, etc.) need no
+change — tuple member access works identically in LINQ.
+
+**`Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs`** — change `GetMousePosition()`'s return
+type from `System.Windows.Point` to `(double X, double Y)`. `return new System.Windows.Point(0, 0);`
+becomes `return (0, 0);`; the final `return new System.Windows.Point(ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));`
+becomes `return (ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));`.
+
+**`Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs`** (`ComputeLinearRegression()`) — `points` is a
+purely local variable, built only to feed `MathHelpers.LinearRegression(points, out a, out b)`; it is
+never used for WPF rendering (confirmed by reading the full method). `List<Point> points = new
+List<Point>();` becomes `List<(double X, double Y)> points = new List<(double X, double Y)>();`, and
+`points.Add(new Point(x++, (double)c.Amount));` becomes `points.Add((x++, (double)c.Amount));`.
+
+**`Source/WPF/MyMoney/Utilities/DragAndDrop.cs`** (`UpdateWindowLocation()`) — `Point pos =
+NativeMethods.GetMousePosition();` becomes `var pos = NativeMethods.GetMousePosition();`; the
+following `pos.X`/`pos.Y` reads are unchanged.
+
+Before applying any of this, re-verify (fresh grep, don't trust this document's file list as
+exhaustive) that these are the only files referencing `System.Windows.Point` reachable from
+`MyMoney.Business`, and that `NativeMethods.GetMousePosition()`'s only caller is
+`DragAndDrop.cs` and `MathHelpers.LinearRegression`/`Covariance`'s only callers are `Payments.cs`
+(double-only overload) and `HistoryBarChart.xaml.cs` (`Point`-based overload) — this spec's own
+account of the call sites was itself discovered by exploration during Task 16, not by an exhaustive
+audit planned from the start, so re-confirm rather than assume completeness.
+
+## Design: removing the `MyMoney.Business.csproj` WPF `FrameworkReference`
+
+Once the `Point` migration above lands, re-run an exhaustive check (`grep -rln "System.Windows"
+Source/WPF/MyMoney.Business --include=*.cs`) to confirm nothing else in the project needs
+`WindowsBase` for any reason. If clean, remove from `Source/WPF/MyMoney.Business/MyMoney.Business.csproj`:
+
+- The `<ItemGroup>` containing `<FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />`.
+- The `RemoveWpfViewRenderingAssemblies` target and its preceding doc comment.
+- The `VerifyNoWpfViewRenderingAssemblies` target and its preceding doc comment (this one references
+  issue #11 as its own rationale — that issue doesn't need updating, it documented why the
+  self-test existed, and the self-test's job is now done differently: `LayerBoundaryTests` is the
+  ongoing check, matching how `MyMoney.Data` already relies on it with zero MSBuild-level machinery).
+
+After removal, `MyMoney.Business.csproj` needs no WPF-specific `ItemGroup`s or `Target`s at all —
+structurally identical to `MyMoney.Data.csproj` in this respect.
+
+## Characterization tests for `MathHelpers`
+
+No existing test coverage exists anywhere for `MathHelpers.Covariance`/`LinearRegression`/
+`DistancesToLine`, despite `Payments.cs` depending on `LinearRegression` for real bill/loan
+amortization outlier detection. Before changing the type these methods operate on, write
+characterization tests proving today's numeric behavior, so the migration can be verified as
+behavior-preserving rather than merely "still compiles":
+
+1. Write tests for `LinearRegression(IEnumerable<double>, out double, out double)` (the overload
+   `Payments.cs` actually calls) against the **current**, unmigrated code: a perfectly linear input
+   (e.g. `[2, 4, 6, 8, 10]`, expecting `a` and `b` matching `y = a + b*x` for that sequence) and a
+   noisy/non-trivial input, with concrete expected numeric values computed independently (not just
+   "whatever the code currently outputs" — that would validate nothing).
+2. Write a test for `Covariance` and the `Point`-based `LinearRegression` overload directly, with a
+   small hand-computed `(X, Y)` dataset.
+3. Run these tests against the current code. They must pass — this proves they capture real, correct
+   behavior, not an assumption about what the code does.
+4. Migrate the type per the design above.
+5. Mechanically update the same tests' input construction from `new Point(x, y)` to `(x, y)` (the
+   expected output values do not change — that is the point of the test).
+6. Re-run. Identical results confirm the migration changed no observable behavior.
+7. Add one minimal test for `NativeMethods.GetMousePosition()`'s new tuple-returning signature —
+   this method reads the real OS mouse position, so a test can only sensibly assert it returns
+   without throwing and produces a well-formed `(double, double)`, not exact coordinates.
+
 ## Test changes
 
 `Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs` (PR #48) must be updated in the **same
@@ -517,9 +645,11 @@ for an unaddressed reason (migration panelist's finding):
 
 ## `LayerBoundaryTests` (`Source/WPF/UnitTests/LayerBoundaryTests.cs`)
 
-Once the rewrite is complete, tighten `MyMoneyBusiness_HasNoUiRenderingAssemblyReference` (or add a
-new test) to check against `AllWpfAssemblyNames` (all three: `PresentationFramework`,
-`PresentationCore`, `WindowsBase`) instead of just `UiRenderingAssemblyNames` — matching
+Once the rewrite **and** the `Point`/`FrameworkReference` migration above are both complete — this
+test genuinely cannot pass until both are done, since either one alone leaves `WindowsBase`
+referenced — tighten `MyMoneyBusiness_HasNoUiRenderingAssemblyReference` (or add a new test) to check
+against `AllWpfAssemblyNames` (all three: `PresentationFramework`, `PresentationCore`,
+`WindowsBase`) instead of just `UiRenderingAssemblyNames` — matching
 `MyMoneyData_HasNoWpfAssemblyReference`'s existing pattern exactly. This is the concrete, automated
 acceptance criterion proving issue #7's goal achieved; update the class-level doc comment
 accordingly (it currently documents the WindowsBase allowance as intentional).
@@ -529,7 +659,8 @@ accordingly (it currently documents the WindowsBase allowance as intentional).
 - `dotnet build Source/WPF/MyMoney.sln` — clean.
 - `dotnet test Source/WPF/UnitTests/UnitTests.csproj` — full pass, including the tightened
   `LayerBoundaryTests` (this is the test that would fail if any WPF-only type leaked back into
-  `MyMoney.Business`) and the rewritten `CrossThreadEventMarshalingTests`.
+  `MyMoney.Business`), the rewritten `CrossThreadEventMarshalingTests`, and the new `MathHelpers`
+  characterization tests.
 - Full-solution regression matching this session's established baseline.
 - **Manual interactive smoke pass** through the main app (`MyMoney.exe`), specifically exercising
   every migrated view/dialog (Accounts, Transactions, Securities, Currencies, Aliases, Categories,
