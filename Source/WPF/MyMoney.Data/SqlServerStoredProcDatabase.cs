@@ -1700,7 +1700,21 @@ namespace Walkabout.Data
                         {
                             long storedVersion = reader.GetInt64(reader.GetOrdinal("StoredVersion"));
                             long callerVersion = reader.GetInt64(reader.GetOrdinal("CallerVersion"));
-                            rootsById.TryGetValue(id, out PersistentObject conflictRoot);
+                            if (!rootsById.TryGetValue(id, out PersistentObject conflictRoot))
+                            {
+                                // ConcurrencyConflictException's constructor calls
+                                // root.GetType() unconditionally, so a null root would surface as
+                                // a raw NullReferenceException instead of the intended, well-typed
+                                // exception. rootsById is supposed to contain every id that could
+                                // come back from the proc's result set (it's built from the same
+                                // batch that was sent), so a miss here means the caller broke that
+                                // invariant - fail fast with a clear diagnostic naming the proc and
+                                // the id, rather than let it degrade into an NRE.
+                                throw new InvalidOperationException(string.Format(
+                                    "{0} reported a CONFLICT for Id {1}, but no matching root was found in rootsById. " +
+                                    "The caller must populate rootsById with every root in the batch before calling ExecuteSaveBatchProc.",
+                                    procName, id));
+                            }
                             throw new ConcurrencyConflictException(conflictRoot, storedVersion, callerVersion);
                         }
                         long newVersion = reader.GetInt64(reader.GetOrdinal("NewVersion"));
