@@ -99,7 +99,7 @@ namespace Walkabout
 
         public MainWindow()
         {
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
         }
 
         public MainWindow(Settings settings)
@@ -108,7 +108,7 @@ namespace Walkabout
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.MainWindowInitialize))
             {
 #endif
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
             this.settings = settings;
             this.settings.PropertyChanged += this.OnSettingsChanged;
 
@@ -124,7 +124,7 @@ namespace Walkabout
                 settings.StockServiceSettings = new List<OnlineServiceSettings>();
             }
 
-            Walkabout.Utilities.UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            Walkabout.Utilities.UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
             this.mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
             this.OnThemeChanged(settings.Theme);
             this.ParseCommandLine();

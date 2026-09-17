@@ -22,7 +22,7 @@ namespace Walkabout.Tests
 
         public MainWindow()
         {
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
 
             InitializeComponent();
         }

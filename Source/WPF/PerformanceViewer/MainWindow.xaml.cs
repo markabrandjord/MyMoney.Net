@@ -38,7 +38,7 @@ namespace PerformanceViewer
 
         public MainWindow()
         {
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
         }
 
         private void BtnClear_Click(object sender, RoutedEventArgs e)

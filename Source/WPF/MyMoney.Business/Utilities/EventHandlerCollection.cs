@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Windows;
 
 namespace Walkabout.Utilities
 {
@@ -42,10 +41,24 @@ namespace Walkabout.Utilities
         public int ListenerCount => this.list.Count;
 
         /// <summary>
-        /// The owner of the event uses this method to raise the event to the registered event handlers.        
+        /// The owner of the event uses this method to raise the event to the registered event handlers.
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="args"></param>
+        // This collection has no concept of UI threads or marshaling - every handler is invoked
+        // synchronously, directly, on whichever thread raises the event. A listener that needs
+        // UI-thread delivery must opt in explicitly via UiThreadHandler/UiThreadPropertyChangedHandler
+        // (see Utilities/UiThreadHandler.cs) at its own subscription site; this class deliberately
+        // does not - and must not - try to detect that need itself (see
+        // docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md for why an
+        // automatic per-listener check was removed from here).
+        //
+        // If bugs recur from callers forgetting to wrap a UI-bound subscription in one of those
+        // wrappers, or from unsubscribing with a different delegate than was subscribed, consider a
+        // Roslyn analyzer over a runtime check here - both mistakes are structural and syntactic
+        // (visible in the subscription code itself), which is exactly what an analyzer is
+        // well-suited to catch at compile time instead of at whatever point in the future the
+        // mistake happens to surface at runtime. Deferred for now - see issue #49.
         public void RaiseEvent(object sender, Q args)
         {
             object[] array = new object[] { sender, args };
@@ -53,14 +66,7 @@ namespace Walkabout.Utilities
             {
                 try
                 {
-                    if (d.Target is DependencyObject)
-                    {
-                        UiDispatcher.BeginInvoke(d, array);
-                    }
-                    else
-                    {
-                        this.Invoke(d, array);
-                    }
+                    this.Invoke(d, array);
                 }
                 catch (System.Reflection.TargetInvocationException e)
                 {

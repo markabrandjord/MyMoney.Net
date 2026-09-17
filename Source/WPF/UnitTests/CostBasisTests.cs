@@ -13,7 +13,7 @@ namespace Walkabout.Tests
         [Test]
         public void SimpleCostBasis()
         {
-            UiDispatcher.CurrentDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
             MyMoney m = new MyMoney();
             Security s = m.Securities.NewSecurity();
             s.Name = "MSFT";
@@ -84,7 +84,7 @@ namespace Walkabout.Tests
         [Test]
         public void CostBasisAcrossTransfers()
         {
-            UiDispatcher.CurrentDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
             MyMoney m = SetupSecurityTransactions();
             var a = m.Accounts.FindAccount("Ameritrade");
             var a2 = m.Accounts.FindAccount("Fidelity");
