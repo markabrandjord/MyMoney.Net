@@ -1632,6 +1632,7 @@ namespace Walkabout.Data
                 return;
             }
 
+            List<Type> typeOrder = new List<Type>();
             Dictionary<Type, List<PersistentObject>> groupedByType = new Dictionary<Type, List<PersistentObject>>();
             foreach (PersistentObject root in list)
             {
@@ -1645,6 +1646,7 @@ namespace Walkabout.Data
                 {
                     group = new List<PersistentObject>();
                     groupedByType[type] = group;
+                    typeOrder.Add(type);
                 }
                 group.Add(root);
             }
@@ -1660,9 +1662,9 @@ namespace Walkabout.Data
                     // Common case: one entity type, no ambient transaction needed - the proc's own
                     // internal BEGIN TRAN/COMMIT/ROLLBACK is already a complete, standalone
                     // transaction.
-                    foreach (var group in groupedByType)
+                    foreach (Type type in typeOrder)
                     {
-                        this.DispatchSaveBatchForType(group.Key, group.Value, connection, null, postCommitActions);
+                        this.DispatchSaveBatchForType(type, groupedByType[type], connection, null, postCommitActions);
                     }
                     foreach (Action action in postCommitActions)
                     {
@@ -1675,9 +1677,9 @@ namespace Walkabout.Data
                 {
                     try
                     {
-                        foreach (var group in groupedByType)
+                        foreach (Type type in typeOrder)
                         {
-                            this.DispatchSaveBatchForType(group.Key, group.Value, connection, ambientTransaction, postCommitActions);
+                            this.DispatchSaveBatchForType(type, groupedByType[type], connection, ambientTransaction, postCommitActions);
                         }
                         ambientTransaction.Commit();
                     }
