@@ -91,11 +91,23 @@ namespace Walkabout.UITests
 
         private static void OpenFileViaFileMenu(Application app, Window mainWindow, string filePath)
         {
-            AutomationElement fileMenu = mainWindow.FindFirstDescendant(cf => cf.ByName("File"));
+            // FindFirstDescendant right after Expand() races WPF's popup layout/render pass:
+            // Wait.UntilInputIsProcessed() only pumps the input queue, it does not wait for the
+            // menu's automation tree to actually populate - this was the root cause of issue #26's
+            // intermittent NullReferenceException here (openItem null because the dropdown hadn't
+            // rendered yet). Retry.WhileNull matches every other "wait for async UI change" lookup
+            // already used elsewhere in this file (payeeRow, openDialog, the window-title check).
+            AutomationElement fileMenu = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByName("File")),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(fileMenu, Is.Not.Null, "File menu not found.");
             fileMenu.Patterns.ExpandCollapse.Pattern.Expand();
             Wait.UntilInputIsProcessed();
 
-            AutomationElement openItem = mainWindow.FindFirstDescendant(cf => cf.ByName("Open..."));
+            AutomationElement openItem = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByName("Open...")),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(openItem, Is.Not.Null, "'Open...' menu item not found after expanding the File menu.");
             openItem.Patterns.Invoke.Pattern.Invoke();
 
             // The dialog is a separate top-level window belonging to the same
@@ -121,11 +133,15 @@ namespace Walkabout.UITests
             // (AutomationId "CreateDatabaseDialog") with a path text box
             // (AutomationId "TextBoxFile") and an "Open" button
             // (AutomationId "ButtonCreate", Name "Open").
-            AutomationElement fileNameBox = openDialog.FindFirstDescendant(cf => cf.ByAutomationId("TextBoxFile"));
+            AutomationElement fileNameBox = Retry.WhileNull(
+                () => openDialog.FindFirstDescendant(cf => cf.ByAutomationId("TextBoxFile")),
+                TimeSpan.FromSeconds(5)).Result;
             Assert.That(fileNameBox, Is.Not.Null, "File name box not found in Open dialog.");
             fileNameBox.Patterns.Value.Pattern.SetValue(filePath);
 
-            AutomationElement openButton = openDialog.FindFirstDescendant(cf => cf.ByAutomationId("ButtonCreate"));
+            AutomationElement openButton = Retry.WhileNull(
+                () => openDialog.FindFirstDescendant(cf => cf.ByAutomationId("ButtonCreate")),
+                TimeSpan.FromSeconds(5)).Result;
             Assert.That(openButton, Is.Not.Null, "Open button not found in Open dialog.");
             openButton.Patterns.Invoke.Pattern.Invoke();
         }
