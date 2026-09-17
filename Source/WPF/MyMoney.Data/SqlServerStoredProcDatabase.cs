@@ -76,6 +76,7 @@ namespace Walkabout.Data
                         {
                             i.UserKeyExpireDate = reader.GetDateTime(20);
                         }
+                        i.RowVersion = reader.GetInt64(21);
                         i.OnUpdated();
                     }
                     onlineAccounts.EndUpdate();
@@ -1646,6 +1647,10 @@ namespace Walkabout.Data
                 {
                     this.SaveCurrencyBatch(list.ConvertAll(r => (Currency)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(OnlineAccount))
+                {
+                    this.SaveOnlineAccountBatch(list.ConvertAll(r => (OnlineAccount)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -1885,6 +1890,102 @@ namespace Walkabout.Data
                 {
                     c.OnUpdated();
                     c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+
+        private static DataTable NewOnlineAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Institution", typeof(string));
+            table.Columns.Add("OFX", typeof(string));
+            table.Columns.Add("FID", typeof(string));
+            table.Columns.Add("UserId", typeof(string));
+            table.Columns.Add("Password", typeof(string));
+            table.Columns.Add("BankId", typeof(string));
+            table.Columns.Add("BranchId", typeof(string));
+            table.Columns.Add("BrokerId", typeof(string));
+            table.Columns.Add("OfxVersion", typeof(string));
+            table.Columns.Add("LogoUrl", typeof(string));
+            table.Columns.Add("AppId", typeof(string));
+            table.Columns.Add("AppVersion", typeof(string));
+            table.Columns.Add("ClientUid", typeof(string));
+            table.Columns.Add("UserCred1", typeof(string));
+            table.Columns.Add("UserCred2", typeof(string));
+            table.Columns.Add("AuthToken", typeof(string));
+            table.Columns.Add("AccessKey", typeof(string));
+            table.Columns.Add("UserKey", typeof(string));
+            table.Columns.Add("UserKeyExpireDate", typeof(DateTime));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveOnlineAccountBatch(List<OnlineAccount> accounts, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewOnlineAccountRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, OnlineAccount> byId = new Dictionary<long, OnlineAccount>();
+            List<OnlineAccount> deletedInThisBatch = new List<OnlineAccount>();
+
+            foreach (OnlineAccount i in accounts)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object expireDate = SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add("I", i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add("U", i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add("D", i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.OnlineAccounts_SaveBatch",
+                new[] { ("@Rows", "dbo.OnlineAccountSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    OnlineAccount i = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (OnlineAccount i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
                 });
             }
         }
