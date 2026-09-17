@@ -362,6 +362,92 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.OnlineAccounts.FindOnlineAccount("Chase"), Is.Null);
         }
 
+        private static MyMoney BuildOneAccountMoney(out Account account)
+        {
+            MyMoney money = new MyMoney();
+            account = money.Accounts.AddAccount("Checking");
+            account.OpeningBalance = 100m;
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewAccount_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneAccountMoney(out Account account);
+
+            this.Database.SaveOne(account);
+
+            Assert.That(account.RowVersion, Is.EqualTo(1));
+            Assert.That(account.IsInserted, Is.False);
+            Assert.That(account.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account found = reloaded.Accounts.FindAccount("Checking");
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateAccountAfterReload_IncrementsRowVersion()
+        {
+            BuildOneAccountMoney(out Account account);
+            this.Database.SaveOne(account);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account found = reloaded.Accounts.FindAccount("Checking");
+            found.Description = "Updated";
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Account foundAgain = reloadedAgain.Accounts.FindAccount("Checking");
+            Assert.That(foundAgain.Description, Is.EqualTo("Updated"));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleAccountRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneAccountMoney(out Account account);
+            this.Database.SaveOne(account);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Account accountA = readerA.Accounts.FindAccount("Checking");
+            accountA.Description = "From A";
+            this.Database.SaveOne(accountA);
+
+            Account accountB = readerB.Accounts.FindAccount("Checking");
+            accountB.Description = "From B";
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(accountB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Accounts.FindAccount("Checking").Description, Is.EqualTo("From A"));
+        }
+
+        [Test]
+        public void SaveOne_DeleteAccount_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneAccountMoney(out Account account);
+            this.Database.SaveOne(account);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account toDelete = reloaded.Accounts.FindAccount("Checking");
+            reloaded.Accounts.RemoveAccount(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Accounts.FindAccount("Checking"), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Accounts.FindAccount("Checking"), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {

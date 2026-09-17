@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1041,6 +1041,10 @@ namespace Walkabout.Data
                         else if (root is OnlineAccount onlineAccount)
                         {
                             this.SaveOneOnlineAccount(onlineAccount, transaction, postCommitActions);
+                        }
+                        else if (root is Account account)
+                        {
+                            this.SaveOneAccount(account, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1285,6 +1289,86 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Account row - same shape as SaveOneCategory. SQL mirrors UpdateAccounts'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneAccount(Account a, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = a.RowVersion;
+
+            if (a.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Accounts (Id,AccountId,OfxAccountId,Name,Type,Description,OnlineAccount,OpeningBalance,LastSync,LastBalance,SyncGuid,Flags,Currency,WebSite,ReconcileWarning,CategoryIdForPrincipal,CategoryIdForInterest) " +
+                    "VALUES (@Id,@AccountId,@OfxAccountId,@Name,@Type,@Description,@OnlineAccount,@OpeningBalance,@LastSync,@LastBalance,@SyncGuid,@Flags,@Currency,@WebSite,@ReconcileWarning,@CategoryIdForPrincipal,@CategoryIdForInterest);",
+                    ("@Id", a.Id), ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                    ("@Type", (int)a.Type), ("@Description", a.Description),
+                    ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
+                    ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                    ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                    ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                    ("@ReconcileWarning", a.ReconcileWarning),
+                    ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                    ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id));
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Accounts SET AccountId=@AccountId,OfxAccountId=@OfxAccountId,Name=@Name,Type=@Type,Description=@Description," +
+                    "OnlineAccount=@OnlineAccount,OpeningBalance=@OpeningBalance,LastSync=@LastSync,LastBalance=@LastBalance,SyncGuid=@SyncGuid," +
+                    "Flags=@Flags,Currency=@Currency,WebSite=@WebSite,ReconcileWarning=@ReconcileWarning,CategoryIdForPrincipal=@CategoryIdForPrincipal," +
+                    "CategoryIdForInterest=@CategoryIdForInterest," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                    ("@Type", (int)a.Type), ("@Description", a.Description),
+                    ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
+                    ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                    ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                    ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                    ("@ReconcileWarning", a.ReconcileWarning),
+                    ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                    ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id),
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Accounts", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = callerRowVersion + 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Accounts WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Accounts", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
@@ -1441,6 +1525,70 @@ namespace Walkabout.Data
             }
             onlineAccounts.EndUpdate();
             onlineAccounts.FireChangeEvent(this, this, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadAccounts to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadAccounts(Accounts accts, MyMoney money)
+        {
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[AccountId],[Name],[Type],[Description],[OnlineAccount],[OpeningBalance],[LastSync],[LastBalance],[SyncGuid],[Flags],[Currency],[WebSite],[ReconcileWarning],[CategoryIdForPrincipal],[CategoryIdForInterest],[OfxAccountId],[" + this.VersionColumnName + "] FROM Accounts");
+            accts.BeginUpdate(false);
+            accts.Clear();
+            while (reader.Read())
+            {
+                this.IncrementProgress("Accounts");
+                int id = reader.GetInt32(0);
+                Account a = accts.AddAccount(id);
+                a.AccountId = ReadDbString(reader, 1);
+                a.Name = ReadDbString(reader, 2);
+                a.Type = (AccountType)reader.GetInt32(3);
+                a.Description = ReadDbString(reader, 4);
+                a.OnlineAccount = reader.IsDBNull(5) ? null : money.OnlineAccounts.FindOnlineAccountAt(reader.GetInt32(5));
+                a.OpeningBalance = reader.GetDecimal(6);
+
+                if (!reader.IsDBNull(7))
+                {
+                    a.LastSync = reader.SafeGetDateTime(7);
+                }
+
+                if (!reader.IsDBNull(8))
+                {
+                    a.LastBalance = reader.SafeGetDateTime(8);
+                }
+
+                if (!reader.IsDBNull(9))
+                {
+                    try
+                    {
+                        a.SyncGuid = new SqlGuid(reader.GetGuid(9));
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("### invalid GUID Error: {0}", ex.Message);
+                    }
+                }
+
+                if (!reader.IsDBNull(10))
+                {
+                    a.Flags = (AccountFlags)reader.GetInt32(10);
+                }
+
+                a.Currency = ReadDbString(reader, 11);
+                a.WebSite = ReadDbString(reader, 12);
+                a.ReconcileWarning = ReadInt32(reader, 13);
+
+                a.CategoryForPrincipal = reader.IsDBNull(14) ? null : money.Categories.FindCategoryById(reader.GetInt32(14));
+                a.CategoryForInterest = reader.IsDBNull(15) ? null : money.Categories.FindCategoryById(reader.GetInt32(15));
+
+                a.OfxAccountId = ReadDbString(reader, 16);
+                a.RowVersion = reader.GetInt64(17);
+                a.OnUpdated();
+            }
+            accts.EndUpdate();
+            accts.FireChangeEvent(accts, accts, null, ChangeType.Reloaded);
             reader.Close();
         }
 
