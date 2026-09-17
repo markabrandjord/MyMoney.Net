@@ -1632,6 +1632,13 @@ namespace Walkabout.Data
                 return;
             }
 
+            // Roots are grouped by type (one _SaveBatch proc call per type), so typeOrder only
+            // preserves the caller's ordering ACROSS type-groups, not the original interleaving of
+            // individual roots of different types. E.g. [Category A, Account X, Category B] is
+            // processed as one Category-group call (A, B) then one Account-group call (X), not in
+            // the caller's literal A, X, B order. This is an inherent consequence of the
+            // one-proc-call-per-type design, not a bug - roots of the same type still save in
+            // their original relative order within their group.
             List<Type> typeOrder = new List<Type>();
             Dictionary<Type, List<PersistentObject>> groupedByType = new Dictionary<Type, List<PersistentObject>>();
             foreach (PersistentObject root in list)
@@ -1712,6 +1719,11 @@ namespace Walkabout.Data
             }
         }
 
+        // Exact type == matching (not `is`), unlike some other patterns in this codebase - so a
+        // future subclass of any of these 11 aggregate root types would fall through to
+        // DispatchSaveBatchForType's inherited NotImplementedException stub here even if it works
+        // fine on SqliteDatabase (which matches with `is`). A known, narrow limitation: not
+        // something to fix now, just something for whoever adds a new entity type later to know.
         private static bool IsSupportedSaveBatchType(Type type)
         {
             return type == typeof(Category) || type == typeof(Currency) || type == typeof(OnlineAccount)
@@ -2719,6 +2731,11 @@ namespace Walkabout.Data
 
             foreach (RentUnit u in deletedUnits)
             {
+                // No OnUpdated() call here - matches MockDatabase.MarkOwnedChildrenClean's
+                // established precedent for deleted owned children (see the deleted-Investment
+                // case in SaveTransactionBatch), and is verified inert since RemoveChild(u, true)
+                // removes the object from its container regardless. (SqliteDatabase diverges here
+                // and does call OnUpdated() for deleted children - a known, accepted divergence.)
                 postCommitActions.Add(() => u.Parent.RemoveChild(u, true));
             }
         }
@@ -2799,6 +2816,15 @@ namespace Walkabout.Data
 
             foreach (Transaction t in transactions)
             {
+                if (t.Account == null)
+                {
+                    // Matches UpdateTransactions' existing guard: a dangling transaction with no
+                    // account isn't written - skip the whole transaction (and its owned
+                    // Splits/Investment) rather than sending Account as DBNull, which would
+                    // violate dbo.Transactions.Account's NOT NULL constraint.
+                    continue;
+                }
+
                 long id = t.Id;
                 rootsById[id] = t;
                 byId[id] = t;
@@ -2941,6 +2967,11 @@ namespace Walkabout.Data
 
             foreach (Split s in deletedSplits)
             {
+                // No OnUpdated() call here - matches MockDatabase.MarkOwnedChildrenClean's
+                // established precedent for deleted owned children (see the deleted-Investment
+                // case above), and is verified inert since RemoveChild(s, true) removes the object
+                // from its container regardless. (SqliteDatabase diverges here and does call
+                // OnUpdated() for deleted children - a known, accepted divergence.)
                 postCommitActions.Add(() => s.Parent.RemoveChild(s, true));
             }
 

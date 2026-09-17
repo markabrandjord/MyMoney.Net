@@ -11,15 +11,68 @@
 USE MyMoney;
 GO
 
-ALTER TABLE dbo.Categories ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Currencies ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.OnlineAccounts ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Accounts ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Payees ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Aliases ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Securities ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.StockSplits ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.LoanPayments ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.RentBuildings ADD Version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE dbo.Transactions ADD Version BIGINT NOT NULL DEFAULT 1;
+IF COL_LENGTH('dbo.Categories', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Categories ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Currencies', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Currencies ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.OnlineAccounts', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.OnlineAccounts ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Accounts', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Accounts ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Payees', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Payees ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Aliases', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Aliases ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Securities', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Securities ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.StockSplits', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.StockSplits ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.LoanPayments', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.LoanPayments ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.RentBuildings', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.RentBuildings ADD Version BIGINT NOT NULL DEFAULT 1;
+END
+GO
+
+IF COL_LENGTH('dbo.Transactions', 'Version') IS NULL
+BEGIN
+    ALTER TABLE dbo.Transactions ADD Version BIGINT NOT NULL DEFAULT 1;
+END
 GO
