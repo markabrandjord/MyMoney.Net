@@ -16,7 +16,7 @@ namespace Walkabout.Dialogs
     {
         #region PROPERTIES
 
-        private readonly EventHandler<ChangeEventArgs> handler;
+        private readonly UiThreadHandler handler;
         private readonly DelayedActions delayedActions = new DelayedActions();
 
         private MyMoney money;
@@ -28,13 +28,13 @@ namespace Walkabout.Dialogs
             {
                 if (this.money != null)
                 {
-                    this.money.Payees.Changed -= this.handler;
+                    this.money.Payees.Changed -= this.handler.Handler;
                 }
                 this.money = value;
                 if (this.money != null)
                 {
-                    this.money.Payees.Changed -= this.handler;
-                    this.money.Payees.Changed += this.handler;
+                    this.money.Payees.Changed -= this.handler.Handler;
+                    this.money.Payees.Changed += this.handler.Handler;
                 }
                 this.LoadPayees();
             }
@@ -123,7 +123,7 @@ namespace Walkabout.Dialogs
         /// </summary>
         public RenamePayeeDialog()
         {
-            this.handler = new EventHandler<ChangeEventArgs>(this.OnPayees_Changed);
+            this.handler = new UiThreadHandler(this.OnPayees_Changed);
 
             this.InitializeComponent();
 
@@ -200,7 +200,7 @@ namespace Walkabout.Dialogs
         {
             if (this.money != null)
             {
-                this.money.Payees.Changed -= this.handler;
+                this.money.Payees.Changed -= this.handler.Handler;
                 this.money = null;
             }
 
