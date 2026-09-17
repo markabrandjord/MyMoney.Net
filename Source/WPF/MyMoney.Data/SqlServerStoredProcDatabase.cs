@@ -875,6 +875,7 @@ namespace Walkabout.Data
                             s.LastRatio = reader.GetDecimal(4);
                         }
                         s.CultureCode = reader.IsDBNull(5) ? "en-US" : reader.GetString(5);
+                        s.RowVersion = reader.GetInt64(6);
                         s.OnUpdated();
                     }
                     currencies.EndUpdate();
@@ -1641,6 +1642,10 @@ namespace Walkabout.Data
                 {
                     this.SaveCategoryBatch(list.ConvertAll(r => (Category)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(Currency))
+                {
+                    this.SaveCurrencyBatch(list.ConvertAll(r => (Currency)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -1804,6 +1809,77 @@ namespace Walkabout.Data
                 });
 
             foreach (Category c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+
+        private static DataTable NewCurrencyRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Symbol", typeof(string));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Ratio", typeof(decimal));
+            table.Columns.Add("LastRatio", typeof(decimal));
+            table.Columns.Add("CultureCode", typeof(string));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveCurrencyBatch(List<Currency> currencies, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewCurrencyRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Currency> byId = new Dictionary<long, Currency>();
+            List<Currency> deletedInThisBatch = new List<Currency>();
+
+            foreach (Currency c in currencies)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add("I", c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add("U", c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add("D", c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Currencies_SaveBatch",
+                new[] { ("@Rows", "dbo.CurrencySaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Currency c = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Currency c in deletedInThisBatch)
             {
                 postCommitActions.Add(() =>
                 {
