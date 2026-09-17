@@ -1005,7 +1005,7 @@ namespace Walkabout.Data
             securities.RemoveDeleted();
         }
 
-        public void ReadStockSplits(StockSplits splits, MyMoney money)
+        public new void ReadStockSplits(StockSplits splits, MyMoney money)
         {
             splits.Clear();
             using (var connection = new SqlConnection(this.GetConnectionString(true)))

@@ -8,6 +8,7 @@ using System.Data.SqlTypes;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
@@ -755,6 +756,29 @@ namespace Walkabout.Data
 
                         foreach (ColumnMapping c in actual.Columns)
                         {
+                            if (c.ColumnName == this.VersionColumnName)
+                            {
+                                // Version/RowVersion is deliberately excluded from mapping.Columns
+                                // (it's engine-injected, not reflected off the domain model - see
+                                // the column-drop guard below), so mapping.FindColumn(c.ColumnName)
+                                // always returns null for it here and it would otherwise fall into
+                                // the "dropping this column" branch below, discarding every row's
+                                // real accumulated version history - the new table's freshly
+                                // GetCreateTableScript-generated Version column would then default
+                                // every row back to 1, letting a stale in-memory RowVersion win a
+                                // write it should have conflicted on. Carry the real column across
+                                // explicitly instead.
+                                if (!first)
+                                {
+                                    sb.Append(", ");
+                                    select.Append(", ");
+                                }
+                                sb.Append("[" + c.ColumnName + "]");
+                                select.Append("[" + c.ColumnName + "]");
+                                first = false;
+                                continue;
+                            }
+
                             ColumnMapping ac = mapping.FindColumn(c.ColumnName);
                             if (ac == null)
                             {
@@ -976,12 +1000,13 @@ namespace Walkabout.Data
                 return;
             }
 
-            // Only Category has a real implementation in this phase. If the batch contains
+            // Only these types have a real implementation so far (entity-extension follow-up to
+            // Phase 2b, adding one flat-row aggregate root at a time). If the batch contains
             // anything else, delegate the WHOLE call to the inherited Phase 2a stub rather than
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security || root is StockSplit || root is LoanPayment))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1005,7 +1030,42 @@ namespace Walkabout.Data
                 {
                     foreach (PersistentObject root in list)
                     {
-                        this.SaveOneCategory((Category)root, transaction, postCommitActions);
+                        if (root is Category category)
+                        {
+                            this.SaveOneCategory(category, transaction, postCommitActions);
+                        }
+                        else if (root is Currency currency)
+                        {
+                            this.SaveOneCurrency(currency, transaction, postCommitActions);
+                        }
+                        else if (root is OnlineAccount onlineAccount)
+                        {
+                            this.SaveOneOnlineAccount(onlineAccount, transaction, postCommitActions);
+                        }
+                        else if (root is Account account)
+                        {
+                            this.SaveOneAccount(account, transaction, postCommitActions);
+                        }
+                        else if (root is Payee payee)
+                        {
+                            this.SaveOnePayee(payee, transaction, postCommitActions);
+                        }
+                        else if (root is Alias alias)
+                        {
+                            this.SaveOneAlias(alias, transaction, postCommitActions);
+                        }
+                        else if (root is Security security)
+                        {
+                            this.SaveOneSecurity(security, transaction, postCommitActions);
+                        }
+                        else if (root is StockSplit stockSplit)
+                        {
+                            this.SaveOneStockSplit(stockSplit, transaction, postCommitActions);
+                        }
+                        else if (root is LoanPayment loanPayment)
+                        {
+                            this.SaveOneLoanPayment(loanPayment, transaction, postCommitActions);
+                        }
                     }
                     transaction.Commit();
                 }
@@ -1111,12 +1171,544 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Currency row - same shape as SaveOneCategory (see its comment for why the
+        /// in-memory side effect is deferred into postCommitActions). SQL mirrors UpdateCurrencies'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneCurrency(Currency c, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = c.RowVersion;
+
+            if (c.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Currencies (Id,Symbol,Name,Ratio,LastRatio,CultureCode) VALUES (@Id,@Symbol,@Name,@Ratio,@LastRatio,@CultureCode);",
+                    ("@Id", c.Id), ("@Symbol", c.Symbol), ("@Name", c.Name), ("@Ratio", c.Ratio), ("@LastRatio", c.LastRatio),
+                    ("@CultureCode", c.CultureCode));
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Currencies SET Symbol=@Symbol,Name=@Name,Ratio=@Ratio,LastRatio=@LastRatio,CultureCode=@CultureCode," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Symbol", c.Symbol), ("@Name", c.Name), ("@Ratio", c.Ratio), ("@LastRatio", c.LastRatio),
+                    ("@CultureCode", c.CultureCode), ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Currencies", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.RowVersion = callerRowVersion + 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Currencies WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", c.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, "Currencies", c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one OnlineAccount row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateOnlineAccounts' existing parameterized branch (SqlDatabase.cs) exactly, plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneOnlineAccount(OnlineAccount i, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = i.RowVersion;
+
+            if (i.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO OnlineAccounts (Id,Name,Institution,OFX,FID,UserId,Password,BankId,BranchId,BrokerId,OfxVersion,LogoUrl,AppId,AppVersion,ClientUid,UserCred1,UserCred2,AuthToken,AccessKey,UserKey,UserKeyExpireDate) " +
+                    "VALUES (@Id,@Name,@Institution,@OFX,@FID,@UserId,@Password,@BankId,@BranchId,@BrokerId,@OfxVersion,@LogoUrl,@AppId,@AppVersion,@ClientUid,@UserCred1,@UserCred2,@AuthToken,@AccessKey,@UserKey,@UserKeyExpireDate);",
+                    ("@Id", i.Id), ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                    ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                    ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                    ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                    ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                    ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)));
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE OnlineAccounts SET Name=@Name,Institution=@Institution,OFX=@OFX,FID=@FID,UserId=@UserId,Password=@Password," +
+                    "BankId=@BankId,BranchId=@BranchId,BrokerId=@BrokerId,OfxVersion=@OfxVersion,LogoUrl=@LogoUrl,AppId=@AppId,AppVersion=@AppVersion," +
+                    "ClientUid=@ClientUid,UserCred1=@UserCred1,UserCred2=@UserCred2,AuthToken=@AuthToken,AccessKey=@AccessKey,UserKey=@UserKey," +
+                    "UserKeyExpireDate=@UserKeyExpireDate," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", i.Name), ("@Institution", i.Institution), ("@OFX", i.Ofx), ("@FID", i.FID),
+                    ("@UserId", i.UserId), ("@Password", i.Password), ("@BankId", i.BankId), ("@BranchId", i.BranchId),
+                    ("@BrokerId", i.BrokerId), ("@OfxVersion", i.OfxVersion), ("@LogoUrl", i.LogoUrl), ("@AppId", i.AppId),
+                    ("@AppVersion", i.AppVersion), ("@ClientUid", i.ClientUid), ("@UserCred1", i.UserCred1),
+                    ("@UserCred2", i.UserCred2), ("@AuthToken", i.AuthToken), ("@AccessKey", i.AccessKey),
+                    ("@UserKey", i.UserKey), ("@UserKeyExpireDate", DBNullableDateTimeParam(i.UserKeyExpireDate)),
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "OnlineAccounts", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = callerRowVersion + 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM OnlineAccounts WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "OnlineAccounts", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one Account row - same shape as SaveOneCategory. SQL mirrors UpdateAccounts'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneAccount(Account a, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = a.RowVersion;
+
+            if (a.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Accounts (Id,AccountId,OfxAccountId,Name,Type,Description,OnlineAccount,OpeningBalance,LastSync,LastBalance,SyncGuid,Flags,Currency,WebSite,ReconcileWarning,CategoryIdForPrincipal,CategoryIdForInterest) " +
+                    "VALUES (@Id,@AccountId,@OfxAccountId,@Name,@Type,@Description,@OnlineAccount,@OpeningBalance,@LastSync,@LastBalance,@SyncGuid,@Flags,@Currency,@WebSite,@ReconcileWarning,@CategoryIdForPrincipal,@CategoryIdForInterest);",
+                    ("@Id", a.Id), ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                    ("@Type", (int)a.Type), ("@Description", a.Description),
+                    ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
+                    ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                    ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                    ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                    ("@ReconcileWarning", a.ReconcileWarning),
+                    ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                    ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id));
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Accounts SET AccountId=@AccountId,OfxAccountId=@OfxAccountId,Name=@Name,Type=@Type,Description=@Description," +
+                    "OnlineAccount=@OnlineAccount,OpeningBalance=@OpeningBalance,LastSync=@LastSync,LastBalance=@LastBalance,SyncGuid=@SyncGuid," +
+                    "Flags=@Flags,Currency=@Currency,WebSite=@WebSite,ReconcileWarning=@ReconcileWarning,CategoryIdForPrincipal=@CategoryIdForPrincipal," +
+                    "CategoryIdForInterest=@CategoryIdForInterest," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@AccountId", a.AccountId), ("@OfxAccountId", a.OfxAccountId), ("@Name", a.Name),
+                    ("@Type", (int)a.Type), ("@Description", a.Description),
+                    ("@OnlineAccount", a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
+                    ("@OpeningBalance", a.OpeningBalance), ("@LastSync", DBDateTimeParam(a.LastSync)),
+                    ("@LastBalance", DBDateTimeParam(a.LastBalance)), ("@SyncGuid", DBGuidParam(a.SyncGuid)),
+                    ("@Flags", (int)a.Flags), ("@Currency", a.Currency), ("@WebSite", a.WebSite),
+                    ("@ReconcileWarning", a.ReconcileWarning),
+                    ("@CategoryIdForPrincipal", a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                    ("@CategoryIdForInterest", a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id),
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Accounts", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = callerRowVersion + 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Accounts WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Accounts", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one Payee row - same shape as SaveOneCategory. SQL mirrors UpdatePayees' existing
+        /// parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOnePayee(Payee p, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = p.RowVersion;
+
+            if (p.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Payees (Id, Name) VALUES (@Id, @Name);",
+                    ("@Id", p.Id), ("@Name", p.Name));
+                postCommitActions.Add(() =>
+                {
+                    p.RowVersion = 1;
+                    p.OnUpdated();
+                });
+                return;
+            }
+
+            if (p.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Payees SET Name=@Name," + this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", p.Name), ("@Id", p.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(p, "Payees", p.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    p.RowVersion = callerRowVersion + 1;
+                    p.OnUpdated();
+                });
+                return;
+            }
+
+            if (p.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Payees WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", p.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(p, "Payees", p.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    p.OnUpdated();
+                    p.Parent.RemoveChild(p, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one Alias row - same shape as SaveOneCategory. SQL mirrors UpdateAliases' existing
+        /// parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneAlias(Alias a, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = a.RowVersion;
+
+            if (a.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Aliases (Id, Pattern, Payee, Flags) VALUES (@Id,@Pattern,@Payee,@Flags);",
+                    ("@Id", a.Id), ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType));
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Aliases SET Pattern=@Pattern,Payee=@Payee,Flags=@Flags," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Pattern", a.Pattern), ("@Payee", a.Payee.Id), ("@Flags", (int)a.AliasType),
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Aliases", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = callerRowVersion + 1;
+                    a.OnUpdated();
+                });
+                return;
+            }
+
+            if (a.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Aliases WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", a.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(a, "Aliases", a.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one Security row - same shape as SaveOneCategory. SQL mirrors UpdateSecurities'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneSecurity(Security s, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = s.RowVersion;
+
+            if (s.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Securities (Id,Name,Symbol,Price,LastPrice,CuspId,SecurityType,Taxable,PriceDate) " +
+                    "VALUES (@Id,@Name,@Symbol,@Price,@LastPrice,@CuspId,@SecurityType,@Taxable,@PriceDate);",
+                    ("@Id", s.Id), ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                    ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                    ("@PriceDate", DBDateTimeParam(s.PriceDate)));
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Securities SET Name=@Name,Symbol=@Symbol,Price=@Price,LastPrice=@LastPrice,CuspId=@CuspId," +
+                    "SecurityType=@SecurityType,Taxable=@Taxable,PriceDate=@PriceDate," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                    ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                    ("@PriceDate", DBDateTimeParam(s.PriceDate)), ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "Securities", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = callerRowVersion + 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Securities WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "Securities", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one StockSplit row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateStockSplits' existing parameterized branch (SqlDatabase.cs) exactly, including its
+        /// "Date != DateTime.MinValue" guard (an incomplete split with no date set is never written
+        /// to the database - it stays pending until the caller finishes filling it in), plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneStockSplit(StockSplit s, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = s.RowVersion;
+
+            if (s.IsInserted && s.Date != DateTime.MinValue)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO StockSplits (Id,Date,Security,Numerator,Denominator) VALUES (@Id,@Date,@Security,@Numerator,@Denominator);",
+                    ("@Id", s.Id), ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                    ("@Numerator", s.Numerator), ("@Denominator", s.Denominator));
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsChanged && s.Date != DateTime.MinValue)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE StockSplits SET Date=@Date,Security=@Security,Numerator=@Numerator,Denominator=@Denominator," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Date", DBDateTimeParam(s.Date)), ("@Security", s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                    ("@Numerator", s.Numerator), ("@Denominator", s.Denominator), ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "StockSplits", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = callerRowVersion + 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM StockSplits WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "StockSplits", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+                return;
+            }
+
+            // No pending change (or an incomplete insert/update with no date yet) - nothing to do.
+        }
+
+        /// <summary>
+        /// Writes one LoanPayment row - same shape as SaveOneCategory. SQL mirrors
+        /// UpdateLoanPayments' existing parameterized branch (SqlDatabase.cs) exactly, plus the
+        /// version check/bump.
+        /// </summary>
+        private void SaveOneLoanPayment(LoanPayment i, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = i.RowVersion;
+
+            if (i.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO LoanPayments (Id,AccountId,Date,Principal,Interest,Memo) VALUES (@Id,@AccountId,@Date,@Principal,@Interest,@Memo);",
+                    ("@Id", i.Id), ("@AccountId", i.AccountId), ("@Date", DBDateTimeParam(i.Date)),
+                    ("@Principal", i.Principal), ("@Interest", i.Interest), ("@Memo", i.Memo));
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE LoanPayments SET Date=@Date,AccountId=@AccountId,Principal=@Principal,Interest=@Interest,Memo=@Memo," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Date", DBDateTimeParam(i.Date)), ("@AccountId", i.AccountId), ("@Principal", i.Principal),
+                    ("@Interest", i.Interest), ("@Memo", i.Memo), ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "LoanPayments", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.RowVersion = callerRowVersion + 1;
+                    i.OnUpdated();
+                });
+                return;
+            }
+
+            if (i.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM LoanPayments WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", i.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(i, "LoanPayments", i.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
         /// longer exists at all (e.g. already deleted by someone else).
         /// </summary>
-        private void ThrowConflict(PersistentObject root, string tableName, int id, SQLiteTransaction transaction, long callerRowVersion)
+        private void ThrowConflict(PersistentObject root, string tableName, long id, SQLiteTransaction transaction, long callerRowVersion)
         {
             object result = this.ExecuteScalarInTransaction(transaction,
                 "SELECT " + this.VersionColumnName + " FROM " + tableName + " WHERE Id=@Id;", ("@Id", id));
@@ -1183,6 +1775,325 @@ namespace Walkabout.Data
             categories.EndUpdate();
             categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
             reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadCurrencies to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadCurrencies(Currencies currencies, MyMoney money)
+        {
+            currencies.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Symbol],[Name],[Ratio],[LastRatio],[CultureCode],[" + this.VersionColumnName + "] FROM Currencies");
+            currencies.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Currencies");
+                int id = reader.GetInt32(0);
+                Currency c = currencies.AddCurrency(id);
+                c.Symbol = ReadDbString(reader, 1);
+                c.Name = ReadDbString(reader, 2);
+                if (!reader.IsDBNull(3))
+                {
+                    c.Ratio = reader.GetDecimal(3);
+                }
+                if (!reader.IsDBNull(4))
+                {
+                    c.LastRatio = reader.GetDecimal(4);
+                }
+                if (reader.IsDBNull(5))
+                {
+                    c.CultureCode = "en-US";
+                }
+                else
+                {
+                    c.CultureCode = ReadDbString(reader, 5);
+                }
+                c.RowVersion = reader.GetInt64(6);
+                c.OnUpdated();
+            }
+            currencies.EndUpdate();
+            currencies.FireChangeEvent(currencies, currencies, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadOnlineAccounts to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadOnlineAccounts(OnlineAccounts onlineAccounts, MyMoney money)
+        {
+            onlineAccounts.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Institution],[OFX],[FID],[UserId],[Password],[BankId],[BranchId],[BrokerId],[OfxVersion],[LogoUrl],[AppId],[AppVersion],[ClientUid],[UserCred1],[UserCred2],[AuthToken],[AccessKey],[UserKey],[UserKeyExpireDate],[" + this.VersionColumnName + "] FROM OnlineAccounts");
+            onlineAccounts.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("OnlineAccounts");
+                int id = reader.GetInt32(0);
+                OnlineAccount i = onlineAccounts.AddOnlineAccount(id);
+                i.Name = ReadDbString(reader, 1);
+                i.Institution = ReadDbString(reader, 2);
+                i.Ofx = ReadDbString(reader, 3);
+                i.FID = ReadDbString(reader, 4);
+                i.UserId = ReadDbString(reader, 5);
+                i.Password = ReadDbString(reader, 6);
+                i.BankId = ReadDbString(reader, 7);
+                i.BranchId = ReadDbString(reader, 8);
+                i.BrokerId = ReadDbString(reader, 9);
+                i.OfxVersion = ReadDbString(reader, 10);
+                i.LogoUrl = ReadDbString(reader, 11);
+                i.AppId = ReadDbString(reader, 12);
+                i.AppVersion = ReadDbString(reader, 13);
+                i.ClientUid = ReadDbString(reader, 14);
+                i.UserCred1 = ReadDbString(reader, 15);
+                i.UserCred2 = ReadDbString(reader, 16);
+                i.AuthToken = ReadDbString(reader, 17);
+                i.AccessKey = ReadDbString(reader, 18);
+                i.UserKey = ReadDbString(reader, 19);
+                if (!reader.IsDBNull(20))
+                {
+                    i.UserKeyExpireDate = reader.SafeGetDateTime(20);
+                }
+                i.RowVersion = reader.GetInt64(21);
+                i.OnUpdated();
+            }
+            onlineAccounts.EndUpdate();
+            onlineAccounts.FireChangeEvent(this, this, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadAccounts to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadAccounts(Accounts accts, MyMoney money)
+        {
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[AccountId],[Name],[Type],[Description],[OnlineAccount],[OpeningBalance],[LastSync],[LastBalance],[SyncGuid],[Flags],[Currency],[WebSite],[ReconcileWarning],[CategoryIdForPrincipal],[CategoryIdForInterest],[OfxAccountId],[" + this.VersionColumnName + "] FROM Accounts");
+            accts.BeginUpdate(false);
+            accts.Clear();
+            while (reader.Read())
+            {
+                this.IncrementProgress("Accounts");
+                int id = reader.GetInt32(0);
+                Account a = accts.AddAccount(id);
+                a.AccountId = ReadDbString(reader, 1);
+                a.Name = ReadDbString(reader, 2);
+                a.Type = (AccountType)reader.GetInt32(3);
+                a.Description = ReadDbString(reader, 4);
+                a.OnlineAccount = reader.IsDBNull(5) ? null : money.OnlineAccounts.FindOnlineAccountAt(reader.GetInt32(5));
+                a.OpeningBalance = reader.GetDecimal(6);
+
+                if (!reader.IsDBNull(7))
+                {
+                    a.LastSync = reader.SafeGetDateTime(7);
+                }
+
+                if (!reader.IsDBNull(8))
+                {
+                    a.LastBalance = reader.SafeGetDateTime(8);
+                }
+
+                if (!reader.IsDBNull(9))
+                {
+                    try
+                    {
+                        a.SyncGuid = new SqlGuid(reader.GetGuid(9));
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("### invalid GUID Error: {0}", ex.Message);
+                    }
+                }
+
+                if (!reader.IsDBNull(10))
+                {
+                    a.Flags = (AccountFlags)reader.GetInt32(10);
+                }
+
+                a.Currency = ReadDbString(reader, 11);
+                a.WebSite = ReadDbString(reader, 12);
+                a.ReconcileWarning = ReadInt32(reader, 13);
+
+                a.CategoryForPrincipal = reader.IsDBNull(14) ? null : money.Categories.FindCategoryById(reader.GetInt32(14));
+                a.CategoryForInterest = reader.IsDBNull(15) ? null : money.Categories.FindCategoryById(reader.GetInt32(15));
+
+                a.OfxAccountId = ReadDbString(reader, 16);
+                a.RowVersion = reader.GetInt64(17);
+                a.OnUpdated();
+            }
+            accts.EndUpdate();
+            accts.FireChangeEvent(accts, accts, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadPayees to also read back the Version column - same rationale
+        /// as ReadCategories' override.
+        /// </summary>
+        public override void ReadPayees(Payees payees, MyMoney money)
+        {
+            payees.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[" + this.VersionColumnName + "] FROM Payees");
+            payees.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Payees");
+                int id = reader.GetInt32(0);
+                Payee p = payees.AddPayee(id);
+                p.Name = ReadDbString(reader, 1);
+                p.RowVersion = reader.GetInt64(2);
+                p.OnUpdated();
+            }
+            payees.EndUpdate();
+            payees.FireChangeEvent(payees, payees, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadAliases to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadAliases(Aliases aliases, MyMoney money)
+        {
+            Payees payees = money.Payees;
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Pattern],[Payee],[Flags],[" + this.VersionColumnName + "] FROM Aliases");
+            aliases.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Aliases");
+                int id = reader.GetInt32(0);
+                Alias a = aliases.AddAlias(id);
+                string pattern = ReadDbString(reader, 1);
+                a.Pattern = pattern;
+                int payeeId = reader.GetInt32(2);
+                Payee p = payees.FindPayeeAt(payeeId);
+                Debug.Assert(p != null);
+                a.Payee = p;
+                try
+                {
+                    a.AliasType = (AliasType)reader.GetInt32(3);
+                }
+                catch
+                {
+                    // don't blow up if bad alias reg-ex got saved to DB.
+                }
+                a.RowVersion = reader.GetInt64(4);
+                a.OnUpdated();
+            }
+            aliases.EndUpdate();
+            aliases.FireChangeEvent(aliases, aliases, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadSecurities to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadSecurities(Securities securities, MyMoney money)
+        {
+            securities.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Symbol],[Price],[LastPrice],[CuspId],[SecurityType],[Taxable],[PriceDate],[" + this.VersionColumnName + "] FROM Securities");
+            securities.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Securities");
+                int id = reader.GetInt32(0);
+                Security s = securities.AddSecurity(id);
+                s.Name = ReadDbString(reader, 1);
+                s.Symbol = ReadDbString(reader, 2);
+                s.Price = reader.GetDecimal(3);
+                if (!reader.IsDBNull(4))
+                {
+                    s.LastPrice = reader.GetDecimal(4);
+                }
+
+                s.CuspId = ReadDbString(reader, 5);
+                if (!reader.IsDBNull(6))
+                {
+                    s.SecurityType = (SecurityType)reader.GetInt32(6);
+                }
+
+                if (!reader.IsDBNull(7))
+                {
+                    s.Taxable = (YesNo)reader.GetByte(7);
+                }
+
+                if (!reader.IsDBNull(8))
+                {
+                    s.PriceDate = reader.SafeGetDateTime(8);
+                }
+
+                s.RowVersion = reader.GetInt64(9);
+                s.OnUpdated();
+            }
+            securities.EndUpdate();
+            securities.FireChangeEvent(securities, securities, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited (now protected virtual - was private) ReadStockSplits to also
+        /// read back the Version column - same rationale as ReadCategories' override.
+        /// </summary>
+        protected override void ReadStockSplits(StockSplits splits, MyMoney money)
+        {
+            splits.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Date],[Security],[Numerator],[Denominator],[" + this.VersionColumnName + "] FROM StockSplits");
+            splits.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("StockSplits");
+
+                long id = reader.GetInt64(0);
+                StockSplit s = splits.AddStockSplit(id);
+                s.Date = reader.SafeGetDateTime(1);
+                s.Security = reader.IsDBNull(2) ? null : money.Securities.FindSecurityAt(reader.GetInt32(2));
+                s.Numerator = reader.GetDecimal(3);
+                s.Denominator = reader.GetDecimal(4);
+                s.RowVersion = reader.GetInt64(5);
+                s.OnUpdated();
+            }
+            splits.EndUpdate();
+            splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadLoanPayments to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadLoanPayments(LoanPayments collection, MyMoney money)
+        {
+            collection.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[AccountId],[Date],[Principal],[Interest],[Memo],[" + this.VersionColumnName + "] FROM LoanPayments");
+            collection.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("LoanPayments");
+                LoanPayment x = new LoanPayment(collection);
+                x.BatchMode = true;
+                x.Id = reader.GetInt32(0);
+                x.AccountId = reader.GetInt32(1);
+                x.Date = reader.SafeGetDateTime(2);
+                x.Principal = reader.GetDecimal(3);
+                x.Interest = reader.GetDecimal(4);
+                x.Memo = ReadDbString(reader, 5);
+                x.RowVersion = reader.GetInt64(6);
+                x.BatchMode = false;
+                collection.AddLoan(x);
+                x.OnUpdated();
+            }
+            collection.EndUpdate();
+            collection.FireChangeEvent(collection, collection, null, ChangeType.Reloaded);
+            reader.Close();
+
+            foreach (Account a in money.Accounts)
+            {
+                if (a.Type == AccountType.Loan)
+                {
+                    money.GetOrCreateLoanAccount(a);
+                }
+            }
         }
 
     }

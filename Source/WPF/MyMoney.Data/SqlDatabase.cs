@@ -2878,7 +2878,7 @@ namespace Walkabout.Data
 
 
         #region TABLE STOCK SPLITS
-        private void ReadStockSplits(StockSplits splits, MyMoney money)
+        protected virtual void ReadStockSplits(StockSplits splits, MyMoney money)
         {
             splits.Clear();
             IDataReader reader = this.ExecuteReader("SELECT Id,Date,Security,Numerator,Denominator FROM StockSplits");
