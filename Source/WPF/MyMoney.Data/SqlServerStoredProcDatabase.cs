@@ -690,6 +690,7 @@ namespace Walkabout.Data
                         {
                             a.CategoryForInterest = money.Categories.FindCategoryById(reader.GetInt32(16));
                         }
+                        a.RowVersion = reader.GetInt64(17);
                         a.OnUpdated();
                     }
                     accts.EndUpdate();
@@ -1651,6 +1652,10 @@ namespace Walkabout.Data
                 {
                     this.SaveOnlineAccountBatch(list.ConvertAll(r => (OnlineAccount)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(Account))
+                {
+                    this.SaveAccountBatch(list.ConvertAll(r => (Account)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -1986,6 +1991,103 @@ namespace Walkabout.Data
                 {
                     i.OnUpdated();
                     i.Parent.RemoveChild(i, true);
+                });
+            }
+        }
+
+        private static DataTable NewAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("AccountId", typeof(string));
+            table.Columns.Add("OfxAccountId", typeof(string));
+            table.Columns.Add("Name", typeof(string));
+            table.Columns.Add("Type", typeof(int));
+            table.Columns.Add("Description", typeof(string));
+            table.Columns.Add("OnlineAccount", typeof(int));
+            table.Columns.Add("OpeningBalance", typeof(decimal));
+            table.Columns.Add("LastSync", typeof(DateTime));
+            table.Columns.Add("LastBalance", typeof(DateTime));
+            table.Columns.Add("SyncGuid", typeof(Guid));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("Currency", typeof(string));
+            table.Columns.Add("WebSite", typeof(string));
+            table.Columns.Add("ReconcileWarning", typeof(int));
+            table.Columns.Add("CategoryIdForPrincipal", typeof(int));
+            table.Columns.Add("CategoryIdForInterest", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveAccountBatch(List<Account> accounts, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewAccountRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Account> byId = new Dictionary<long, Account>();
+            List<Account> deletedInThisBatch = new List<Account>();
+
+            foreach (Account a in accounts)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+                object onlineAccountId = a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value;
+                object categoryForPrincipal = a.CategoryForPrincipal != null ? (object)a.CategoryForPrincipal.Id : DBNull.Value;
+                object categoryForInterest = a.CategoryForInterest != null ? (object)a.CategoryForInterest.Id : DBNull.Value;
+                object lastSync = SqlServerDatabase.DBDateTimeParam(a.LastSync);
+                object lastBalance = SqlServerDatabase.DBDateTimeParam(a.LastBalance);
+                object syncGuid = SqlServerDatabase.DBGuidParam(a.SyncGuid);
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add("I", a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add("U", a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add("D", a.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Accounts_SaveBatch",
+                new[] { ("@Rows", "dbo.AccountSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Account a = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Account a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
                 });
             }
         }
