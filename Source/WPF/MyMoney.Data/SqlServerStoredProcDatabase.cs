@@ -1108,6 +1108,7 @@ namespace Walkabout.Data
                         {
                             a.AliasType = (AliasType)reader.GetInt32(3);
                         }
+                        a.RowVersion = reader.GetInt64(4);
                         a.OnUpdated();
                     }
                     aliases.EndUpdate();
@@ -1661,6 +1662,10 @@ namespace Walkabout.Data
                 {
                     this.SavePayeeBatch(list.ConvertAll(r => (Payee)r), connection, null, postCommitActions);
                 }
+                else if (firstType == typeof(Alias))
+                {
+                    this.SaveAliasBatch(list.ConvertAll(r => (Alias)r), connection, null, postCommitActions);
+                }
                 else
                 {
                     base.SaveBatch(list);
@@ -2160,6 +2165,75 @@ namespace Walkabout.Data
                 {
                     p.OnUpdated();
                     p.Parent.RemoveChild(p, true);
+                });
+            }
+        }
+
+        private static DataTable NewAliasRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add("Action", typeof(string));
+            table.Columns.Add("Id", typeof(int));
+            table.Columns.Add("Pattern", typeof(string));
+            table.Columns.Add("Payee", typeof(int));
+            table.Columns.Add("Flags", typeof(int));
+            table.Columns.Add("ExpectedVersion", typeof(long));
+            return table;
+        }
+
+        private void SaveAliasBatch(List<Alias> aliases, SqlConnection connection, SqlTransaction transaction, List<Action> postCommitActions)
+        {
+            DataTable rows = NewAliasRowTable();
+            Dictionary<long, PersistentObject> rootsById = new Dictionary<long, PersistentObject>();
+            Dictionary<long, Alias> byId = new Dictionary<long, Alias>();
+            List<Alias> deletedInThisBatch = new List<Alias>();
+
+            foreach (Alias a in aliases)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add("I", a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add("U", a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add("D", a.Id, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, "dbo.Aliases_SaveBatch",
+                new[] { ("@Rows", "dbo.AliasSaveBatchRow", rows) },
+                rootsById,
+                (id, newVersion) =>
+                {
+                    Alias a = byId[id];
+                    postCommitActions.Add(() =>
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Alias a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =>
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
                 });
             }
         }
