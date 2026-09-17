@@ -1006,7 +1006,7 @@ namespace Walkabout.Data
             // partially committing some roots and throwing on others.
             foreach (PersistentObject root in list)
             {
-                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias))
+                if (!(root is Category || root is Currency || root is OnlineAccount || root is Account || root is Payee || root is Alias || root is Security))
                 {
                     base.SaveBatch(list);
                     return;
@@ -1053,6 +1053,10 @@ namespace Walkabout.Data
                         else if (root is Alias alias)
                         {
                             this.SaveOneAlias(alias, transaction, postCommitActions);
+                        }
+                        else if (root is Security security)
+                        {
+                            this.SaveOneSecurity(security, transaction, postCommitActions);
                         }
                     }
                     transaction.Commit();
@@ -1497,12 +1501,78 @@ namespace Walkabout.Data
         }
 
         /// <summary>
+        /// Writes one Security row - same shape as SaveOneCategory. SQL mirrors UpdateSecurities'
+        /// existing parameterized branch (SqlDatabase.cs) exactly, plus the version check/bump.
+        /// </summary>
+        private void SaveOneSecurity(Security s, SQLiteTransaction transaction, List<Action> postCommitActions)
+        {
+            long callerRowVersion = s.RowVersion;
+
+            if (s.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    "INSERT INTO Securities (Id,Name,Symbol,Price,LastPrice,CuspId,SecurityType,Taxable,PriceDate) " +
+                    "VALUES (@Id,@Name,@Symbol,@Price,@LastPrice,@CuspId,@SecurityType,@Taxable,@PriceDate);",
+                    ("@Id", s.Id), ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                    ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                    ("@PriceDate", DBDateTimeParam(s.PriceDate)));
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "UPDATE Securities SET Name=@Name,Symbol=@Symbol,Price=@Price,LastPrice=@LastPrice,CuspId=@CuspId," +
+                    "SecurityType=@SecurityType,Taxable=@Taxable,PriceDate=@PriceDate," +
+                    this.VersionColumnName + "=" + this.VersionColumnName + "+1 " +
+                    "WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Name", s.Name), ("@Symbol", s.Symbol), ("@Price", s.Price), ("@LastPrice", s.LastPrice),
+                    ("@CuspId", s.CuspId), ("@SecurityType", (int)s.SecurityType), ("@Taxable", (byte)s.Taxable),
+                    ("@PriceDate", DBDateTimeParam(s.PriceDate)), ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "Securities", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.RowVersion = callerRowVersion + 1;
+                    s.OnUpdated();
+                });
+                return;
+            }
+
+            if (s.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    "DELETE FROM Securities WHERE Id=@Id AND " + this.VersionColumnName + "=@ExpectedVersion;",
+                    ("@Id", s.Id), ("@ExpectedVersion", callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(s, "Securities", s.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =>
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// <summary>
         /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
         /// version actually is - one more SELECT (inside the same transaction, so it sees a
         /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
         /// longer exists at all (e.g. already deleted by someone else).
         /// </summary>
-        private void ThrowConflict(PersistentObject root, string tableName, int id, SQLiteTransaction transaction, long callerRowVersion)
+        private void ThrowConflict(PersistentObject root, string tableName, long id, SQLiteTransaction transaction, long callerRowVersion)
         {
             object result = this.ExecuteScalarInTransaction(transaction,
                 "SELECT " + this.VersionColumnName + " FROM " + tableName + " WHERE Id=@Id;", ("@Id", id));
@@ -1776,6 +1846,52 @@ namespace Walkabout.Data
             }
             aliases.EndUpdate();
             aliases.FireChangeEvent(aliases, aliases, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+        /// <summary>
+        /// Overrides the inherited ReadSecurities to also read back the Version column - same
+        /// rationale as ReadCategories' override.
+        /// </summary>
+        public override void ReadSecurities(Securities securities, MyMoney money)
+        {
+            securities.Clear();
+            IDataReader reader = this.ExecuteReader("SELECT [Id],[Name],[Symbol],[Price],[LastPrice],[CuspId],[SecurityType],[Taxable],[PriceDate],[" + this.VersionColumnName + "] FROM Securities");
+            securities.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress("Securities");
+                int id = reader.GetInt32(0);
+                Security s = securities.AddSecurity(id);
+                s.Name = ReadDbString(reader, 1);
+                s.Symbol = ReadDbString(reader, 2);
+                s.Price = reader.GetDecimal(3);
+                if (!reader.IsDBNull(4))
+                {
+                    s.LastPrice = reader.GetDecimal(4);
+                }
+
+                s.CuspId = ReadDbString(reader, 5);
+                if (!reader.IsDBNull(6))
+                {
+                    s.SecurityType = (SecurityType)reader.GetInt32(6);
+                }
+
+                if (!reader.IsDBNull(7))
+                {
+                    s.Taxable = (YesNo)reader.GetByte(7);
+                }
+
+                if (!reader.IsDBNull(8))
+                {
+                    s.PriceDate = reader.SafeGetDateTime(8);
+                }
+
+                s.RowVersion = reader.GetInt64(9);
+                s.OnUpdated();
+            }
+            securities.EndUpdate();
+            securities.FireChangeEvent(securities, securities, null, ChangeType.Reloaded);
             reader.Close();
         }
 

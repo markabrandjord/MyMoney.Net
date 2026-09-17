@@ -633,6 +633,101 @@ namespace Walkabout.TestSupport
             Assert.That(reloadedAgain.Aliases.FindAlias("KROGER"), Is.Null);
         }
 
+        private static MyMoney BuildOneSecurityMoney(out Security security)
+        {
+            MyMoney money = new MyMoney();
+            security = money.Securities.FindSymbol("MSFT", true);
+            security.Price = 100m;
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewSecurity_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneSecurityMoney(out Security security);
+
+            this.Database.SaveOne(security);
+
+            Assert.That(security.RowVersion, Is.EqualTo(1));
+            Assert.That(security.IsInserted, Is.False);
+            Assert.That(security.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Security found = reloaded.Securities.FindSecurity("MSFT", false);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateSecurityAfterReload_IncrementsRowVersion()
+        {
+            BuildOneSecurityMoney(out Security security);
+            this.Database.SaveOne(security);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Security found = reloaded.Securities.FindSecurity("MSFT", false);
+            found.Price = 150m;
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Security foundAgain = reloadedAgain.Securities.FindSecurity("MSFT", false);
+            Assert.That(foundAgain.Price, Is.EqualTo(150m));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleSecurityRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneSecurityMoney(out Security security);
+            this.Database.SaveOne(security);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Security securityA = readerA.Securities.FindSecurity("MSFT", false);
+            securityA.Price = 150m;
+            this.Database.SaveOne(securityA);
+
+            Security securityB = readerB.Securities.FindSecurity("MSFT", false);
+            securityB.Price = 200m;
+            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.Database.SaveOne(securityB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Securities.FindSecurity("MSFT", false).Price, Is.EqualTo(150m));
+        }
+
+        [Test]
+        public void SaveOne_DeleteSecurity_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneSecurityMoney(out Security security);
+            this.Database.SaveOne(security);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Security toDelete = reloaded.Securities.FindSecurity("MSFT", false);
+            int toDeleteId = toDelete.Id;
+            reloaded.Securities.RemoveSecurity(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            // RemoveSecurity(s, forceRemoveAfterSave: false) (its default here) removes the
+            // name-based securityIndex entry unconditionally, so FindSecurity("MSFT", false) would
+            // already be null here even if SaveOne's postCommit RemoveChild(s, true) never fires.
+            // FindSecurityAt(id) indexes the id-keyed `securities` dictionary directly, only
+            // cleared when IsInserted || forceRemoveAfterSave, so it's the genuine proof.
+            Assert.That(reloaded.Securities.FindSecurityAt(toDeleteId), Is.Not.Null,
+                "sanity check: id-based lookup must still find the security before SaveOne runs its postCommit RemoveChild");
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Securities.FindSecurityAt(toDeleteId), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Securities.FindSecurity("MSFT", false), Is.Null);
+        }
+
         [Test]
         public void Backup_ChecksPointsWalBeforeCopying_BackupContainsMostRecentCommit()
         {
