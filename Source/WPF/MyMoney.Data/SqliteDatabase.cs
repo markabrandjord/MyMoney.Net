@@ -755,6 +755,29 @@ namespace Walkabout.Data
 
                         foreach (ColumnMapping c in actual.Columns)
                         {
+                            if (c.ColumnName == this.VersionColumnName)
+                            {
+                                // Version/RowVersion is deliberately excluded from mapping.Columns
+                                // (it's engine-injected, not reflected off the domain model - see
+                                // the column-drop guard below), so mapping.FindColumn(c.ColumnName)
+                                // always returns null for it here and it would otherwise fall into
+                                // the "dropping this column" branch below, discarding every row's
+                                // real accumulated version history - the new table's freshly
+                                // GetCreateTableScript-generated Version column would then default
+                                // every row back to 1, letting a stale in-memory RowVersion win a
+                                // write it should have conflicted on. Carry the real column across
+                                // explicitly instead.
+                                if (!first)
+                                {
+                                    sb.Append(", ");
+                                    select.Append(", ");
+                                }
+                                sb.Append("[" + c.ColumnName + "]");
+                                select.Append("[" + c.ColumnName + "]");
+                                first = false;
+                                continue;
+                            }
+
                             ColumnMapping ac = mapping.FindColumn(c.ColumnName);
                             if (ac == null)
                             {

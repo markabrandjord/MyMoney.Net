@@ -270,5 +270,64 @@ namespace Walkabout.Data.Tests
                 db.Delete();
             }
         }
+
+        [TableMapping(TableName = "VersionRebuildTestTable")]
+        private class FakeVersionRebuildRow
+        {
+            [ColumnMapping(ColumnName = "Id", IsPrimaryKey = true)]
+            public int Id { get; set; }
+
+            // MaxLength deliberately differs from the raw-SQL table's nvarchar(20) below, so
+            // CreateOrUpdateTable's column-diff loop sets newTable=true and takes the
+            // rebuild-via-temp-table path rather than the simple in-place ALTER path (already
+            // covered by CreateOrUpdateTable_Sqlite_RetrofitsMissingVersionColumnWithDefaultOfOne
+            // above).
+            [ColumnMapping(ColumnName = "Name", MaxLength = 50)]
+            public string Name { get; set; }
+        }
+
+        [Test]
+        public void CreateOrUpdateTable_Sqlite_NewTableRebuild_PreservesVersionColumnHistory()
+        {
+            string dbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"VersionRebuildTest_{Guid.NewGuid():N}.mmdb");
+            if (System.IO.File.Exists(dbPath))
+            {
+                System.IO.File.Delete(dbPath);
+            }
+
+            var db = new SqliteDatabase { DatabasePath = dbPath };
+            try
+            {
+                db.Create();
+
+                // A pre-existing table that already has real accumulated Version history (Id=1 is
+                // on its 5th write) and a column (Name) whose MaxLength differs from the mapping
+                // below - forcing the newTable rebuild path, not the simple ALTER path.
+                db.ExecuteNonQuery(
+                    "CREATE TABLE [VersionRebuildTestTable] (\r\n" +
+                    "  [Id] int PRIMARY KEY,\r\n" +
+                    "  [Name] nvarchar(20) NOT NULL,\r\n" +
+                    "  [Version] INTEGER NOT NULL DEFAULT 1\r\n" +
+                    ");");
+                db.ExecuteNonQuery("INSERT INTO [VersionRebuildTestTable] ([Id],[Name],[Version]) VALUES (1,'pre-existing row',5);");
+
+                var mapping = new TableMapping { ObjectType = typeof(FakeVersionRebuildRow), TableName = "VersionRebuildTestTable" };
+                db.CreateOrUpdateTable(mapping);
+
+                ColumnMapping versionColumn = db.LoadTableMetadata("VersionRebuildTestTable").FindColumn("Version");
+                Assert.That(versionColumn, Is.Not.Null,
+                    "The rebuilt table must still have a Version column.");
+
+                // The real assertion: rebuilding the table must NOT reset accumulated conflict-
+                // detection history back to the schema's DEFAULT 1, which would silently let a
+                // stale in-memory RowVersion win a write it should have conflicted on.
+                object versionValue = db.ExecuteScalar("SELECT [Version] FROM [VersionRebuildTestTable] WHERE [Id]=1;");
+                Assert.That(Convert.ToInt64(versionValue), Is.EqualTo(5));
+            }
+            finally
+            {
+                db.Delete();
+            }
+        }
     }
 }
