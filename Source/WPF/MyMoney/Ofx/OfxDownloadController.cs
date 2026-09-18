@@ -100,13 +100,16 @@ h2 { font-size: 12pt; }";
                         }
                         else
                         {
-                            // Anything that is neither of the two OFX-specific exception types:
-                            // render message-only (no "TypeName: " prefix, no stack trace), which
-                            // is what the user can actually act on. Added in Task 6 while
-                            // DownloadData.AddError briefly wrapped its messages in a plain
-                            // Exception; Task 8 restored the OfxException wrapping, so this branch
-                            // is back to being the genuine fallback it was written as.
-                            message = error.Message;
+                            // Task 6 temporarily rendered this branch message-only, to compensate
+                            // for DownloadData.AddError briefly wrapping its messages in a plain
+                            // Exception instead of an OfxException. Task 8 restored that wrapping,
+                            // so this branch is back to being reached only by genuinely unexpected
+                            // exceptions - Ofx.cs's per-account catch-all (HttpRequestException, IO
+                            // errors) and ProcessResponse's own format-mismatch throws - and with
+                            // it the original type name and stack trace, which are the whole point
+                            // of an error report the user is asked to attach to a GitHub issue.
+                            message = error.GetType().FullName + ": " + error.Message;
+                            response = error.StackTrace;
                         }
                     }
                 }

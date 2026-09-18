@@ -154,8 +154,9 @@ namespace Walkabout.Importers
                 // OfxException still lived in MyMoney.csproj. Task 8 moved Ofx.cs (and with it
                 // OfxException) into this assembly, so the original wrapping is restored: the
                 // error-detail hyperlink handler in OfxDownloadController reads it back as
-                // "error as OfxException" again, as it always did. Its plain-Exception branch
-                // stays - it is the honest rendering for anything else that lands there.
+                // "error as OfxException" again, as it always did - and that handler's
+                // non-OfxException branch was reverted to its pre-Task-6 form in the same
+                // change, so Task 6's compensation is now fully undone on both sides.
                 e.Error = new OfxException(error);
             }
             e.isError = true;
