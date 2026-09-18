@@ -16,6 +16,7 @@
 - No new test framework/harness: reuse `MyMoney.TestSupport`'s `MockDatabase` and the existing `DatabaseContractTests*` pattern.
 - Every subsystem migration ends with `dotnet build Source/WPF/MyMoney.sln` and `dotnet test Source/WPF/UnitTests/UnitTests.csproj` + `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj` green before moving to the next task.
 - Reports, the rest of MainWindow's orchestration, dual-engine parity, and FlaUI-level testing are explicitly out of scope — do not touch `Source/WPF/MyMoney/Reports/`.
+- **Every migrated subsystem's test coverage must (a) run independently of WPF** — no `System.Windows.*` imports, no WPF `Dispatcher`/`Application` construction in any test file for a migrated subsystem (`UiDispatcher.CurrentContext`, where genuinely needed, gets a plain `System.Threading.SynchronizationContext`, not a `DispatcherSynchronizationContext` — verified during Task 3 planning that `UiDispatcher.BeginInvoke`/`Invoke` in `Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs` only actually calls into `context` when the calling thread differs from the thread that set `CurrentContext`, so a single-threaded test never exercises the real dispatcher and a WPF one is never required) — **and (b) cover both the success path and at least one meaningful invalid-input/failure path** per public API surface being migrated (malformed input, out-of-range values, a missing/not-found lookup, an error callback firing) — not happy-path-only coverage. Each task below that touches tests names its own concrete invalid-input cases; where a task's existing steps don't yet name one, add it using the same judgment before considering the task done.
 
 ---
 
@@ -374,9 +375,11 @@ git commit -m "test: add seed-derived canary and property-based invariants for p
 - Move: `Source/WPF/MyMoney/Taxes/TxfSpec.txt` → `Source/WPF/MyMoney.Business/Taxes/TxfSpec.txt`
 - Modify: `Source/WPF/MyMoney/MyMoney.csproj:606-616` (remove the 3 explicit item entries for the moved data files)
 - Modify: `Source/WPF/MyMoney.Business/MyMoney.Business.csproj` (add matching entries)
-- Test: `Source/WPF/UnitTests/CostBasisTests.cs`, `Source/WPF/UnitTests/TaxTests.cs` (already exist — no new tests needed, this task's job is to keep them green through the move)
+- Modify: `Source/WPF/UnitTests/CostBasisTests.cs` (remove stale WPF `Dispatcher` setup — see Step 3a)
+- Modify: `Source/WPF/UnitTests/TaxTests.cs` (add an invalid-input case — see Step 3c)
+- Create: `Source/WPF/UnitTests/TaxCategoryTests.cs` (new invalid-input coverage for `TaxCategory`'s parsing methods — see Step 3b)
 
-**Interfaces:** None — Taxes has zero WPF coupling (verified: 0/5 files reference `System.Windows`), this is a pure relocation.
+**Interfaces:** None — Taxes has zero WPF coupling (verified: 0/5 *source* files reference `System.Windows`), this is a pure relocation. The one exception is the *test* file `CostBasisTests.cs`, which has stale WPF coupling of its own (see Step 3a) — fixing that is part of this task's independent-testability requirement, not a source-file coupling issue.
 
 - [ ] **Step 1: Move the 5 `.cs` files and 3 data files**
 
@@ -429,26 +432,110 @@ In `Source/WPF/MyMoney.Business/MyMoney.Business.csproj`, add a new `<ItemGroup>
   </ItemGroup>
 ```
 
-- [ ] **Step 3: Build**
+- [ ] **Step 3a: Remove `CostBasisTests.cs`'s stale WPF Dispatcher setup**
+
+Verified during plan amendment: `CostBasisTests.cs` currently does, in (at least) two test methods:
+```csharp
+UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+```
+This is unnecessary WPF coupling in a test that doesn't test any cross-thread scenario — it's a leftover from before the #7 `UiDispatcher` portability rewrite. Confirmed by reading `Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs:33-73`: `UiDispatcher.BeginInvoke`/`Invoke` only route through `context.Post`/`context.Send` when the *calling* thread differs from the thread that set `CurrentContext` — a single-threaded test (this one) always takes the "already on the UI thread" branch and never actually invokes the context object at all, regardless of its concrete type. Replace both occurrences with:
+```csharp
+UiDispatcher.CurrentContext = new System.Threading.SynchronizationContext();
+```
+and remove the now-unused `using System.Windows.Controls;` import at the top of the file. Do not touch `Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs` — that file's use of `DispatcherSynchronizationContext` is deliberate (it specifically tests cross-thread marshaling behavior against a real WPF dispatcher as one of `UiDispatcher`'s genuinely-supported cases), not stale.
+
+- [ ] **Step 3b: Add invalid-input tests for `TaxCategory`'s parsing methods**
+
+Create `Source/WPF/UnitTests/TaxCategoryTests.cs`. These methods are `internal`, so this test file must live in `UnitTests` (which already has `InternalsVisibleTo` access per the existing `MyMoney.Business` `AssemblyInfo.cs` grant) and use `Walkabout.Taxes`. Verified behavior (read directly from `TaxCategory.cs` during plan amendment — none of these throw; they degrade gracefully, which is exactly what these tests must pin down):
+
+```csharp
+using NUnit.Framework;
+using Walkabout.Taxes;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class TaxCategoryTests
+    {
+        [Test]
+        public void ParseInt_ValidNumber_ReturnsParsedValue()
+        {
+            Assert.That(TaxCategory.ParseInt("42"), Is.EqualTo(42));
+        }
+
+        [Test]
+        public void ParseInt_InvalidNumber_ReturnsZero()
+        {
+            Assert.That(TaxCategory.ParseInt("not-a-number"), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParseSign_KnownCodes_ReturnsExpectedSign()
+        {
+            Assert.That(TaxCategory.ParseSign("E"), Is.EqualTo(-1));
+            Assert.That(TaxCategory.ParseSign("I"), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ParseSign_UnknownCode_ReturnsZero()
+        {
+            Assert.That(TaxCategory.ParseSign("garbage"), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParseSortOrder_UnknownCode_ReturnsNone()
+        {
+            Assert.That(TaxCategory.ParseSortOrder("not-a-real-code"), Is.EqualTo(SortOrder.None));
+        }
+
+        [Test]
+        public void Parse_WrongTokenCount_ReturnsNull()
+        {
+            // A well-formed line has 8 whitespace/quote-delimited tokens; this has 2.
+            Assert.That(TaxCategory.Parse("1 2"), Is.Null);
+        }
+    }
+}
+```
+
+Confirm `SortOrder` is `public` (or otherwise accessible from `UnitTests`) before compiling — it's referenced as `TaxCategory.ParseSortOrder`'s return type in `TaxCategory.cs`, so it must already be visible somewhere `TaxCategory.cs` itself can use it; verify its accessibility modifier matches what this test needs.
+
+- [ ] **Step 3c: Add an invalid-input case to `TaxTests.cs`**
+
+`StateTaxes.Load()`'s existing test (`TestStateIncomeTaxes`) looks up `"CA"` via `(from s in stateTaxes.Data where s.Abbreviation == "CA" select s).FirstOrDefault()` and asserts it's found. Add the mirror negative case — a state abbreviation that doesn't exist:
+
+```csharp
+        [Test]
+        public void TestStateTaxes_UnknownAbbreviation_ReturnsNull()
+        {
+            var stateTaxes = StateTaxes.Load();
+            var unknown = (from s in stateTaxes.Data where s.Abbreviation == "ZZ" select s).FirstOrDefault();
+            Assert.That(unknown, Is.Null, "Expected no state tax data for a made-up abbreviation");
+        }
+```
+
+Before finalizing, open `FederalTaxes.cs`'s `GetIncomeTax`/`GetCapitalGainsTax` (lines 47, 125) and `StateTaxes.cs`'s equivalents (lines 85, 150) and check their actual behavior for a negative or zero `baseIncome`/`paycheck`/`gains` argument — whichever it turns out to be (clamps to zero, returns a negative tax, throws), add one test asserting that real, observed behavior. Don't guess the behavior; read the method first.
+
+- [ ] **Step 4: Build**
 
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors. If `MyMoney.csproj` call sites into `Walkabout.Taxes` types fail to resolve, confirm `MyMoney.csproj` still has its existing `ProjectReference` to `MyMoney.Business.csproj` (it does — verified at `MyMoney.csproj:649`).
 
-- [ ] **Step 4: Run the existing Taxes tests plus the phase-1 safety net**
+- [ ] **Step 5: Run the existing Taxes tests, the new invalid-input tests, and the phase-1 safety net — independently of the rest of the suite**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CostBasisTests|FullyQualifiedName~TaxTests|FullyQualifiedName~SampleDataRegressionTests"`
-Expected: all PASS, unchanged from before the move.
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CostBasisTests|FullyQualifiedName~TaxTests|FullyQualifiedName~TaxCategoryTests|FullyQualifiedName~SampleDataRegressionTests"`
+Expected: all PASS. This exact filtered command — run in isolation, without the rest of `UnitTests.csproj` — is the "runs independently" proof: no WPF `Application`/`Dispatcher` needed to reach green (after Step 3a's fix), no other test fixture's setup required.
 
-- [ ] **Step 5: Confirm the layer boundary still holds**
+- [ ] **Step 6: Confirm the layer boundary still holds**
 
 Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~LayerBoundaryTests"`
-Expected: PASS (Taxes had zero WPF references, so this should be a no-op confirmation).
+Expected: PASS (Taxes' source files had zero WPF references, so this should be a no-op confirmation).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/Taxes Source/WPF/MyMoney.Business/Taxes Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj
-git commit -m "refactor: move Taxes into MyMoney.Business"
+git add Source/WPF/MyMoney/Taxes Source/WPF/MyMoney.Business/Taxes Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/CostBasisTests.cs Source/WPF/UnitTests/TaxTests.cs Source/WPF/UnitTests/TaxCategoryTests.cs
+git commit -m "refactor: move Taxes into MyMoney.Business, decouple CostBasisTests from WPF, add invalid-input coverage"
 ```
 
 ---
@@ -618,7 +705,8 @@ git commit -m "feat: add MyMoney.Business UI-callback interfaces for the subsyst
 - Modify: `Source/WPF/MyMoney.Business/StockQuotes/StockQuoteManager.cs` (add `IBusinessLayerUiCallback` property, replace the one `MessageBoxEx.Show` call)
 - Modify: `Source/WPF/MyMoney/MainWindow.xaml.cs` (wire `WpfBusinessLayerUiCallback` into `StockQuoteManager` construction)
 - Modify: `Source/WPF/MyMoney/MyMoney.csproj:327` (move the `StockQuotes\Design.dgml` `<None Include>` entry)
-- Test: reuse `SampleDataRegressionTests` (Task 2) as the safety net; no new unit tests required beyond confirming existing coverage still passes
+- Test: reuse `SampleDataRegressionTests` (Task 2) as the safety net; plus new tests per the Global Constraints' independent-testability/invalid-input requirement — see Step 7a below
+- Create: `Source/WPF/UnitTests/StockQuoteThrottleTests.cs`
 
 **Interfaces:**
 - Consumes: `IBusinessLayerUiCallback` (Task 4).
@@ -697,16 +785,63 @@ this.stockQuotes = new StockQuoteManager(provider, serviceSettings, logPath)
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors. If `internal` members of moved `StockQuotes` types fail to resolve from WPF-project-only call sites (e.g. `ExchangeRateService.IsMySettings`, called from `MainWindow.xaml.cs:836`), confirm Task 4's `InternalsVisibleTo("MyMoney")` was added correctly.
 
-- [ ] **Step 7: Run the safety net**
+- [ ] **Step 7a: Add independent-of-WPF success/invalid-input tests for `StockQuoteThrottle`**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests"`
+`StockQuoteThrottle.GetSleep()` (`StockQuoteThrottle.cs`, verified during plan amendment) is a clean, pure-logic candidate: it genuinely throws `StockQuoteThrottledException` when a configured limit is exceeded, no mocking or WPF needed, no network I/O. Create `Source/WPF/UnitTests/StockQuoteThrottleTests.cs`:
+
+```csharp
+using NUnit.Framework;
+using Walkabout.StockQuotes;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class StockQuoteThrottleTests
+    {
+        [Test]
+        public void GetSleep_UnderAllLimits_ReturnsZero()
+        {
+            var throttle = new StockQuoteThrottle
+            {
+                Settings = new OnlineServiceSettings
+                {
+                    ApiRequestsPerMonthLimit = 1000,
+                    ApiRequestsPerDayLimit = 100,
+                    ApiRequestsPerMinuteLimit = 10
+                }
+            };
+            Assert.That(throttle.GetSleep(), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void GetSleep_MonthlyLimitExceeded_ThrowsWithMonthlyLimitReached()
+        {
+            var throttle = new StockQuoteThrottle
+            {
+                Settings = new OnlineServiceSettings { ApiRequestsPerMonthLimit = 1 }
+            };
+            throttle.RecordCall();
+            var ex = Assert.Throws<StockQuoteThrottledException>(() => throttle.GetSleep());
+            Assert.That(ex.MonthlyLimitReached, Is.True);
+        }
+    }
+}
+```
+
+Before finalizing: confirm `OnlineServiceSettings`'s exact property names against `Source/WPF/MyMoney.Business/StockQuotes/IOnlineService.cs` (they were read during earlier plan research as `ApiRequestsPerMonthLimit` etc. via the `_requestsPerMonth`-backed properties — verify the public property name matches, since the backing field name and public property name may differ), and confirm `RecordCall()`'s exact effect on `_callsThisMonth` actually reaches the throw threshold with a single call given `ApiRequestsPerMonthLimit = 1`. `StockQuoteThrottledException`'s constructor/`MonthlyLimitReached` property are visible in `ThrottledStockQuoteService.cs:17` per earlier research — confirm its accessibility (the class itself is `internal class StockQuoteThrottledException`, verified earlier; `UnitTests` already has `InternalsVisibleTo` access via `MyMoney.Business`'s `AssemblyInfo.cs` grant from Task 4, so this should compile, but confirm before assuming).
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~StockQuoteThrottleTests"` in isolation — no other fixture, no WPF — to prove independent testability.
+
+- [ ] **Step 7b: Run the safety net**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~StockQuoteThrottleTests"`
 Expected: all PASS.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/StockQuotes Source/WPF/MyMoney.Business/StockQuotes Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj
-git commit -m "refactor: move StockQuotes into MyMoney.Business"
+git add Source/WPF/MyMoney/StockQuotes Source/WPF/MyMoney.Business/StockQuotes Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/StockQuoteThrottleTests.cs
+git commit -m "refactor: move StockQuotes into MyMoney.Business, add independent throttle tests"
 ```
 
 ---
@@ -808,16 +943,90 @@ var importer = new QifImporter(new DownloadControlProgressReporter(this.download
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors.
 
+- [ ] **Step 8a: Add independent-of-WPF success/invalid-input tests for Importers**
+
+Two candidates, verified during plan amendment:
+
+1. **`XmlImporter.Import(string file)`** (`Importer.cs`'s override, verified in `XmlImporter.cs`) needs no fake at all — no `MessageBoxEx`/`DownloadControl` coupling in this class. It throws `NotSupportedException` for an unrecognized file extension:
+```csharp
+using System;
+using NUnit.Framework;
+using Walkabout.Data;
+using Walkabout.Importers;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class XmlImporterTests
+    {
+        [Test]
+        public void Import_UnsupportedExtension_ThrowsNotSupportedException()
+        {
+            var importer = new XmlImporter(new MyMoney(), null);
+            Assert.Throws<NotSupportedException>(() => importer.Import("statement.qfx"));
+        }
+    }
+}
+```
+Confirm `XmlImporter`'s constructor signature (`MyMoney money, IServiceProvider site`) still matches after the move — `site` being `null` here is fine since this path never reaches code that dereferences it (verify that's still true after moving the file; if `Import`'s extension check runs before any `site` usage, this holds).
+
+2. **`QifImporter`'s new `IImportProgressReporter`/`IBusinessLayerUiCallback` dependency (from Step 5) is now directly testable with simple fakes** — this is new capability this task's own refactor unlocked, not something a WPF-coupled `QifImporter` could ever have had before. Add a small test-only fake in the same test file (not a new shared infrastructure class — YAGNI, this is the only place it's needed so far):
+```csharp
+using NUnit.Framework;
+using Walkabout.Data;
+using Walkabout.Importers;
+using Walkabout.Utilities;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class QifImporterTests
+    {
+        private class FakeImportProgressReporter : IImportProgressReporter
+        {
+            public ThreadSafeObservableCollection<DownloadData> Entries { get; private set; }
+            public DownloadData Selected { get; private set; }
+            public void SetEntries(ThreadSafeObservableCollection<DownloadData> entries) => this.Entries = entries;
+            public void SelectEntry(DownloadData entry) => this.Selected = entry;
+        }
+
+        private class FakeBusinessLayerUiCallback : IBusinessLayerUiCallback
+        {
+            public string LastErrorMessage { get; private set; }
+            public void ShowError(string message, string title) => this.LastErrorMessage = message;
+            public bool Confirm(string message, string title) => true;
+            public bool ConfirmOkCancel(string message, string title) => true;
+        }
+
+        [Test]
+        public void Import_NoAccountSelected_ReportsErrorViaCallback()
+        {
+            var reporter = new FakeImportProgressReporter();
+            var callback = new FakeBusinessLayerUiCallback();
+            var importer = new QifImporter(reporter, callback, new MyMoney());
+
+            // Open the file to confirm the exact call shape that reports "you must first
+            // select an account" (message text captured loosely in Step 5, not verbatim) —
+            // call whichever method/overload triggers that path with currentlySelectedAccount
+            // null, then assert callback.LastErrorMessage is not null/empty.
+        }
+    }
+}
+```
+This second test's body is intentionally left for you to complete once you've read `QifImporter.cs`'s real method signature and the exact no-account-selected code path during Step 5 — don't guess the call shape here; you'll know it precisely by the time you reach this step.
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~XmlImporterTests|FullyQualifiedName~QifImporterTests"` in isolation to confirm independent testability.
+
 - [ ] **Step 9: Run the safety net**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests"`
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~XmlImporterTests|FullyQualifiedName~QifImporterTests"`
 Expected: all PASS.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/Importers Source/WPF/MyMoney.Business/Importers Source/WPF/MyMoney/MainWindow.xaml.cs
-git commit -m "refactor: move Importers into MyMoney.Business, cut DownloadControl/MessageBox coupling"
+git add Source/WPF/MyMoney/Importers Source/WPF/MyMoney.Business/Importers Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/UnitTests/XmlImporterTests.cs Source/WPF/UnitTests/QifImporterTests.cs
+git commit -m "refactor: move Importers into MyMoney.Business, cut DownloadControl/MessageBox coupling, add independent tests"
 ```
 
 ---
@@ -845,21 +1054,31 @@ For each of `BeginLoadDatabase`, `LoadDatabase` (both overloads), `CreateNewData
 
 - [ ] **Step 4: Update `MainWindow.xaml.cs` call sites to delegate to the new class**
 
+- [ ] **Step 4a: Add independent-of-WPF success/invalid-input tests for the extracted `DatabaseLifecycle` methods**
+
+Per the Global Constraints' independent-testability/invalid-input requirement: once you know `DatabaseLifecycle`'s real public surface (from Steps 2-4), add tests in a new `Source/WPF/UnitTests/DatabaseLifecycleTests.cs` covering at minimum:
+- One success-path case (e.g. create a database via `MyMoney.TestSupport`'s `MockDatabase` or a real temp `SqliteDatabase`, confirm the load/save round-trips).
+- One invalid-input/failure case for whichever extracted method is easiest to exercise without a WPF dialog — a load from a nonexistent file path, an unsupported/corrupt file, or (if a password-protected engine's opened this way) a wrong password. Pick whichever one of `DatabaseLifecycle`'s real methods actually has an observable failure mode (throws, returns false/null, calls `IBusinessLayerUiCallback.ShowError`) — you'll know which by the time you've done Steps 2-4; don't force a test onto a method that doesn't have one.
+
+Run the new test file's filter in isolation (`dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseLifecycleTests"`) to confirm it passes without WPF.
+
 - [ ] **Step 5: Build**
 
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors.
 
-- [ ] **Step 6: Run the safety net plus a manual smoke check**
+- [ ] **Step 6: Run the safety net**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests"`
-Then manually run the app (`dotnet run --project Source/WPF/MyMoney/MyMoney.csproj`) and confirm File > New, File > Open, File > Save, File > Save As, and File > Export all still work — this task touches the most operationally sensitive code in the app (data loss risk if `Save` breaks silently), so don't skip the manual pass even though the automated suite is green.
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~DatabaseLifecycleTests"`
+Expected: all PASS.
+
+**Do not run the app interactively (`dotnet run`) from this dispatch.** This task touches the most operationally sensitive code in the app (data loss risk if `Save` breaks silently), and a real manual click-through of File > New/Open/Save/Save As/Export is genuinely warranted before this ships — but Task 1 already hit a real hung-process incident when a background agent launched the WPF app in this unattended environment (FlaUI/dialog-driven UI needs an interactive desktop; see the ledger's operational note). If you are an agent dispatched by a controller: stop here, report DONE_WITH_CONCERNS, and name the manual click-through as an outstanding verification step for a human (or an interactive session) to perform — do not attempt to launch the app yourself.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney.Business/DatabaseLifecycle.cs
-git commit -m "refactor: move MainWindow's file/database lifecycle into MyMoney.Business"
+git add Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney.Business/DatabaseLifecycle.cs Source/WPF/UnitTests/DatabaseLifecycleTests.cs
+git commit -m "refactor: move MainWindow's file/database lifecycle into MyMoney.Business, add independent lifecycle tests"
 ```
 
 ---
@@ -961,16 +1180,57 @@ git mv Source/WPF/MyMoney/Ofx/Ofx.cs Source/WPF/MyMoney.Business/Ofx/Ofx.cs
 Run: `dotnet build Source/WPF/MyMoney.sln`
 Expected: 0 errors. `OfxDownloadController.cs` staying in `MyMoney.csproj` still needs a reference to the moved `Ofx.cs`/`OfxObjectModel.cs` types — confirm `MyMoney.csproj`'s existing `ProjectReference` to `MyMoney.Business.csproj` covers this (it does; no new reference needed).
 
-- [ ] **Step 7: Run the full test suite (final check for phase 1)**
+- [ ] **Step 6a: Add independent-of-WPF success/invalid-input tests for OFX parsing**
 
-Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj` and `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj`
+`OFX.Deserialize(XDocument doc)` (`OfxObjectModel.cs:120`, verified) is a clean, no-WPF, no-fake-needed candidate — pure XML-in, object-out. Create `Source/WPF/UnitTests/OfxObjectModelTests.cs`:
+
+```csharp
+using System.Xml.Linq;
+using NUnit.Framework;
+using Walkabout.Ofx;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class OfxObjectModelTests
+    {
+        [Test]
+        public void Deserialize_ValidMinimalDocument_ReturnsOfx()
+        {
+            // Replace with a minimal-but-real OFX response body — check an existing
+            // fixture file (search Source/WPF for sample .ofx/.qfx test data, or
+            // Ofx.cs's own log files under docs/dev if any are checked in) rather
+            // than hand-writing one from scratch if a real sample already exists.
+            var doc = XDocument.Parse("<OFX></OFX>");
+            var result = OFX.Deserialize(doc);
+            Assert.That(result, Is.Not.Null);
+        }
+
+        [Test]
+        public void Deserialize_MalformedDocument_HandlesGracefully()
+        {
+            var doc = XDocument.Parse("<NotOfx><Garbage/></NotOfx>");
+            // Read Deserialize's actual behavior for unrecognized structure before writing
+            // this assertion — it may throw (assert the specific exception type), return
+            // null, or return an OFX with empty/default fields. Don't guess; verify, then
+            // assert the real, observed, correct-per-the-code behavior.
+        }
+    }
+}
+```
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~OfxObjectModelTests"` in isolation to confirm independent testability.
+
+- [ ] **Step 7: Run the full scoped test suite (final check for phase 1)**
+
+Run: `dotnet test Source/WPF/UnitTests/UnitTests.csproj` and `dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj` — **never `dotnet test Source/WPF/MyMoney.sln`** (the whole-solution target pulls in `UITests`/`ScenarioTest`, which launch the real app via FlaUI and hang in an unattended session — see the ledger's Task 1 operational note).
 Expected: all green.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Source/WPF/MyMoney/Ofx Source/WPF/MyMoney.Business/Ofx Source/WPF/MyMoney/Dialogs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj
-git commit -m "refactor: move Ofx parsing into MyMoney.Business, keep OfxDownloadController's UI orchestration in place"
+git add Source/WPF/MyMoney/Ofx Source/WPF/MyMoney.Business/Ofx Source/WPF/MyMoney/Dialogs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/OfxObjectModelTests.cs
+git commit -m "refactor: move Ofx parsing into MyMoney.Business, keep OfxDownloadController's UI orchestration in place, add independent parsing tests"
 ```
 
 ---
