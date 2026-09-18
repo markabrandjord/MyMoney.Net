@@ -1,6 +1,5 @@
 ﻿using NUnit.Framework;
 using System.Diagnostics.CodeAnalysis;
-using System.Windows.Controls;
 using Walkabout.Data;
 using Walkabout.StockQuotes;
 using Walkabout.Taxes;
@@ -13,7 +12,7 @@ namespace Walkabout.Tests
         [Test]
         public void SimpleCostBasis()
         {
-            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            UiDispatcher.CurrentContext = new System.Threading.SynchronizationContext();
             MyMoney m = new MyMoney();
             Security s = m.Securities.NewSecurity();
             s.Name = "MSFT";
@@ -84,7 +83,7 @@ namespace Walkabout.Tests
         [Test]
         public void CostBasisAcrossTransfers()
         {
-            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            UiDispatcher.CurrentContext = new System.Threading.SynchronizationContext();
             MyMoney m = SetupSecurityTransactions();
             var a = m.Accounts.FindAccount("Ameritrade");
             var a2 = m.Accounts.FindAccount("Fidelity");
