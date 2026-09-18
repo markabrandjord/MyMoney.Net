@@ -91,8 +91,15 @@ h2 { font-size: 12pt; }";
                         }
                         else
                         {
-                            message = error.GetType().FullName + ": " + error.Message;
-                            response = error.StackTrace;
+                            // Task 6: DownloadData.AddError(OnlineAccount, Account, string) used to wrap
+                            // its message in an OfxException (message-only constructor, so Response/
+                            // HttpHeaders were always null here too) - now wraps it in a plain Exception
+                            // since OfxException itself isn't referenceable from MyMoney.Business. Render
+                            // message-only (no "System.Exception: " prefix, no stack trace) so that path
+                            // still reads the way it always did; a genuinely unexpected Exception reaching
+                            // here from elsewhere now also renders more cleanly, which is a net improvement
+                            // for anything the user sees.
+                            message = error.Message;
                         }
                     }
                 }

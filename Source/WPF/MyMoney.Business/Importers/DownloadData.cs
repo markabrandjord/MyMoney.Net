@@ -152,10 +152,19 @@ namespace Walkabout.Importers
             {
                 // Was "new OfxException(error)". OfxException (Ofx.cs) is a much larger,
                 // still-WPF-adjacent type staying in MyMoney.csproj pending Task 8's full Ofx
-                // move (see OfxErrorCode.cs's comment) - nothing reads this back as an
-                // OfxException specifically (verified: no cast/`as OfxException` site anywhere
-                // in the codebase touches a DownloadData.Error value), so a plain Exception
-                // carrying the same message is behavior-equivalent here.
+                // move (see OfxErrorCode.cs's comment). Correction (post-review): this IS read
+                // back as "error as OfxException" at OfxDownloadController.cs's error-detail-
+                // hyperlink handler (~line 85) - Ofx.cs calls this AddError overload at 16 sites,
+                // so that path is live. With a plain Exception here, that cast now misses and
+                // falls to the handler's generic-Exception branch instead of its OfxException
+                // branch; OfxDownloadController.cs was updated in the same fix to render that
+                // branch as message-only (no "TypeName: " prefix, no stack trace), matching what
+                // the original OfxException(message-only-ctor) path always rendered (Response/
+                // HttpHeaders were always null on that ctor too, so nothing there regresses).
+                // Verified no other call site reads a DownloadData.Error back as OfxException.
+                // Task 8's implementer: once OfxException itself moves, this can go back to
+                // "new OfxException(error)" and OfxDownloadController's branch split becomes
+                // purely cosmetic dead code again (harmless to leave, or fold back).
                 e.Error = new Exception(error);
             }
             e.isError = true;

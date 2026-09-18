@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using Walkabout.Data;
 using Walkabout.Importers;
@@ -62,6 +63,40 @@ namespace Walkabout.Tests
             Assert.IsNull(result);
             Assert.AreEqual(0, count);
             Assert.IsFalse(string.IsNullOrEmpty(callback.LastErrorMessage));
+        }
+
+        // Added post-review (Task 6 fix round 1): both prior tests only covered failure paths
+        // (the plan's Global Constraint requires success-path coverage too). Exercises the
+        // "merge QIF data into the already-selected account" success path: the special import
+        // filename skips the "create new account?" prompt, currentlySelectedAccount is non-null
+        // so QifImporter asks (via the fake's Confirm, which always returns true) whether to
+        // merge into it, then actually parses and imports one real transaction from a minimal
+        // QIF file on disk.
+        [Test]
+        public void Import_MergeIntoSelectedAccount_ParsesFileAndReturnsAccount()
+        {
+            var reporter = new FakeImportProgressReporter();
+            var callback = new FakeBusinessLayerUiCallback();
+            var money = new MyMoney();
+            var existingAccount = money.Accounts.AddAccount("Checking");
+            var importer = new QifImporter(reporter, callback, money);
+
+            string tempFile = Path.Combine(Path.GetTempPath(), QifImporter.SpecialImportFileName);
+            File.WriteAllText(tempFile, "!Type:Bank\r\nD01/15/2024\r\nT100.00\r\nPACME Corp\r\n^\r\n");
+            try
+            {
+                Account result = importer.Import(existingAccount, tempFile, out int count);
+
+                Assert.AreSame(existingAccount, result);
+                Assert.AreEqual(1, count);
+                Assert.IsNotNull(reporter.Entries, "SetEntries should have been called");
+                Assert.AreEqual(1, reporter.Entries.Count, "One DownloadData entry should have been added for the import");
+                Assert.IsTrue(reporter.Entries[0].Success);
+            }
+            finally
+            {
+                File.Delete(tempFile);
+            }
         }
     }
 }
