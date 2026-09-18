@@ -462,7 +462,11 @@ namespace Walkabout.Data
         private void CreateRandomTransactions(List<SampleTransaction> list, double inflation, int years)
         {
             // Now pick randomly from the list to mix things up nicely and spread across 10 year range.
-            Random rand = new Random();
+            // NOTE: deliberately reuse this.rand (not a fresh, unseeded Random) so that the
+            // randomSeed passed into the constructor makes the whole Create() call deterministic --
+            // this method generates the bulk of transactions, so a local unseeded Random here
+            // silently defeated the seeded-reproducibility contract for the entire generator.
+            Random rand = this.rand;
             DateTime today = DateTime.Today;
             DateTime first = today.AddYears(-years);
             DateTime start = new DateTime(first.Year, 1, 1); // start in January
