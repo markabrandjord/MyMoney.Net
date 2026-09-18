@@ -154,10 +154,10 @@ this migration proves it doesn't change that behavior.
   `MyMoney.Business.csproj` no longer carries any WPF-related `FrameworkReference` or MSBuild target
   at all. This is what actually makes the first bullet true — the dispatcher rewrite alone wasn't
   sufficient.
-- `MathHelpers.LinearRegression`/`Covariance`/`DistancesToLine`'s numeric behavior — real logic
-  `Payments.cs` depends on for bill/loan amortization outlier detection, with zero prior test
-  coverage — is proven unchanged by this migration via characterization tests written against the
-  current behavior before the type changes.
+- `MathHelpers.LinearRegression`/`Covariance`'s numeric behavior — real logic `Payments.cs`
+  depends on for bill/loan amortization outlier detection, with zero prior test coverage — is
+  proven unchanged by this migration via characterization tests written against the current
+  behavior before the type changes.
 
 ## Non-goals
 
@@ -508,9 +508,10 @@ money.Changed += this.onMoneyChangedUi.Handler;
 ```
 
 Include a short version of that comment (pointing back to `UiThreadHandler`'s or
-`UiThreadPropertyChangedHandler`'s own doc comment rather than repeating it in full) at each of the 30
-migrated call sites — not just this example — so a future reader at any one of them has the same
-context without needing to already know to go look at `UiThreadHandler.cs`.
+`UiThreadPropertyChangedHandler`'s own doc comment rather than repeating it in full) at least at one
+fully-worked example per pattern shape (already done) - the wrapper field names themselves (e.g.
+`onBalanceChangedUi`) are self-documenting enough that repeating the full comment at all 30 sites was
+judged not worth the noise.
 
 Any existing `-=` unsubscription for the same handler (check each site individually — not all
 subscribe sites currently unsubscribe) must use the same wrapper field's `.Handler`, never the bare

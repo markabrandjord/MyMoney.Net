@@ -2228,5 +2228,7 @@ This step cannot be completed by an agent without a real interactive desktop ses
 1. Run `MyMoney.exe` interactively.
 2. Exercise every migrated view/dialog and confirm UI updates still arrive correctly: Accounts, Transactions (including editing a transaction's status/amount/attachment to exercise the 5 `TransactionsView` nested-class migrations from Task 3), Securities, Currencies, Aliases, Categories, Payees, Rents, the rename-payee dialog, and the account dialog.
 3. Specifically watch for any missed UI update (a value that used to refresh automatically but now doesn't) — the concrete failure mode a missed or mismatched `UiThreadHandler` wrap would produce.
+4. Confirm the startup version-check/changelog notification path (exercises `ChangeListRequest.Completed`) still shows correctly without needing a second app restart.
+5. Confirm a stock-quote download still completes and updates the UI correctly (exercises `StockQuoteManager.DownloadComplete`).
 
 Do not consider this plan complete, and do not merge, until this manual pass has been done and confirmed.
