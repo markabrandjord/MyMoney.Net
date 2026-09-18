@@ -18,13 +18,14 @@ namespace Walkabout.Data
     {
         private readonly MyMoney money;
         private Account checking;
-        private readonly Random rand = new Random();
+        private readonly Random rand;
         private readonly Dictionary<string, StockQuoteHistory> quotes;
 
-        public SampleDataGenerator(MyMoney money, Dictionary<string, StockQuoteHistory> quotes)
+        public SampleDataGenerator(MyMoney money, Dictionary<string, StockQuoteHistory> quotes, int? randomSeed = null)
         {
             this.money = money;
             this.quotes = quotes;
+            this.rand = randomSeed.HasValue ? new Random(randomSeed.Value) : new Random();
         }
 
         public void Create(SampleData data, double inflation, int years, string employer, decimal paycheck)
