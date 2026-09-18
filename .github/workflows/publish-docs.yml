@@ -6,6 +6,14 @@ on:
   push:
     branches: [ master ]
 
+# mkdocs gh-deploy pushes the built site to the gh-pages branch using the
+# default GITHUB_TOKEN, which needs write access to do that -- the repo-wide
+# default token permission is left at read (see ci.yml's reasoning about
+# handing workflows the least token that does the job), so this workflow
+# opts in to write explicitly, scoped to just itself.
+permissions:
+  contents: write
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
