@@ -106,5 +106,31 @@ namespace Walkabout.UnitTests
             var ex = Assert.Throws<InvalidOperationException>(() => registry.BuildConnectionString(entry, DatabaseRole.User));
             Assert.That(ex.Message, Does.Contain("Nowhere"));
         }
+
+        [Test]
+        public void SqlServerConnectionFactory_Connect_BuildsDatabaseWithOverrideAndSyntheticPath()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            registry.Servers["Redmond"] = new DatabaseServerEntry
+            {
+                MyMoneyUser = new DatabaseCredential { UserId = "MyMoneyUser", Password = "secret" }
+            };
+            registry.Databases["My Real Money"] = new DatabaseEntry
+            {
+                Engine = DataEngineType.SqlServer, Server = "Redmond", Catalog = "MyMoney"
+            };
+
+            var database = SqlServerConnectionFactory.Connect(registry, "My Real Money", uiCallback: null);
+
+            Assert.That(database.ConnectionStringOverride, Does.Contain("Initial Catalog=MyMoney").IgnoreCase);
+            Assert.That(database.DatabasePath, Does.EndWith(Path.Combine("SqlServer", "MyMoney.sqlserver")));
+        }
+
+        [Test]
+        public void SqlServerConnectionFactory_Connect_UnknownDisplayName_Throws()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            Assert.Throws<InvalidOperationException>(() => SqlServerConnectionFactory.Connect(registry, "nope", null));
+        }
     }
 }
