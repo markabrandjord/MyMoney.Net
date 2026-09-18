@@ -8,6 +8,7 @@ using FlaUI.Core.Input;
 using FlaUI.Core.Tools;
 using FlaUI.UIA3;
 using NUnit.Framework;
+using Walkabout.Data;
 
 namespace Walkabout.UITests
 {
@@ -38,18 +39,52 @@ namespace Walkabout.UITests
             Assert.That(File.Exists(fixturePath), Is.True,
                 $"Fixture not found at {fixturePath}. Run Task 2's FixtureGenerator first.");
 
-            // /nosettings prevents the app from auto-loading the developer's real,
-            // persisted database on launch and from writing its settings back out
-            // on close. Without it, this test would (a) overwrite the developer's
-            // actual application settings file with the fixture's path, and (b) on
-            // subsequent runs, start with the fixture already loaded from the prior
-            // run's saved settings - defeating the point of exercising the File->Open
-            // dialog below.
-            app = Application.Launch(LaunchSmokeTests.MyMoneyExePath, "/nosettings");
-            automation = new UIA3Automation();
-            Window mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+            // Issue #32 made File | Open a picker over the DatabaseRegistry,
+            // not a free-text file browser (see docs/superpowers/specs/
+            // 2026-09-17-database-registry-and-engine-aware-dialogs-design.md:
+            // "File | Open -> a list of registry entries, not a file
+            // browser"), so the fixture must be registered before it can be
+            // opened this way. Registered/removed against the real default
+            // registry path (there is no per-test override), cleaned up in
+            // a finally block so this test doesn't leave a stray entry in
+            // the developer's actual registry file.
+            const string fixtureDisplayName = "PayeeSelectionTests Fixture";
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[fixtureDisplayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = fixturePath,
+                TestDatabase = true
+            };
+            registry.Save();
 
-            OpenFileViaFileMenu(app, mainWindow, fixturePath);
+            try
+            {
+                // /nosettings prevents the app from auto-loading the developer's real,
+                // persisted database on launch and from writing its settings back out
+                // on close. Without it, this test would (a) overwrite the developer's
+                // actual application settings file with the fixture's path, and (b) on
+                // subsequent runs, start with the fixture already loaded from the prior
+                // run's saved settings - defeating the point of exercising the File->Open
+                // dialog below.
+                app = Application.Launch(LaunchSmokeTests.MyMoneyExePath, "/nosettings");
+                automation = new UIA3Automation();
+                Window mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+
+                OpenFileViaFileMenu(app, mainWindow, fixtureDisplayName);
+                RunAssertions(mainWindow);
+            }
+            finally
+            {
+                var cleanup = DatabaseRegistry.Load(registryPath);
+                cleanup.Databases.Remove(fixtureDisplayName);
+                cleanup.Save();
+            }
+        }
+
+        private void RunAssertions(Window mainWindow)
+        {
 
             // The window title reflects the opened file once loading completes.
             Retry.WhileFalse(
@@ -89,7 +124,7 @@ namespace Walkabout.UITests
             Assert.That(errorDialogPresent, Is.False, "An unhandled-exception dialog appeared after selecting the payee.");
         }
 
-        private static void OpenFileViaFileMenu(Application app, Window mainWindow, string filePath)
+        private static void OpenFileViaFileMenu(Application app, Window mainWindow, string displayName)
         {
             // FindFirstDescendant right after Expand() races WPF's popup layout/render pass:
             // Wait.UntilInputIsProcessed() only pumps the input queue, it does not wait for the
@@ -105,42 +140,30 @@ namespace Walkabout.UITests
             Wait.UntilInputIsProcessed();
 
             AutomationElement openItem = Retry.WhileNull(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByName("Open...")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MenuFileOpen")),
                 TimeSpan.FromSeconds(5)).Result;
             Assert.That(openItem, Is.Not.Null, "'Open...' menu item not found after expanding the File menu.");
             openItem.Patterns.Invoke.Pattern.Invoke();
 
             // The dialog is a separate top-level window belonging to the same
-            // process, not a descendant of mainWindow. The fallback below is
-            // scoped to this app's own process ID and the dialog's known
-            // AutomationId, so it can never match an unrelated window on the
-            // developer's desktop.
+            // process, not a descendant of mainWindow.
             Window openDialog = Retry.WhileNull(() =>
-                mainWindow.ModalWindows.FirstOrDefault() ??
-                mainWindow.Automation.GetDesktop()
-                    .FindFirstChild(cf => cf.ByProcessId(app.ProcessId).And(cf.ByAutomationId("CreateDatabaseDialog")))
-                    ?.AsWindow(),
+                mainWindow.ModalWindows.FirstOrDefault(),
                 TimeSpan.FromSeconds(5)).Result;
-            Assert.That(openDialog, Is.Not.Null, "Open file dialog did not appear.");
-            Assert.That(openDialog.AutomationId, Is.EqualTo("CreateDatabaseDialog"),
-                "Expected the app's 'Connect Database' dialog (AutomationId 'CreateDatabaseDialog') to appear, " +
-                $"but found a different modal window instead (Name: '{openDialog.Name}', AutomationId: '{openDialog.AutomationId}'). " +
-                "This may be an unexpected dialog, e.g. a 'Save Changes?' confirmation.");
+            Assert.That(openDialog, Is.Not.Null, "Open Database dialog did not appear.");
+            Assert.That(openDialog.Title, Is.EqualTo("Open Database"),
+                $"Expected the app's registry-backed 'Open Database' dialog (issue #32), but found a different modal window instead " +
+                $"(Name: '{openDialog.Name}'). This may be an unexpected dialog, e.g. a 'Save Changes?' confirmation.");
 
-            // "Open..." does not launch the native Windows common file dialog -
-            // confirmed by dumping the actual automation tree during development.
-            // It opens the app's own custom WPF "Connect Database" dialog
-            // (AutomationId "CreateDatabaseDialog") with a path text box
-            // (AutomationId "TextBoxFile") and an "Open" button
-            // (AutomationId "ButtonCreate", Name "Open").
-            AutomationElement fileNameBox = Retry.WhileNull(
-                () => openDialog.FindFirstDescendant(cf => cf.ByAutomationId("TextBoxFile")),
-                TimeSpan.FromSeconds(5)).Result;
-            Assert.That(fileNameBox, Is.Not.Null, "File name box not found in Open dialog.");
-            fileNameBox.Patterns.Value.Pattern.SetValue(filePath);
+            // Issue #32's Open Database dialog is a picker over the registered
+            // databases (a ListBox), not a free-text file path box -- see the
+            // comment at this method's call site.
+            var listBox = openDialog.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            Assert.That(listBox.Items.Any(i => i.Text == displayName), Is.True, $"'{displayName}' not listed in Open Database dialog.");
+            listBox.Select(displayName);
 
             AutomationElement openButton = Retry.WhileNull(
-                () => openDialog.FindFirstDescendant(cf => cf.ByAutomationId("ButtonCreate")),
+                () => openDialog.FindFirstDescendant(cf => cf.ByAutomationId("ButtonOk")),
                 TimeSpan.FromSeconds(5)).Result;
             Assert.That(openButton, Is.Not.Null, "Open button not found in Open dialog.");
             openButton.Patterns.Invoke.Pattern.Invoke();

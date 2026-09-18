@@ -263,8 +263,23 @@ namespace Walkabout
             this.AddHandler(OutputPane.HideOutputEvent, new RoutedEventHandler(this.OnHideOutputWindow));
 
             this.recentFilesMenu = new RecentFilesMenu(this.MenuRecentFiles);
-            this.recentFilesMenu.SetFiles(settings.RecentFiles);
-            this.recentFilesMenu.RecentFileSelected += this.OnRecentFileSelected;
+            this.recentFilesMenu.RecentDatabaseSelected += this.OnRecentDatabaseSelected;
+            this.recentFilesMenu.Refresh(DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath()));
+
+#if DEBUG
+            // MenuItem.Click is a bubbling routed event: without marking it
+            // Handled here, a click on either child bubbles up through
+            // MenuFileNew (which itself has Click="OnMenuFileNewClick" in
+            // XAML) once this handler returns, firing NewSqliteDatabase()
+            // a second time -- symptom: cancel the dialog once, it
+            // reappears, cancel again before the app is usable.
+            var newSqlServerItem = new MenuItem { Header = "_SQL Server..." };
+            newSqlServerItem.Click += (s, e) => { this.OnNewSqlServerDatabase(s, e); e.Handled = true; };
+            var newSqliteItem = new MenuItem { Header = "S_QLite..." };
+            newSqliteItem.Click += (s, e) => { this.NewSqliteDatabase(); e.Handled = true; };
+            this.MenuFileNew.Items.Add(newSqlServerItem);
+            this.MenuFileNew.Items.Add(newSqliteItem);
+#endif
 
             this.TransactionGraph.ServiceProvider = this;
             this.AppSettingsPanel.Closed += this.OnAppSettingsPanelClosed;
@@ -294,8 +309,8 @@ namespace Walkabout
             // statementManager against the *new* MyMoney instance) exactly
             // the same way a normal file-based Open does.
             {
-                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
-                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg => this.log.Warning(msg)))
+                string registryPath = DatabaseRegistry.GetDefaultPath();
+                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(registryPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg => this.log.Warning(msg)))
                 {
                     this.database = autoDatabase;
                     this.MenuFileAddUser.Visibility = autoDatabase.SupportsUserLogin ? Visibility.Visible : Visibility.Collapsed;
@@ -477,15 +492,74 @@ namespace Walkabout
             }
         }
 
-        private void OnRecentFileSelected(object sender, RecentFileEventArgs e)
+        private void OnRecentDatabaseSelected(object sender, RecentDatabaseEventArgs e)
         {
             if (!this.SaveIfDirty())
             {
                 return;
             }
+            this.OpenRegisteredDatabase(e.DisplayName, DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath()));
+        }
 
-            Settings.TheSettings.Database = e.FileName;
-            this.BeginLoadDatabase();
+        private void OpenRegisteredDatabase(string displayName, DatabaseRegistry registry)
+        {
+            if (!registry.Databases.TryGetValue(displayName, out DatabaseEntry entry))
+            {
+                MessageBoxEx.Show($"'{displayName}' is no longer registered.", "Open Database", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            if (entry.Engine == DataEngineType.Sqlite)
+            {
+                this.canSave = false;
+                this.LoadDatabase(null, entry.Path, null, null, null);
+            }
+            else
+            {
+                var sqlServerDatabase = SqlServerConnectionFactory.Connect(registry, displayName, new WpfDataLayerUiCallback());
+                MyMoney newMoney = sqlServerDatabase.Load(null);
+                this.database = sqlServerDatabase;
+                this.MenuFileAddUser.Visibility = sqlServerDatabase.SupportsUserLogin ? Visibility.Visible : Visibility.Collapsed;
+                this.DataContext = newMoney;
+                this.canSave = true;
+            }
+
+            entry.LastUsedUtc = DateTime.UtcNow;
+            registry.Save();
+            this.recentFilesMenu.Refresh(registry);
+        }
+
+        private void RegisterRecentDatabase(IDatabase database)
+        {
+            // Only file-based engines land here (via the shared LoadDatabase(string,...)
+            // continuation below); SQL Server loads go through OpenRegisteredDatabase/
+            // OnNewSqlServerDatabase instead, which manage the registry entry themselves.
+            string ext = Path.GetExtension(database.DatabasePath)?.ToLowerInvariant();
+            if (ext != ".db" && ext != ".mmdb")
+            {
+                // Legacy XML/BinaryXML/SqlCe formats aren't modeled in DatabaseRegistry
+                // (DataEngineType only has Sqlite/SqlServer) -- out of #32's scope.
+                return;
+            }
+
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            string displayName = registry.Databases
+                .Where(kv => kv.Value.Engine == DataEngineType.Sqlite
+                    && string.Equals(kv.Value.Path, database.DatabasePath, StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv.Key)
+                .FirstOrDefault() ?? Path.GetFileName(database.DatabasePath);
+
+            bool existingTestFlag = registry.Databases.TryGetValue(displayName, out DatabaseEntry existing) && existing.TestDatabase;
+
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = database.DatabasePath,
+                TestDatabase = existingTestFlag,
+                LastUsedUtc = DateTime.UtcNow
+            };
+            registry.Save();
+            this.recentFilesMenu.Refresh(registry);
         }
 
         private void OfxDownloadControl_SelectionChanged(object sender, DownloadControlSelectionChangedEventArgs e)
@@ -1596,7 +1670,6 @@ namespace Walkabout
             s.ToolBoxWidth = Convert.ToInt32(this.toolBox.Width);
             s.GraphHeight = (int)this.TransactionGraph.Height;
             s.DisplayClosedAccounts = this.accountsControl.DisplayClosedAccounts;
-            s.RecentFiles = this.recentFilesMenu.ToArray();
 
             if (this.database != null && this.database is not SqlServerStoredProcDatabase)
             {
@@ -1893,7 +1966,7 @@ namespace Walkabout
                     }
                     else
                     {
-                        this.NewDatabase();
+                        this.NewSqliteDatabase();
                         this.StartTracking();
                         this.LoadImportFiles();
                     }
@@ -2085,7 +2158,7 @@ namespace Walkabout
                     this.InternalShowMessage(msg);
                     this.skipMessagesUntil = DateTime.Now.AddSeconds(5);
 
-                    this.recentFilesMenu.AddRecentFile(database.DatabasePath);
+                    this.RegisterRecentDatabase(database);
                 }));
             }
 #if PerformanceBlocks
@@ -2137,12 +2210,6 @@ namespace Walkabout
             }
         }
 
-        private CreateDatabaseDialog InitializeCreateDatabaseDialog()
-        {
-            CreateDatabaseDialog frm = new CreateDatabaseDialog();
-            return frm;
-        }
-
         private void CreateAttachmentDirectory()
         {
             if (this.database != null)
@@ -2159,41 +2226,6 @@ namespace Walkabout
                 string path = this.database.DatabasePath;
                 this.settings.StatementsDirectory = this.statementManager.SetupStatementsDirectory(path);
             }
-        }
-
-        private bool NewDatabase()
-        {
-            if (!this.SaveIfDirty())
-            {
-                return false;
-            }
-
-            if (this.database == null ||
-                MessageBoxEx.Show("Are you sure you want to create a new money database?", "New Database",
-                    MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK)
-            {
-                CreateDatabaseDialog frm = this.InitializeCreateDatabaseDialog();
-                frm.Owner = this;
-                frm.Mode = ConnectMode.Create;
-                if (frm.ShowDialog() == false)
-                {
-                    return false;
-                }
-
-                this.canSave = false;
-                try
-                {
-                    this.LoadDatabase(null, frm.Database, null, frm.Password, null);
-                }
-                catch (Exception ex)
-                {
-                    this.log.Error("Error creating new database", ex);
-                    MessageBoxEx.Show(ex.Message, "Create Error", MessageBoxButton.OKCancel, MessageBoxImage.Error);
-                    return false;
-                }
-                return true;
-            }
-            return false;
         }
 
         /// <summary>
@@ -2245,31 +2277,6 @@ namespace Walkabout
             }
         }
 
-        private void OpenDatabase()
-        {
-            if (!this.SaveIfDirty())
-            {
-                return;
-            }
-
-            CreateDatabaseDialog frm = this.InitializeCreateDatabaseDialog();
-            frm.Owner = this;
-            frm.Mode = ConnectMode.Open;
-            if (frm.ShowDialog() == true)
-            {
-                try
-                {
-                    this.LoadDatabase(null, frm.Database, null, frm.Password, null);
-                    this.CreateAttachmentDirectory();
-                    this.CreateStatementsDirectory();
-                }
-                catch (Exception ex)
-                {
-                    this.log.Error("Error opening database", ex);
-                    MessageBoxEx.Show(ex.ToString(), "Error opening database", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-        }
 
         internal bool SaveIfDirty()
         {
@@ -3990,14 +3997,106 @@ namespace Walkabout
             this.myMoney.ResetCategoryFrequencies();
         }
 
-        private void OnCommandFileNew(object sender, ExecutedRoutedEventArgs e)
+        private void OnMenuFileNewClick(object sender, RoutedEventArgs e)
         {
-            this.NewDatabase();
+            // In DEBUG this handler is bound in XAML on MenuFileNew itself,
+            // which now has children (added in the constructor). A direct
+            // click on the parent header just opens the submenu (no Click
+            // fires for that), but a click on either CHILD's own Click
+            // handler bubbles back up here as a routed event once it
+            // returns -- guarded against explicitly (not just by marking
+            // the child handlers Handled) in case that ever changes.
+            // Release builds have no children, so this fires directly and
+            // goes straight to SQLite.
+            if (this.MenuFileNew.Items.Count > 0)
+            {
+                return;
+            }
+            this.NewSqliteDatabase();
+        }
+
+#if DEBUG
+        private void OnNewSqlServerDatabase(object sender, RoutedEventArgs e)
+        {
+            if (!this.SaveIfDirty()) { return; }
+
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            var dlg = new NewSqlServerDatabaseDialog(registry) { Owner = this };
+            if (dlg.ShowDialog() != true) { return; }
+
+            var bootstrapper = new SqlServerBootstrapper(Path.Combine(AppContext.BaseDirectory, "SqlScripts"));
+
+            if (!registry.Servers.ContainsKey(dlg.ServerName))
+            {
+                var saPrompt = new SaCredentialDialog { Owner = this };
+                if (!bootstrapper.BootstrapServerIfNeeded(registry, dlg.ServerName, saPrompt, out string bootstrapError))
+                {
+                    MessageBoxEx.Show(bootstrapError, "Bootstrap Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }
+
+            if (!bootstrapper.CreateCatalog(registry, dlg.ServerName, dlg.CatalogName, dlg.TestDatabase, out string catalogError))
+            {
+                MessageBoxEx.Show(catalogError, "Create Database Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            registry.Databases[dlg.DisplayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.SqlServer,
+                Server = dlg.ServerName,
+                Catalog = dlg.CatalogName,
+                TestDatabase = dlg.TestDatabase,
+                LastUsedUtc = DateTime.UtcNow
+            };
+            registry.Save();
+
+            this.OpenRegisteredDatabase(dlg.DisplayName, registry);
+        }
+#endif
+
+        private void NewSqliteDatabase()
+        {
+            if (!this.SaveIfDirty()) { return; }
+
+            var dlg = new NewSqliteDatabaseDialog { Owner = this };
+            if (dlg.ShowDialog() != true) { return; }
+
+            this.canSave = false;
+            try
+            {
+                this.LoadDatabase(null, dlg.FilePath, null, null, null);
+            }
+            catch (Exception ex)
+            {
+                this.log.Error("Error creating new database", ex);
+                MessageBoxEx.Show(ex.Message, "Create Error", MessageBoxButton.OKCancel, MessageBoxImage.Error);
+                return;
+            }
+
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            registry.Databases[dlg.DisplayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = dlg.FilePath,
+                TestDatabase = dlg.TestDatabase,
+                LastUsedUtc = DateTime.UtcNow
+            };
+            registry.Save();
+            this.recentFilesMenu.Refresh(registry);
         }
 
         private void OnCommandFileOpen(object sender, ExecutedRoutedEventArgs e)
         {
-            this.OpenDatabase();
+            if (!this.SaveIfDirty()) { return; }
+
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            var dlg = new OpenDatabaseDialog(registry) { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                this.OpenRegisteredDatabase(dlg.SelectedDisplayName, registry);
+            }
         }
 
         private void OnCommandFileSave(object sender, ExecutedRoutedEventArgs e)

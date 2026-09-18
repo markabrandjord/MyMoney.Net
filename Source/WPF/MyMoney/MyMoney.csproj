@@ -649,6 +649,19 @@
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.Data\MyMoney.Data.csproj" />
   </ItemGroup>
+
+  <!-- DEBUG-only: SQL Server bootstrap (SqlServerBootstrapper, issue #32)
+       reads these next to MyMoney.exe itself. Release never ships them;
+       SQL Server stays a DEBUG-only engine. This replaces the copy that
+       used to arrive indirectly via MyMoneyAdmin.csproj's own content item
+       plus its CopyMyMoneyAdminOutputToMyMoney target, both retired along
+       with that project. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <None Include="..\MyMoney.Data\SqlScripts\**\*.sql">
+      <Link>SqlScripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
   <ItemGroup>
     <WCFMetadata Include="Service References\" />
   </ItemGroup>

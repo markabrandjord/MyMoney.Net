@@ -8,8 +8,6 @@ namespace Walkabout.Tests
 {
     public class SqlServerStoredProcDatabaseTests
     {
-        private const string EnvVarName = "MYMONEY_TEST_SQLSERVER_USER_CONNECTION";
-
         /// <summary>
         /// Short-term fix (see the WI tracking the real one - unifying this class with
         /// DatabaseContractTests' per-engine SetUp/TearDown pattern and moving cleanup onto a
@@ -21,18 +19,17 @@ namespace Walkabout.Tests
         /// with every later run of any test reusing that ID - cascading one real failure into
         /// unrelated ones. Wiping first, same as SqlServerDatabaseContractTests, makes each run
         /// start from a known-clean table set regardless of what a previous run left behind. Skips
-        /// (does not fail) when SQL Server isn't configured at all, matching this class's existing
-        /// local-dev-friendly behavior - only escalates to SqlServerTestDatabase's fail-fast
-        /// admin/wipe-ack requirements once someone has actually pointed these tests at a real
-        /// server.
+        /// (does not fail) when no TestDatabase: true SQL Server registry entry is configured,
+        /// matching this class's existing local-dev-friendly behavior - only escalates to
+        /// SqlServerTestDatabase's fail-fast requirements once someone has actually registered one.
         /// </summary>
         [SetUp]
         public void SetUp()
         {
-            string connectionString = Environment.GetEnvironmentVariable(EnvVarName);
-            if (string.IsNullOrEmpty(connectionString))
+            string skipReason = SqlServerTestDatabase.GetSkipReasonIfNotConfigured();
+            if (skipReason != null)
             {
-                Assert.Ignore($"Set {EnvVarName} to a MyMoneyUser connection string to run this test against a real SQL Server.");
+                Assert.Ignore(skipReason);
             }
 
             SqlServerTestDatabase.WipeAllTables();
@@ -40,12 +37,12 @@ namespace Walkabout.Tests
 
         private string GetConnectionStringOrSkip()
         {
-            string connectionString = Environment.GetEnvironmentVariable(EnvVarName);
-            if (string.IsNullOrEmpty(connectionString))
+            string skipReason = SqlServerTestDatabase.GetSkipReasonIfNotConfigured();
+            if (skipReason != null)
             {
-                Assert.Ignore($"Set {EnvVarName} to a MyMoneyUser connection string to run this test against a real SQL Server.");
+                Assert.Ignore(skipReason);
             }
-            return connectionString;
+            return SqlServerTestDatabase.GetUserConnectionString();
         }
 
         [Test]

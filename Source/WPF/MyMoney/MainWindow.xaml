@@ -34,7 +34,6 @@
   <Window.CommandBindings>
 
     <!-- FILE -->
-    <CommandBinding Command="New" Executed="OnCommandFileNew"/>
     <CommandBinding Command="Open" Executed="OnCommandFileOpen" />
     <CommandBinding Command="Save" Executed="OnCommandFileSave" CanExecute="OnCommandCanSave" />
     <CommandBinding Command="SaveAs" Executed="OnCommandFileSaveAs" />
@@ -142,7 +141,7 @@
 
         <Menu x:Name="MainMenu" IsMainMenu="True" Grid.Column="1" VerticalAlignment="Center" >
           <MenuItem x:Name="MenuFile" Header="_File">
-            <MenuItem x:Name="MenuFileNew" Header="_New" Command="New"/>
+            <MenuItem x:Name="MenuFileNew" Header="_New" Click="OnMenuFileNewClick"/>
             <MenuItem x:Name="MenuFileOpen" Header="_Open..." Command="Open"/>
             <MenuItem x:Name="MenuFileSave" Header="_Save" Command="Save"/>
             <MenuItem x:Name="MenuFileSaveAs" Header="Save _as..." Command="SaveAs"/>

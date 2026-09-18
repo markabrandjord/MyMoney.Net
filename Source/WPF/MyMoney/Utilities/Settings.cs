@@ -114,20 +114,6 @@ namespace Walkabout.Configuration
             }
         }
 
-        public string[] RecentFiles
-        {
-            get
-            {
-                object value = this.map["RecentFiles"];
-                return value is string[]? (string[])value : null;
-            }
-            set
-            {
-                this.map["RecentFiles"] = value;
-                this.OnPropertyChanged("RecentFiles");
-            }
-        }
-
         public int ToolBoxWidth
         {
             get

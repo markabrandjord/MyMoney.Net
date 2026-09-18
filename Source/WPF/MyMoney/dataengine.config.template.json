@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "ExampleServer": {
+      "comment": "Delete this template block and replace with your own -- populated automatically the first time you use File | New | SQL Server...",
+      "myMoneyAdmin": { "userId": "MyMoneyAdmin", "password": "" },
+      "myMoneyUser": { "userId": "MyMoneyUser", "password": "" },
+      "myMoneyTest": { "userId": "MyMoneyTest", "password": "" }
+    }
+  },
+  "databases": {
+    "Example Database": {
+      "engine": "SqlServer",
+      "server": "ExampleServer",
+      "catalog": "MyMoney",
+      "TestDatabase": false,
+      "lastUsedUtc": null,
+      "comment": null
+    }
+  }
+}
