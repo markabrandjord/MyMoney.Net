@@ -7,9 +7,7 @@ using System.Xml.Serialization;
 // This file contains the OFX object model that implements the Open Financial Exchange spec version 2.03.
 namespace Walkabout.Ofx
 {
-    // OfxErrorCode moved to MyMoney.Business/Ofx/OfxErrorCode.cs in Task 6 (still namespace
-    // Walkabout.Ofx - see that file's comment for why). Everything below this point is
-    // unchanged and stays here pending Task 8's full Ofx/Sgml subsystem move.
+    // OfxErrorCode lives in the sibling OfxErrorCode.cs (same namespace) - see that file.
 
     public class OFX
     {

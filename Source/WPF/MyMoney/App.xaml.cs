@@ -48,7 +48,7 @@ namespace Walkabout
                 Directory.CreateDirectory(logs);
                 this.rootLog = new Log(logs);
                 this.appLog = Log.GetLogger("App");
-                Log.CheckCrashLog(path);
+                CheckCrashLog(path);
 
                 Debug.WriteLine($"Writing logs to {logs}");
                 appLog.Info("Launching MyMoney.Net");
@@ -142,6 +142,22 @@ namespace Walkabout
 
             Settings.TheSettings = s;
             return s;
+        }
+
+        /// <summary>
+        /// Reports the crash record (if any) that Log.FatalUnhandledException left behind on the
+        /// previous run. This used to be Log.CheckCrashLog, but Logger.cs moved into
+        /// MyMoney.Business in Task 8 and this MessageBoxEx call was its only WPF dependency, so
+        /// the reporting half stayed here with its only caller; CrashReport.Load is unchanged.
+        /// </summary>
+        private static void CheckCrashLog(string folder)
+        {
+            CrashReport crash = CrashReport.Load(folder);
+            if (crash != null)
+            {
+                MessageBoxEx.Show($"Money app crashed on {crash.Date} - " + Log.ReportLogging + "\r\n" + crash.Message,
+                    "Crash Report", crash.Details, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private static void SetDefaultSettings(Settings s)

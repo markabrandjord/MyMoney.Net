@@ -21,6 +21,9 @@
     <!-- Needed by Taxes\FederalTaxes.cs and Taxes\StateTaxes.cs (JsonProperty/JsonConvert),
          moved here in Task 3. Version matches MyMoney.csproj's existing reference. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <!-- Needed by Utilities\Logger.cs (LogLevel only), moved here in Task 8.
+         Version matches MyMoney.csproj's existing reference. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Properties\Resources.Designer.cs">
@@ -60,6 +63,27 @@
   <ItemGroup>
     <!-- Moved here in Task 5 along with StockQuotes\*.cs. -->
     <None Include="StockQuotes\Design.dgml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Moved here in Task 8 along with Ofx\*.cs. RootNamespace is Walkabout here
+      too, so every "Walkabout.Ofx.*" manifest name is unchanged - but the
+      assembly holding them is not. Ofx.cs (the two DTDs) and
+      OfxInstitutionInfo.cs (OfxProviderList.xml) already looked these up via
+      typeof(OfxRequest).Assembly and moved with them, so they kept working; the
+      two readers left behind in MyMoney.csproj said
+      Assembly.GetExecutingAssembly() and had to be repointed the same way -
+      MfaChallengeDialog.cs (MfaPhrases.xml) and OfxDownloadController.cs
+      (OfxErrorTemplate.htm).
+    -->
+    <EmbeddedResource Include="Ofx\ofx160.dtd" />
+    <EmbeddedResource Include="Ofx\ofx201.dtd" />
+    <EmbeddedResource Include="Ofx\MfaPhrases.xml" />
+    <EmbeddedResource Include="Ofx\OfxProviderList.xml" />
+    <EmbeddedResource Include="Ofx\OfxErrorTemplate.htm" />
+    <None Include="Ofx\OFX 2.1.1.pdf" />
+    <None Include="Ofx\ofx16.pdf" />
   </ItemGroup>
 
 </Project>

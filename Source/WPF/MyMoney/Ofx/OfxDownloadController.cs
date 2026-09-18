@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows;
+using Walkabout.Configuration;
 using Walkabout.Data;
 using Walkabout.Dialogs;
 using Walkabout.Importers;
@@ -17,11 +18,16 @@ namespace Walkabout.Ofx
         private List<OnlineAccount> accounts;
         private string[] ofxFiles;
         private string tryAgainCaption;
+        private readonly IServiceProvider serviceProvider;
 
 
-        public OfxDownloadController(DownloadControl control)
+        // serviceProvider is only here so this controller can hand OfxThread a real
+        // WpfBusinessLayerUiCallback (Task 8): OfxThread/OfxRequest now live in
+        // MyMoney.Business and cannot show a message box themselves.
+        public OfxDownloadController(DownloadControl control, IServiceProvider serviceProvider)
         {
             this.control = control;
+            this.serviceProvider = serviceProvider;
             control.DetailsClicked += this.OnDetailsClicked;
         }
 
@@ -61,7 +67,10 @@ namespace Walkabout.Ofx
                 }
 
 
-                string template = ProcessHelper.GetEmbeddedResource(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Ofx.OfxErrorTemplate.htm");
+                // OfxErrorTemplate.htm moved into MyMoney.Business with the rest of the Ofx
+                // subsystem in Task 8, so it is no longer in the executing (MyMoney.exe)
+                // assembly; resolve it off a type that travelled with it.
+                string template = ProcessHelper.GetEmbeddedResource(typeof(OfxRequest).Assembly, "Walkabout.Ofx.OfxErrorTemplate.htm");
                 // css uses curly brackets, so it must be substituted.
                 string css = @"body, th, td { font-family: Verdana; font-size:10pt; }
 h2 { font-size: 12pt; }";
@@ -91,14 +100,12 @@ h2 { font-size: 12pt; }";
                         }
                         else
                         {
-                            // Task 6: DownloadData.AddError(OnlineAccount, Account, string) used to wrap
-                            // its message in an OfxException (message-only constructor, so Response/
-                            // HttpHeaders were always null here too) - now wraps it in a plain Exception
-                            // since OfxException itself isn't referenceable from MyMoney.Business. Render
-                            // message-only (no "System.Exception: " prefix, no stack trace) so that path
-                            // still reads the way it always did; a genuinely unexpected Exception reaching
-                            // here from elsewhere now also renders more cleanly, which is a net improvement
-                            // for anything the user sees.
+                            // Anything that is neither of the two OFX-specific exception types:
+                            // render message-only (no "TypeName: " prefix, no stack trace), which
+                            // is what the user can actually act on. Added in Task 6 while
+                            // DownloadData.AddError briefly wrapped its messages in a plain
+                            // Exception; Task 8 restored the OfxException wrapping, so this branch
+                            // is back to being the genuine fallback it was written as.
                             message = error.Message;
                         }
                     }
@@ -152,9 +159,7 @@ h2 { font-size: 12pt; }";
 
         private void Start()
         {
-            OfxThread thread = new OfxThread(this.myMoney, this.accounts, this.ofxFiles, AccountHelper.PickAccount, this.control.Dispatcher);
-            this.syncThreads.Add(thread);
-            thread.Status += new DownloadProgress(this.OnSyncUpdate);
+            OfxThread thread = this.CreateSyncThread(this.accounts, this.ofxFiles);
             thread.Start();
         }
 
@@ -162,10 +167,28 @@ h2 { font-size: 12pt; }";
         {
             List<OnlineAccount> list = new List<OnlineAccount>();
             list.Add(account);
-            OfxThread thread = new OfxThread(this.myMoney, list, null, AccountHelper.PickAccount, this.control.Dispatcher);
+            OfxThread thread = this.CreateSyncThread(list, null);
+            thread.Start();
+        }
+
+        /// <summary>
+        /// OfxThread moved into MyMoney.Business in Task 8, so the two things it used to reach
+        /// out to the WPF project for now come in from here: the UI callback for its
+        /// "not implemented, carry on?" prompts, and the application-wide ImportOFXAsUTF8
+        /// setting. It also no longer needs this.control.Dispatcher - it marshals back to the
+        /// UI thread through Walkabout.Utilities.UiDispatcher, which MainWindow installs from
+        /// that same Dispatcher.
+        /// </summary>
+        private OfxThread CreateSyncThread(List<OnlineAccount> onlineAccounts, string[] files)
+        {
+            OfxThread thread = new OfxThread(this.myMoney, onlineAccounts, files, AccountHelper.PickAccount)
+            {
+                UiCallback = new WpfBusinessLayerUiCallback(this.serviceProvider),
+                ImportOfxAsUtf8 = Settings.TheSettings.ImportOFXAsUTF8
+            };
             this.syncThreads.Add(thread);
             thread.Status += new DownloadProgress(this.OnSyncUpdate);
-            thread.Start();
+            return thread;
         }
 
         private void OnSyncUpdate(int min, int max, int value, DownloadEventArgs e)

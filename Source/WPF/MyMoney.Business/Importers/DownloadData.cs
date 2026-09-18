@@ -150,22 +150,13 @@ namespace Walkabout.Importers
             e.Message = error;
             if (!string.IsNullOrEmpty(error))
             {
-                // Was "new OfxException(error)". OfxException (Ofx.cs) is a much larger,
-                // still-WPF-adjacent type staying in MyMoney.csproj pending Task 8's full Ofx
-                // move (see OfxErrorCode.cs's comment). Correction (post-review): this IS read
-                // back as "error as OfxException" at OfxDownloadController.cs's error-detail-
-                // hyperlink handler (~line 85) - Ofx.cs calls this AddError overload at 16 sites,
-                // so that path is live. With a plain Exception here, that cast now misses and
-                // falls to the handler's generic-Exception branch instead of its OfxException
-                // branch; OfxDownloadController.cs was updated in the same fix to render that
-                // branch as message-only (no "TypeName: " prefix, no stack trace), matching what
-                // the original OfxException(message-only-ctor) path always rendered (Response/
-                // HttpHeaders were always null on that ctor too, so nothing there regresses).
-                // Verified no other call site reads a DownloadData.Error back as OfxException.
-                // Task 8's implementer: once OfxException itself moves, this can go back to
-                // "new OfxException(error)" and OfxDownloadController's branch split becomes
-                // purely cosmetic dead code again (harmless to leave, or fold back).
-                e.Error = new Exception(error);
+                // Task 6 temporarily downgraded this to "new Exception(error)" because
+                // OfxException still lived in MyMoney.csproj. Task 8 moved Ofx.cs (and with it
+                // OfxException) into this assembly, so the original wrapping is restored: the
+                // error-detail hyperlink handler in OfxDownloadController reads it back as
+                // "error as OfxException" again, as it always did. Its plain-Exception branch
+                // stays - it is the honest rendering for anything else that lands there.
+                e.Error = new OfxException(error);
             }
             e.isError = true;
             this.children.Add(e);

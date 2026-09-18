@@ -1,16 +1,9 @@
-// This file contains the OFX error code enum, extracted out of
-// Source/WPF/MyMoney/Ofx/OfxObjectModel.cs in Task 6.
-//
-// DownloadData.cs (moved into MyMoney.Business in Task 6) has always exposed an
-// OfxErrorCode-typed OfxError property, and WPF-side code (Ofx.cs, OfxDownloadController.cs -
-// still in MyMoney.csproj, scheduled to move with the rest of the OFX/SGML subsystem in Task 8)
-// sets it with real OfxErrorCode values. The plan's Task 6 research didn't anticipate this
-// forward dependency on a subsystem Task 8 hasn't moved yet. Rather than pull the whole
-// (much larger, WPF-adjacent) Ofx.cs/OfxObjectModel.cs/SgmlParser.cs/SgmlReader.cs set forward
-// out of order, this pure, self-contained, dependency-free enum moves alone; the rest of the
-// Ofx/Sgml subsystem stays in MyMoney.csproj for Task 8 as originally planned. The namespace
-// (Walkabout.Ofx) is unchanged, so MyMoney.csproj's existing "using Walkabout.Ofx;" call sites
-// keep compiling unchanged via its existing ProjectReference to MyMoney.Business.
+// This file contains the OFX error code enum, split out of OfxObjectModel.cs in Task 6 so
+// that DownloadData.cs's OfxErrorCode-typed OfxError property could move into
+// MyMoney.Business ahead of the rest of the OFX/SGML subsystem. Task 8 has since moved that
+// whole subsystem here too, so the enum now simply sits beside the model it belongs to;
+// keeping it in its own file (one type, one file) rather than folding it back avoids a
+// pointless 100-line churn in OfxObjectModel.cs's history.
 namespace Walkabout.Ofx
 {
     public enum OfxErrorCode

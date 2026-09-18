@@ -11,16 +11,13 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Serialization;
-using Walkabout.Configuration;
 using Walkabout.Data;
 using Walkabout.Sgml;
 using Walkabout.Utilities;
 using Walkabout.Importers;
-using Dispatcher = System.Windows.Threading.Dispatcher;
 
 
 namespace Walkabout.Ofx
@@ -40,18 +37,31 @@ namespace Walkabout.Ofx
         private string[] files;
         private readonly MyMoney myMoney;
         private readonly OfxRequest.PickAccountDelegate resolverWhenMissingAccountId;
-        private readonly Dispatcher dispatcher;
         private ILogger log;
 
-        public OfxThread(MyMoney myMoney, List<OnlineAccount> list, string[] files, OfxRequest.PickAccountDelegate resolverWhenMissingAccountId, Dispatcher uiThreadDispatcher)
+        public OfxThread(MyMoney myMoney, List<OnlineAccount> list, string[] files, OfxRequest.PickAccountDelegate resolverWhenMissingAccountId)
         {
             this.myMoney = myMoney;
             this.list = list;
             this.files = files;
             this.resolverWhenMissingAccountId = resolverWhenMissingAccountId;
-            this.dispatcher = uiThreadDispatcher;
             this.log = Log.GetLogger("OfxThread");
         }
+
+        /// <summary>
+        /// Optional hook back to the UI, propagated to every OfxRequest this thread creates.
+        /// Set by MyMoney.csproj (OfxDownloadController); when it is null the prompts below
+        /// are skipped and their "continue" answer is assumed.
+        /// </summary>
+        public IBusinessLayerUiCallback UiCallback { get; set; }
+
+        /// <summary>
+        /// Whether .ofx/.qfx import files should be read as UTF-8 regardless of what their
+        /// header declares. This mirrors the application-wide Settings.ImportOFXAsUTF8 flag,
+        /// which lives in MyMoney.csproj (Walkabout.Configuration.Settings) and so cannot be
+        /// read from here; OfxDownloadController passes the current value in.
+        /// </summary>
+        public bool ImportOfxAsUtf8 { get; set; }
 
         public void Start()
         {
@@ -97,7 +107,7 @@ namespace Walkabout.Ofx
         {
             Thread.CurrentThread.Name = "Synchronize";
             var downloadArgs = new DownloadEventArgs();
-            OfxRequest ofx = new OfxRequest(null, this.myMoney, this.resolverWhenMissingAccountId);
+            OfxRequest ofx = new OfxRequest(null, this.myMoney, this.resolverWhenMissingAccountId) { UiCallback = this.UiCallback };
             var snapshot = this.files;
             this.files = null;
             int count = snapshot.Length;
@@ -134,7 +144,7 @@ namespace Walkabout.Ofx
                             else
                             {
                                 Encoding enc = null;
-                                if (Settings.TheSettings.ImportOFXAsUTF8)
+                                if (this.ImportOfxAsUtf8)
                                 {
                                     enc = Encoding.UTF8;
                                 }
@@ -166,7 +176,7 @@ namespace Walkabout.Ofx
                     this.log.Error($"Error loading file: {fname}", ex);
                     se.Error = ex;
                     se.Message = "Error opening import file";
-                    MessageBoxEx.Show("Error opening import file", null, ex.Message, MessageBoxButton.OK, MessageBoxImage.Error);
+                    this.UiCallback?.ShowError(ex.Message, "Error opening import file");
                 }
             }
 
@@ -241,7 +251,7 @@ namespace Walkabout.Ofx
 
                 this.UpdateStatusOnUIThread(0, count + 1, i + 1, this.downloadEventArgs);
 
-                request = new OfxRequest(oa, this.myMoney, this.resolverWhenMissingAccountId);
+                request = new OfxRequest(oa, this.myMoney, this.resolverWhenMissingAccountId) { UiCallback = this.UiCallback };
 
                 lock (this.pending)
                 {
@@ -264,7 +274,7 @@ namespace Walkabout.Ofx
                 }
                 else
                 {
-                    await request.SyncAccountsAsync(accounts, f, this.dispatcher);
+                    await request.SyncAccountsAsync(accounts, f);
                     f.Success = true;
                 }
             }
@@ -329,6 +339,15 @@ namespace Walkabout.Ofx
             this.callerPickAccount = resolveMissingAccountId;
             this.log = Log.GetLogger("OfxRequest");
         }
+
+        /// <summary>
+        /// Optional hook back to the UI for the two "this OFX element is not implemented,
+        /// carry on anyway?" prompts in ProcessResponse. Settable rather than a constructor
+        /// argument so the 10+ existing "new OfxRequest(...)" call sites stay unchanged; only
+        /// the two requests OfxThread creates ever reach ProcessResponse, so only those are
+        /// wired up.
+        /// </summary>
+        public IBusinessLayerUiCallback UiCallback { get; set; }
 
         private static string ofxLogPath;
 
@@ -1303,7 +1322,7 @@ NEWFILEUID:{1}
             }
         }
 
-        public async Task SyncAccountsAsync(List<Account> accounts, DownloadData results, Dispatcher dispatcher)
+        public async Task SyncAccountsAsync(List<Account> accounts, DownloadData results)
         {
             if (accounts.Count == 0)
             {
@@ -1358,7 +1377,12 @@ NEWFILEUID:{1}
 
             this.OfxCachePath = SaveLog(doc, this.GetLogfileName(this.onlineAccount) + "RS.xml");
 
-            _ = dispatcher.BeginInvoke(new Action(() =>
+            // UiDispatcher rather than the WPF Dispatcher this method used to be handed: it is the
+            // same UI SynchronizationContext (MainWindow installs it from its own Dispatcher) and
+            // is what the rest of this file already marshals through, so the OfxThread/OfxRequest
+            // pair no longer needs a System.Windows.Threading.Dispatcher parameter threaded
+            // through it from OfxDownloadController.
+            _ = UiDispatcher.BeginInvoke(new Action(() =>
             {
                 // do this on the UI thread so we don't have to worry about parallel access to the Money object.
                 try
@@ -1712,8 +1736,11 @@ NEWFILEUID:{1}
             if (doc.Descendants("CHALLENGERQ").FirstOrDefault() != null ||
                 doc.Descendants("CHALLENGERS").FirstOrDefault() != null)
             {
-                if (MessageBoxEx.Show(string.Format(@"Unexpected CHALLENGERQ or CHALLENGERS element, not implemented.
-Please save the log file '{0}' so we can implement this", GetLogFileLocation(doc)), "CHALLENGERQ", MessageBoxButton.OKCancel, MessageBoxImage.Exclamation) == MessageBoxResult.Cancel)
+                // No callback wired (e.g. a headless/test host) means nobody can answer, so take
+                // the same path the "OK" button always took: keep processing the response rather
+                // than silently discarding everything else it contains.
+                if (!(this.UiCallback?.ConfirmOkCancel(string.Format(@"Unexpected CHALLENGERQ or CHALLENGERS element, not implemented.
+Please save the log file '{0}' so we can implement this", GetLogFileLocation(doc)), "CHALLENGERQ") ?? true))
                 {
                     return;
                 }
@@ -1722,8 +1749,8 @@ Please save the log file '{0}' so we can implement this", GetLogFileLocation(doc
             if (doc.Descendants("PINCHRQ").FirstOrDefault() != null ||
                 doc.Descendants("PINCHRS").FirstOrDefault() != null)
             {
-                if (MessageBoxEx.Show(string.Format(@"Unexpected PINCHRQ or PINCHRS found in response and is not implemented.
-Please save the log file '{0}' so we can implement this", GetLogFileLocation(doc)), "PINCHRQ", MessageBoxButton.OKCancel, MessageBoxImage.Exclamation) == MessageBoxResult.Cancel)
+                if (!(this.UiCallback?.ConfirmOkCancel(string.Format(@"Unexpected PINCHRQ or PINCHRS found in response and is not implemented.
+Please save the log file '{0}' so we can implement this", GetLogFileLocation(doc)), "PINCHRQ") ?? true))
                 {
                     return;
                 }

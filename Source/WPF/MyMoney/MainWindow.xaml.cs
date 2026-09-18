@@ -287,7 +287,7 @@ namespace Walkabout
 
             TabItem item = this.TabDownload;
             DownloadControl dc = item.Content as DownloadControl;
-            this.ofxController = new OfxDownloadController(dc);
+            this.ofxController = new OfxDownloadController(dc, this);
 
 #if DEBUG
             // DEBUG-only SQL Server auto-load (see DataEngineStartup). This
