@@ -816,7 +816,10 @@ namespace Walkabout
                 this.quotes.DownloadComplete -= this.onStockDownloadCompleteUi.Handler;
                 this.quotes.HistoryAvailable -= this.OnStockQuoteHistoryAvailable;
             }
-            this.quotes = new StockQuoteManager(this, this.settings.StockServiceSettings, stockQuotes);
+            this.quotes = new StockQuoteManager(this, this.settings.StockServiceSettings, stockQuotes)
+            {
+                UiCallback = new WpfBusinessLayerUiCallback(this)
+            };
             this.quotes.DownloadComplete += this.onStockDownloadCompleteUi.Handler;
             this.quotes.HistoryAvailable += this.OnStockQuoteHistoryAvailable;
             this.cache = new StockQuoteCache(money, this.quotes.DownloadLog);
@@ -824,7 +827,10 @@ namespace Walkabout
             var exchangeRateSettings = this.FindExchangeRateSettings();
             if (exchangeRateSettings != null)
             {
-                this.exchangeRates = new ExchangeRateService(exchangeRateSettings, stockQuotes, this);
+                this.exchangeRates = new ExchangeRateService(exchangeRateSettings, stockQuotes, this)
+                {
+                    UiCallback = new WpfBusinessLayerUiCallback(this)
+                };
             }
         }
 

@@ -57,4 +57,9 @@
     <EmbeddedResource Include="Taxes\TxfSpec.txt" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Moved here in Task 5 along with StockQuotes\*.cs. -->
+    <None Include="StockQuotes\Design.dgml" />
+  </ItemGroup>
+
 </Project>

@@ -323,7 +323,6 @@
     <EmbeddedResource Include="Database\SampleStockQuotes.zip" />
     <EmbeddedResource Include="Ofx\ofx201.dtd" />
     <None Include=".editorconfig" />
-    <None Include="StockQuotes\Design.dgml" />
     <Resource Include="Charts\Icons\Excel.png" />
     <EmbeddedResource Include="Ofx\MfaPhrases.xml" />
     <Resource Include="Charts\Icons\Table.png" />
