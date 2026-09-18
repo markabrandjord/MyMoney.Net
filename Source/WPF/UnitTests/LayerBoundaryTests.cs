@@ -8,34 +8,27 @@ namespace Walkabout.Tests
     [TestFixture]
     public class LayerBoundaryTests
     {
-        // MyMoney.Business is allowed WindowsBase (the domain model's
-        // event-marshaling backbone has a load-bearing dependency on
-        // System.Windows.Threading.Dispatcher/DependencyObject -- Ruling,
-        // 2026-09-15, see the plan's Global Constraints) but never the two
-        // true UI-rendering assemblies. MyMoney.Data forbids all three --
-        // nothing in it needs WindowsBase even transitively through its own
-        // direct references (it only reaches MyMoney.Business's WindowsBase
-        // dependency via the ProjectReference, which GetReferencedAssemblies
-        // does not surface -- that method returns only an assembly's own
-        // direct references).
-        private static readonly string[] UiRenderingAssemblyNames =
-        {
-            "PresentationFramework", "PresentationCore"
-        };
-
+        // MyMoney.Business and MyMoney.Data both forbid all three WPF-family
+        // assemblies. MyMoney.Business's former WindowsBase dependency (the
+        // domain model's event-marshaling backbone had a load-bearing
+        // dependency on System.Windows.Threading.Dispatcher/DependencyObject)
+        // was removed by the issue #7 rewrite - see
+        // docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md.
+        // UiDispatcher now wraps System.Threading.SynchronizationContext, and
+        // EventHandlerCollection has no UI-framework awareness of any kind.
         private static readonly string[] AllWpfAssemblyNames =
         {
             "PresentationFramework", "PresentationCore", "WindowsBase"
         };
 
         [Test]
-        public void MyMoneyBusiness_HasNoUiRenderingAssemblyReference()
+        public void MyMoneyBusiness_HasNoWpfAssemblyReference()
         {
             var assembly = typeof(Walkabout.Data.MyMoney).Assembly;
             var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
             CollectionAssert.IsEmpty(
-                referenced.Where(n => UiRenderingAssemblyNames.Contains(n)).ToList(),
-                $"MyMoney.Business referenced a UI-rendering assembly: {string.Join(", ", referenced)}");
+                referenced.Where(n => AllWpfAssemblyNames.Contains(n)).ToList(),
+                $"MyMoney.Business referenced a WPF assembly: {string.Join(", ", referenced)}");
         }
 
         [Test]
