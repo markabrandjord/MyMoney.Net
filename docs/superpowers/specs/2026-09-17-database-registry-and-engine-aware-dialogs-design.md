@@ -208,17 +208,25 @@ public enum DatabaseRole { Admin, User, Test }
 
 ## File Menu UX
 
-- **`File | New`** → two submenu items, **SQL Server...** and **SQLite...**,
-  each opening a focused dialog (replacing `CreateDatabaseDialog`'s
-  do-everything design):
-  - Both variants collect a **unique display name** (defaults to something
-    sensible — catalog name or file name — but editable; becomes the
-    `databases` dictionary key) and, **DEBUG builds only** (`#if DEBUG`,
-    compiled out entirely in Release, not merely hidden), an "Is test
-    database" checkbox.
-  - **SQL Server...** additionally collects server name (offering servers
-    already present in the registry) and catalog name, then runs the
-    in-process bootstrap described below.
+- **`File | New`** — **DEBUG builds** get a submenu with two items, **SQL
+  Server...** and **SQLite...**. **Release builds have no submenu at all**:
+  `File | New` goes straight to the SQLite creation dialog (the only engine
+  Release ever offers, consistent with SQL Server being DEBUG-only per
+  Non-Goals). The SQL Server menu item and its dialog are compiled out
+  (`#if DEBUG`) in Release, not merely hidden/disabled — same treatment as
+  the "Is test database" checkbox below.
+  - Each variant opens a focused dialog (replacing `CreateDatabaseDialog`'s
+    do-everything design). Both collect a **unique display name** (defaults
+    to something sensible — catalog name or file name — but editable;
+    becomes the `databases` dictionary key).
+  - The **"Is test database" checkbox** is **DEBUG builds only** (`#if
+    DEBUG`, compiled out entirely in Release, not merely hidden) on
+    whichever dialog(s) Release still shows — i.e. on Release's direct-to-
+    SQLite dialog too, not just on the SQL Server one. Release can never
+    create a database with `isTest: true`.
+  - **SQL Server...** (DEBUG only) additionally collects server name
+    (offering servers already present in the registry) and catalog name,
+    then runs the in-process bootstrap described below.
   - **SQLite...** collects a file location exactly as today's dialog does.
   - On success, both add a new `databases` entry (name/engine/isTest/
     lastUsedUtc=now) to the registry.
