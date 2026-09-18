@@ -36,6 +36,7 @@ namespace Walkabout.Tests
 
             public bool Confirm(string message, string title) => true;
             public bool ConfirmOkCancel(string message, string title) => true;
+            public bool ConfirmWithDetails(string message, string title, string details) => true;
             public void ClearOutputLog(string heading) { }
             public void AppendErrorLog(string errorMessages, string logFilePath, bool activate) { }
             public CsvMap PromptForCsvFieldMapping(string[] expectedColumns, IEnumerable<string> headers, CsvMap existingMap) => null;

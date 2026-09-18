@@ -20,6 +20,15 @@ namespace Walkabout.Data
         bool ConfirmOkCancel(string message, string title);
 
         /// <summary>
+        /// Added in Task 7: DatabaseLifecycle's "your database needs to be upgraded" prompt
+        /// is the one confirmation in the migrated code that used MessageBoxEx's five-argument
+        /// overload - a secondary "details" string shown alongside the message, plus the
+        /// question icon. Plain Confirm(message, title) would have silently dropped both, so
+        /// this preserves that dialog exactly rather than approximating it.
+        /// </summary>
+        bool ConfirmWithDetails(string message, string title, string details);
+
+        /// <summary>
         /// Clears StockQuoteManager's output log pane and starts a new section with the
         /// given heading. Added in Task 5 alongside AppendErrorLog: StockQuoteManager's
         /// progress/error reporting goes through a concrete WPF OutputPane UserControl

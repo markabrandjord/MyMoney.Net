@@ -40,6 +40,13 @@ namespace Walkabout
             return MessageBoxEx.Show(message, title, MessageBoxButton.OKCancel, MessageBoxImage.Exclamation) == MessageBoxResult.OK;
         }
 
+        // Added in Task 7: DatabaseLifecycle's schema-upgrade prompt used the five-argument
+        // MessageBoxEx.Show overload (message, title, details, buttons, image) directly.
+        public bool ConfirmWithDetails(string message, string title, string details)
+        {
+            return MessageBoxEx.Show(message, title, details, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        }
+
         public void ClearOutputLog(string heading)
         {
             OutputPane output = (OutputPane)this.provider.GetService(typeof(OutputPane));
