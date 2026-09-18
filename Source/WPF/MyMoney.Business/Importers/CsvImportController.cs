@@ -3,30 +3,27 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Input;
 using Walkabout.StockQuotes;
 using Walkabout.Data;
-using Walkabout.Dialogs;
 using Walkabout.Utilities;
-using Walkabout.Views;
-using Walkabout.Views.Controls;
 
 namespace Walkabout.Importers
 {
     class CsvImportController
     {
-        private DownloadControl control;
+        private readonly IImportProgressReporter progressReporter;
+        private readonly IBusinessLayerUiCallback uiCallback;
         private MyMoney myMoney;
         private string databaseDir;
         private StockQuoteCache cache;
 
-        public CsvImportController(DownloadControl control, MyMoney money, string databaseDir, StockQuoteCache cache)
+        public CsvImportController(IImportProgressReporter progressReporter, IBusinessLayerUiCallback uiCallback, MyMoney money, string databaseDir, StockQuoteCache cache)
         {
+            this.progressReporter = progressReporter;
+            this.uiCallback = uiCallback;
             this.myMoney = money;
             this.databaseDir = databaseDir;
             this.cache = cache;
-            this.control = control;
         }
 
         public async Task<int> ImportCsv(string fileName)
@@ -35,14 +32,14 @@ namespace Walkabout.Importers
             try
             {
                 DownloadData last = null;
-                var entries = new ThreadSafeObservableCollection<DownloadData>();                
-                this.control.DownloadEventTree.ItemsSource = entries;
+                var entries = new ThreadSafeObservableCollection<DownloadData>();
+                this.progressReporter.SetEntries(entries);
 
                 var csv = CsvDocument.Load(fileName);
                 if (csv.Headers.Contains("Account Number"))
                 {
                     CsvMap map = null;
-                    var grouped = CsvTransactionImporter.GroupCsvByAccount(this.myMoney, csv);
+                    var grouped = CsvTransactionImporter.GroupCsvByAccount(this.myMoney, csv, this.uiCallback);
                     foreach (var key in grouped.Keys)
                     {
                         var data = new DownloadData(null, key);
@@ -67,7 +64,7 @@ namespace Walkabout.Importers
                 else
                 {
                     string prompt = "Please select Account to import the CSV transactions into";
-                    var acct = AccountHelper.PickAccount(this.myMoney, null, prompt);
+                    var acct = this.uiCallback?.PickAccount(this.myMoney, null, prompt);
                     var data = new DownloadData(null, acct);
                     entries.Add(data);
                     var result = await this.ImportCsvForAccount(csv, acct, data);
@@ -83,7 +80,7 @@ namespace Walkabout.Importers
 
                 if (last != null)
                 {
-                    this.control.SelectEntry(last);
+                    this.progressReporter.SelectEntry(last);
                 }
 
             }
@@ -93,7 +90,7 @@ namespace Walkabout.Importers
             catch (Exception ex)
             {
                 // this.log.Error("Import Error", ex);
-                MessageBoxEx.Show(ex.Message, "Import Error", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                this.uiCallback?.ShowError(ex.Message, "Import Error");
             }
             return total;
         }
@@ -108,7 +105,7 @@ namespace Walkabout.Importers
                 CsvTransactionImporter.BrokerageAccountFields :
                 CsvTransactionImporter.BankAccountFields;
 
-            var importer = new CsvTransactionImporter(this.myMoney, acct, map, data, fields, this.cache);
+            var importer = new CsvTransactionImporter(this.myMoney, acct, map, data, fields, this.cache, this.uiCallback);
             count = importer.Import(csv);
             await importer.Commit();
             map.Save();

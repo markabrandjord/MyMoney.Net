@@ -7,7 +7,6 @@ using System.Xml.Serialization;
 using Walkabout.Data;
 using Walkabout.Dialogs;
 using Walkabout.StockQuotes;
-using Walkabout.Utilities;
 
 namespace Walkabout.Assistance
 {
@@ -38,28 +37,42 @@ namespace Walkabout.Assistance
         public void Create()
         {
             string temp = Path.Combine(Path.GetTempPath(), "MyMoney");
-            Directory.CreateDirectory(temp);
+            var (data, quotes) = SampleDataLoader.LoadEmbeddedSampleData(System.Reflection.Assembly.GetExecutingAssembly(), temp);
 
-            string path = Path.Combine(temp, "SampleData.xml");
-            ProcessHelper.ExtractEmbeddedResourceAsFile(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Database.SampleData.xml", path);
-
+            string extractedSampleDataPath = Path.Combine(temp, "SampleData.xml");
             SampleDatabaseOptions options = new SampleDatabaseOptions();
             options.Owner = Application.Current.MainWindow;
-            options.SampleData = path;
+            options.SampleData = extractedSampleDataPath;
             if (options.ShowDialog() == false)
             {
                 return;
             }
 
-            string zipPath = Path.Combine(temp, "SampleStockQuotes.zip");
-            ProcessHelper.ExtractEmbeddedResourceAsFile(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Database.SampleStockQuotes.zip", zipPath);
-
             string quoteFolder = Path.Combine(temp, "StockQuotes");
-            if (Directory.Exists(quoteFolder))
+
+            if (options.SampleData != extractedSampleDataPath)
             {
-                Directory.Delete(quoteFolder, true);
+                // The dialog's "browse" button lets the user point at a custom
+                // template file instead of the embedded one -- reload from there,
+                // and rebuild quotes to match the custom file's securities (the
+                // ones loaded from the embedded default won't match by symbol).
+                XmlSerializer serializer = new XmlSerializer(typeof(SampleData));
+                using (XmlReader reader = XmlReader.Create(options.SampleData))
+                {
+                    data = (SampleData)serializer.Deserialize(reader);
+                }
+
+                quotes = new Dictionary<string, StockQuoteHistory>();
+                foreach (SampleSecurity ss in data.Securities)
+                {
+                    StockQuoteHistory history = StockQuoteHistory.Load(quoteFolder, ss.Symbol);
+                    if (history != null)
+                    {
+                        quotes[ss.Symbol] = history;
+                    }
+                }
             }
-            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, temp);
+
             foreach (var file in Directory.GetFiles(quoteFolder))
             {
                 var target = Path.Combine(this.stockQuotePath, Path.GetFileName(file));
@@ -69,23 +82,9 @@ namespace Walkabout.Assistance
                 }
             }
 
-            path = options.SampleData;
-            SampleData data;
-            XmlSerializer s = new XmlSerializer(typeof(SampleData));
-            using (XmlReader reader = XmlReader.Create(path))
+            foreach (var kvp in quotes)
             {
-                data = (SampleData)s.Deserialize(reader);
-            }
-
-            var quotes = new Dictionary<string, StockQuoteHistory>();
-            foreach (SampleSecurity ss in data.Securities)
-            {
-                var history = StockQuoteHistory.Load(quoteFolder, ss.Symbol);
-                if (history != null)
-                {
-                    quotes[ss.Symbol] = history;
-                    this.manager.DownloadLog.AddHistory(history);
-                }
+                this.manager.DownloadLog.AddHistory(kvp.Value);
             }
 
             new SampleDataGenerator(this.money, quotes).Create(data, options.Inflation, options.Years, options.Employer, options.PayCheck);

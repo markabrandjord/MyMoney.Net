@@ -1,26 +1,17 @@
-using ModernWpf.Controls;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Xps.Serialization;
 using System.Xml;
 using System.Xml.Serialization;
-using Walkabout.Configuration;
-using Walkabout.Controls;
 using Walkabout.Data;
 using Walkabout.Utilities;
-using static System.Runtime.InteropServices.JavaScript.JSType;
-using System.ComponentModel;
-using ModernWpf.Controls.Primitives;
 
 
 
@@ -35,6 +26,8 @@ namespace Walkabout.StockQuotes
     /// </summary>
     public class StockQuoteManager : IDisposable
     {
+        public IBusinessLayerUiCallback UiCallback { get; set; }
+
         private readonly MyMoney myMoney;
         private StringBuilder errorLog = new StringBuilder();
         private bool disposed;
@@ -324,9 +317,7 @@ namespace Walkabout.StockQuotes
 
             UiDispatcher.BeginInvoke(new Action(() =>
             {
-                OutputPane output = (OutputPane)this.provider.GetService(typeof(OutputPane));
-                output.Clear();
-                output.AppendHeading(Walkabout.Properties.Resources.StockQuoteCaption);
+                this.UiCallback?.ClearOutputLog(Walkabout.Properties.Resources.StockQuoteCaption);
             }));
 
             DateTime workDay = holidays.MostRecentWorkDay;
@@ -636,7 +627,7 @@ namespace Walkabout.StockQuotes
             }
             catch (Exception e)
             {
-                MessageBoxEx.Show(e.ToString(), Walkabout.Properties.Resources.StockQuotesException, MessageBoxButton.OK, MessageBoxImage.Error);
+                this.UiCallback?.ShowError(e.ToString(), Walkabout.Properties.Resources.StockQuotesException);
             }
             finally
             {
@@ -651,33 +642,10 @@ namespace Walkabout.StockQuotes
             {
                 return;
             }
-            Paragraph p = new Paragraph();
-            p.Inlines.Add(errorMessages.Trim());
-            if (!string.IsNullOrEmpty(path))
-            {
-                p.Inlines.Add("See ");
-                var link = new Hyperlink() { NavigateUri = new Uri("file://" + path) };
-                link.Cursor = Cursors.Arrow;
-                link.PreviewMouseLeftButtonDown += this.OnShowLogFile;
-                link.Inlines.Add("Log File");
-                p.Inlines.Add(link);
-                p.Inlines.Add(" for details");
-            }
-            OutputPane output = (OutputPane)this.provider.GetService(typeof(OutputPane));
-            output.AppendParagraph(p);
-            if (this._firstError)
-            {
-                this._firstError = false;
-                output.Show();
-            }
+            bool activate = this._firstError;
+            this._firstError = false;
+            this.UiCallback?.AppendErrorLog(errorMessages.Trim(), path, activate);
             this.errorLog = new StringBuilder();
-        }
-
-        private void OnShowLogFile(object sender, RoutedEventArgs e)
-        {
-            Hyperlink link = (Hyperlink)sender;
-            Uri uri = link.NavigateUri;
-            InternetExplorer.OpenUrl(IntPtr.Zero, uri.AbsoluteUri);
         }
 
         private void AddError(string msg)

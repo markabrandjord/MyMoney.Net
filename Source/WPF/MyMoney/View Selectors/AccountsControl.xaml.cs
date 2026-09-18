@@ -271,7 +271,7 @@ namespace Walkabout.Views.Controls
             if (data.GetDataPresent(typeof(string)))
             {
                 string xml = (string)data.GetData(typeof(string));
-                XmlImporter importer = new XmlImporter(this.myMoney, this.Site);
+                XmlImporter importer = new XmlImporter(this.myMoney, new WpfBusinessLayerUiCallback(this.Site));
                 importer.ImportAccount(xml);
                 if (importer.LastAccount == null)
                 {
@@ -728,7 +728,7 @@ namespace Walkabout.Views.Controls
             }
             else
             {
-                Exporters e = new Exporters();
+                Exporters e = new Exporters(new WpfBusinessLayerUiCallback(this.Site));
                 List<object> data = new List<object>();
                 data.Add(a);
                 foreach (object row in this.MyMoney.Transactions.GetTransactionsFrom(a))
@@ -974,8 +974,8 @@ namespace Walkabout.Views.Controls
                     var type = account.Type;
                     if (type != AccountType.CategoryFund)
                     {
-                        var name = CsvStore.CsvSafeString(account.Name);
-                        var balance = CsvStore.CsvSafeString(account.Balance.ToString("C3"));
+                        var name = CsvTransactionFormat.CsvSafeString(account.Name);
+                        var balance = CsvTransactionFormat.CsvSafeString(account.Balance.ToString("C3"));
                         var currency = account.GetCurrency().Symbol;
                         var closed = account.IsClosed;
                         var lastBalance = account.LastBalance;
@@ -1028,7 +1028,7 @@ namespace Walkabout.Views.Controls
                     CsvTransactionImporter.BankAccountFields;
                 entries.Add(data);
                 var cache = (StockQuoteCache)this.Site.GetService(typeof(StockQuoteCache));
-                var importer = new CsvTransactionImporter(this.myMoney, account, map, data, fields, cache);
+                var importer = new CsvTransactionImporter(this.myMoney, account, map, data, fields, cache, new WpfBusinessLayerUiCallback(this.Site));
                 var count = importer.Import(csv);
                 data.Message = (count > 0) ? $"Downloaded {count} transactions" : null;
                 await importer.Commit();
@@ -1085,7 +1085,7 @@ namespace Walkabout.Views.Controls
                         CsvTransactionImporter.BankAccountFields;
                     DownloadData data = new DownloadData(null, account, "");
                     var cache = (StockQuoteCache)this.Site.GetService(typeof(StockQuoteCache));
-                    var ti = new CsvTransactionImporter(this.myMoney, account, map, data, fields, cache);
+                    var ti = new CsvTransactionImporter(this.myMoney, account, map, data, fields, cache, new WpfBusinessLayerUiCallback(this.Site));
                     ti.EditCsvMap(null);
                 } 
                 catch (UserCanceledException)

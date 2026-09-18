@@ -1,5 +1,4 @@
-﻿using ModernWpf.Controls;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -7,7 +6,6 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
 using Walkabout.Data;
-using Walkabout.Dialogs;
 using Walkabout.StockQuotes;
 using Walkabout.Utilities;
 
@@ -78,12 +76,13 @@ namespace Walkabout.Importers
         private readonly string[] fields;
         private readonly DownloadData data;
         private readonly StockQuoteCache cache;
+        private readonly IBusinessLayerUiCallback uiCallback;
 
         // this is what we "can" import...must match the values in the MapField switch statement.
         public static string[] BankAccountFields = new string[] { "Date", "Payee", "Memo", "Amount", "FITID" };
         public static string[] BrokerageAccountFields = new string[] { "Date", "Payee", "Memo", "Action", "Symbol", "TradeType", "UnitPrice", "Quantity", "Amount", "FITID" };
 
-        public CsvTransactionImporter(MyMoney money, Account account, CsvMap map, DownloadData data, string[] fields, StockQuoteCache cache)
+        public CsvTransactionImporter(MyMoney money, Account account, CsvMap map, DownloadData data, string[] fields, StockQuoteCache cache, IBusinessLayerUiCallback uiCallback)
         {
             this.money = money;
             this.account = account;
@@ -91,9 +90,10 @@ namespace Walkabout.Importers
             this.fields = fields;
             this.data = data;
             this.cache = cache;
+            this.uiCallback = uiCallback;
         }
 
-        public static Dictionary<Account, CsvDocument> GroupCsvByAccount(MyMoney money, CsvDocument csv)
+        public static Dictionary<Account, CsvDocument> GroupCsvByAccount(MyMoney money, CsvDocument csv, IBusinessLayerUiCallback uiCallback)
         {
             int accountNumberIndex = csv.Headers.IndexOf("Account Number");
             int accountNameIndex = csv.Headers.IndexOf("Account");
@@ -128,7 +128,7 @@ namespace Walkabout.Importers
                         Account template = new Account();
                         template.AccountId = accountNumber;
                         template.Name = accountName;
-                        found = AccountHelper.PickAccount(money, template, prompt);
+                        found = uiCallback?.PickAccount(money, template, prompt);
                     }
                     if (found != null)
                     {
@@ -307,19 +307,14 @@ namespace Walkabout.Importers
 
         public void EditCsvMap(IEnumerable<string> headers)
         {
-            CsvImportDialog cd = new CsvImportDialog(this.fields);
-            cd.Owner = System.Windows.Application.Current.MainWindow;
-            if (headers != null)
+            // This used to construct and ShowDialog() a WPF CsvImportDialog directly. That
+            // dialog is a real Window, so the whole prompt-and-read-back-the-mapping step now
+            // goes through IBusinessLayerUiCallback; MyMoney.csproj's WpfBusinessLayerUiCallback
+            // owns the actual CsvImportDialog construction/ownership/ShowDialog call.
+            CsvMap mapping = this.uiCallback?.PromptForCsvFieldMapping(this.fields, headers, this.map);
+            if (mapping != null)
             {
-                cd.SetHeaders(headers);
-            }
-            else
-            {
-                cd.SetMap(this.map);
-            }
-            if (cd.ShowDialog() == true)
-            {
-                this.map.CopyFrom(cd.Mapping);
+                this.map.CopyFrom(mapping);
                 this.map.Save();
             }
             else

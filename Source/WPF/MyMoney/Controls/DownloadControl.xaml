@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
-             xmlns:i="clr-namespace:Walkabout.Importers"
+             xmlns:i="clr-namespace:Walkabout.Importers;assembly=MyMoney.Business"
              xmlns:c="clr-namespace:Walkabout.WpfConverters"
              xmlns:ui="http://schemas.modernwpf.com/2019"
              Background="{DynamicResource SystemControlPageBackgroundChromeLowBrush}"
@@ -47,7 +47,7 @@
                 </Grid>
                 <TextBlock Text="{Binding Path=Caption}" FontWeight="Bold" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{DynamicResource ListItemForegroundBrush}"/>
                 <TextBlock Text="{Binding Path=Message}" Margin="0,0,10,0"  VerticalAlignment="Center"  Foreground="{DynamicResource ListItemForegroundBrush}"/>
-                <TextBlock Visibility="{Binding Path=ErrorVisibility}"  VerticalAlignment="Center"  Foreground="{DynamicResource ListItemForegroundBrush}">
+                <TextBlock Visibility="{Binding Path=HasErrorDetails, Converter={StaticResource BoolToVisibilityConverter}}"  VerticalAlignment="Center"  Foreground="{DynamicResource ListItemForegroundBrush}">
                     <Hyperlink Click="OnDetailsClick"><TextBlock Text="{Binding Path=LinkCaption}"/></Hyperlink>
                 </TextBlock>
             </StackPanel>            

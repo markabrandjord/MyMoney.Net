@@ -408,7 +408,7 @@ namespace Walkabout.Views
 
         private void OnCommandViewExport(object sender, ExecutedRoutedEventArgs e)
         {
-            Exporters exporter = new Exporters();
+            Exporters exporter = new Exporters(new WpfBusinessLayerUiCallback(this.ServiceProvider));
             exporter.SupportXml = false;
             exporter.ExportPrompt(this.LoanPayments.ToArray());
         }

@@ -2,10 +2,8 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Text;
-using System.Windows;
 using Walkabout.Data;
 using Walkabout.Ofx;
-using Walkabout.Sgml;
 using Walkabout.Utilities;
 
 namespace Walkabout.Importers
@@ -104,7 +102,13 @@ namespace Walkabout.Importers
 
         public Exception Error { get { return this.error; } set { this.error = value; this.OnPropertyChanged("Error"); } }
 
-        public Visibility ErrorVisibility { get { return this.error == null ? Visibility.Hidden : Visibility.Visible; } }
+        /// <summary>
+        /// Renamed from ErrorVisibility (which returned a System.Windows.Visibility) in Task 6:
+        /// MyMoney.Business doesn't reference WPF, so this now exposes the plain bool the WPF
+        /// side's DownloadControl.xaml binds through the same BoolToVisibilityConverter it
+        /// already uses for IsOfxError/Success/IsDownloading on this same class.
+        /// </summary>
+        public bool HasErrorDetails { get { return this.error != null; } }
 
         public string LinkCaption { get { return this.linkCaption; } set { this.linkCaption = value; this.OnPropertyChanged("LinkCaption"); } }
 
@@ -146,6 +150,13 @@ namespace Walkabout.Importers
             e.Message = error;
             if (!string.IsNullOrEmpty(error))
             {
+                // Task 6 temporarily downgraded this to "new Exception(error)" because
+                // OfxException still lived in MyMoney.csproj. Task 8 moved Ofx.cs (and with it
+                // OfxException) into this assembly, so the original wrapping is restored: the
+                // error-detail hyperlink handler in OfxDownloadController reads it back as
+                // "error as OfxException" again, as it always did - and that handler's
+                // non-OfxException branch was reverted to its pre-Task-6 form in the same
+                // change, so Task 6's compensation is now fully undone on both sides.
                 e.Error = new OfxException(error);
             }
             e.isError = true;

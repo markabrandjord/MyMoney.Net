@@ -1,5 +1,4 @@
-﻿using ModernWpf.Controls;
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -9,13 +8,8 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
-using System.Windows.Documents;
-using System.Windows.Ink;
-using System.Windows.Interop;
 using System.Xml;
 using System.Xml.Serialization;
-using Walkabout.Configuration;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace Walkabout.StockQuotes
 {

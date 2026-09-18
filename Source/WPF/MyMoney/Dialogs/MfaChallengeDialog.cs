@@ -51,7 +51,10 @@ namespace Walkabout.Dialogs
         {
             if (this.phraseTable == null)
             {
-                this.phraseTable = ProcessHelper.GetEmbeddedResourceAsXml(System.Reflection.Assembly.GetExecutingAssembly(), "Walkabout.Ofx.MfaPhrases.xml");
+                // MfaPhrases.xml moved into MyMoney.Business with the rest of the Ofx subsystem
+                // in Task 8, so it is no longer in the executing (MyMoney.exe) assembly; resolve
+                // it off a type that travelled with it.
+                this.phraseTable = ProcessHelper.GetEmbeddedResourceAsXml(typeof(OfxRequest).Assembly, "Walkabout.Ofx.MfaPhrases.xml");
             }
             return this.phraseTable;
         }

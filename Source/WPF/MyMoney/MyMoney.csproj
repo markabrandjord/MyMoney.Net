@@ -311,7 +311,6 @@
     <None Remove="Icons\Flags\zm.png" />
     <None Remove="Icons\Flags\zw.png" />
     <None Remove="Reports\FederalTaxes.json" />
-    <None Remove="Taxes\StateTaxes.json" />
     <None Remove="Views\ad.png" />
   </ItemGroup>
  <ItemGroup>
@@ -322,11 +321,8 @@
       <Link>Properties\Version.cs</Link>
     </Compile>
     <EmbeddedResource Include="Database\SampleStockQuotes.zip" />
-    <EmbeddedResource Include="Ofx\ofx201.dtd" />
     <None Include=".editorconfig" />
-    <None Include="StockQuotes\Design.dgml" />
     <Resource Include="Charts\Icons\Excel.png" />
-    <EmbeddedResource Include="Ofx\MfaPhrases.xml" />
     <Resource Include="Charts\Icons\Table.png" />
     <Resource Include="Charts\Icons\Area.png" />
     <Resource Include="Database\StripSampleStockQuotes.xslt" />
@@ -603,30 +599,18 @@
     <Resource Include="Icons\Flags\zw.png" />
     <Resource Include="Setup\LatestVersion.xslt" />
     <Resource Include="Icons\setup.ico" />
-    <Content Include="Taxes\FederalTaxes.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <Content Include="Setup\changes.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <SubType>Designer</SubType>
     </Content>
-    <Content Include="Taxes\StateTaxes.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <EmbeddedResource Include="Taxes\TxfSpec.txt" />
-    <EmbeddedResource Include="Ofx\ofx160.dtd" />
     <Resource Include="Icons\App.ico" />
     <EmbeddedResource Include="Database\SampleData.xml" />
     <EmbeddedResource Include="Charts\Icons\grab.cur" />
     <EmbeddedResource Include="Charts\Icons\grabbing.cur" />
-    <EmbeddedResource Include="Ofx\OfxProviderList.xml" />
-    <EmbeddedResource Include="Ofx\OfxErrorTemplate.htm" />
     <Resource Include="Icons\TurboTax.png" />
     <EmbeddedResource Include="Icons\Ding.wav" />
     <Resource Include="Icons\Excel.png" />
     <None Include="Controls\Calculator\states.dgml" />
-    <None Include="Ofx\OFX 2.1.1.pdf" />
-    <None Include="Ofx\ofx16.pdf" />
   </ItemGroup>
   <ItemGroup>
     <WebReferences Include="Web References\" />

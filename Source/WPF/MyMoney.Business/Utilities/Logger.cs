@@ -5,8 +5,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using System.Windows;
-using System.Xml.Linq;
 using System.Xml.Serialization;
 
 namespace Walkabout.Utilities
@@ -23,6 +21,14 @@ namespace Walkabout.Utilities
 
     /// <summary>
     /// A simple to use logger that does thread safe write to disk using a Channel object.
+    ///
+    /// Moved here from MyMoney.csproj in Task 8: the Ofx subsystem logs through ILogger/
+    /// Log.GetLogger from 13 call sites, and two Walkabout.Utilities.ILogger types (one per
+    /// assembly) would have made every "using Walkabout.Utilities;" in MyMoney.csproj
+    /// ambiguous, so the interface could not simply be duplicated. Everything here is
+    /// UI-free file/channel plumbing except the old static CheckCrashLog helper, whose one
+    /// MessageBoxEx call moved to its only caller (App.MyApplicationStartup); CrashReport
+    /// itself stayed because Log.FatalUnhandledException writes it.
     /// </summary>
     public class Log : ILogger
     {
@@ -160,15 +166,6 @@ namespace Walkabout.Utilities
                     Details = details
                 };
                 crash.Save(this.folder);
-            }
-        }
-
-        public static void CheckCrashLog(string folder)
-        {
-            var crash = CrashReport.Load(folder);
-            if (crash != null) { 
-                MessageBoxEx.Show($"Money app crashed on {crash.Date} - " + ReportLogging + "\r\n" + crash.Message, 
-                    "Crash Report", crash.Details, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

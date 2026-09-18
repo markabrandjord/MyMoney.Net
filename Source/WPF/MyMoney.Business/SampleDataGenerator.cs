@@ -18,13 +18,14 @@ namespace Walkabout.Data
     {
         private readonly MyMoney money;
         private Account checking;
-        private readonly Random rand = new Random();
+        private readonly Random rand;
         private readonly Dictionary<string, StockQuoteHistory> quotes;
 
-        public SampleDataGenerator(MyMoney money, Dictionary<string, StockQuoteHistory> quotes)
+        public SampleDataGenerator(MyMoney money, Dictionary<string, StockQuoteHistory> quotes, int? randomSeed = null)
         {
             this.money = money;
             this.quotes = quotes;
+            this.rand = randomSeed.HasValue ? new Random(randomSeed.Value) : new Random();
         }
 
         public void Create(SampleData data, double inflation, int years, string employer, decimal paycheck)
@@ -461,7 +462,11 @@ namespace Walkabout.Data
         private void CreateRandomTransactions(List<SampleTransaction> list, double inflation, int years)
         {
             // Now pick randomly from the list to mix things up nicely and spread across 10 year range.
-            Random rand = new Random();
+            // NOTE: deliberately reuse this.rand (not a fresh, unseeded Random) so that the
+            // randomSeed passed into the constructor makes the whole Create() call deterministic --
+            // this method generates the bulk of transactions, so a local unseeded Random here
+            // silently defeated the seeded-reproducibility contract for the entire generator.
+            Random rand = this.rand;
             DateTime today = DateTime.Today;
             DateTime first = today.AddYears(-years);
             DateTime start = new DateTime(first.Year, 1, 1); // start in January

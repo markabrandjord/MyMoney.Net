@@ -287,7 +287,7 @@ namespace Walkabout
 
             TabItem item = this.TabDownload;
             DownloadControl dc = item.Content as DownloadControl;
-            this.ofxController = new OfxDownloadController(dc);
+            this.ofxController = new OfxDownloadController(dc, this);
 
 #if DEBUG
             // DEBUG-only SQL Server auto-load (see DataEngineStartup). This
@@ -816,7 +816,10 @@ namespace Walkabout
                 this.quotes.DownloadComplete -= this.onStockDownloadCompleteUi.Handler;
                 this.quotes.HistoryAvailable -= this.OnStockQuoteHistoryAvailable;
             }
-            this.quotes = new StockQuoteManager(this, this.settings.StockServiceSettings, stockQuotes);
+            this.quotes = new StockQuoteManager(this, this.settings.StockServiceSettings, stockQuotes)
+            {
+                UiCallback = new WpfBusinessLayerUiCallback(this)
+            };
             this.quotes.DownloadComplete += this.onStockDownloadCompleteUi.Handler;
             this.quotes.HistoryAvailable += this.OnStockQuoteHistoryAvailable;
             this.cache = new StockQuoteCache(money, this.quotes.DownloadLog);
@@ -824,7 +827,10 @@ namespace Walkabout
             var exchangeRateSettings = this.FindExchangeRateSettings();
             if (exchangeRateSettings != null)
             {
-                this.exchangeRates = new ExchangeRateService(exchangeRateSettings, stockQuotes, this);
+                this.exchangeRates = new ExchangeRateService(exchangeRateSettings, stockQuotes, this)
+                {
+                    UiCallback = new WpfBusinessLayerUiCallback(this)
+                };
             }
         }
 
@@ -1854,7 +1860,7 @@ namespace Walkabout
                         int count;
                         TabItem item = this.ShowDownloadTab();
                         DownloadControl dc = item.Content as DownloadControl;
-                        QifImporter importer = new QifImporter(dc, this.myMoney);
+                        QifImporter importer = new QifImporter(new DownloadControlProgressReporter(dc), new WpfBusinessLayerUiCallback(this), this.myMoney);
                         acct = importer.Import(selected, file, out count);
                         total += count;
                     }
@@ -1914,6 +1920,30 @@ namespace Walkabout
 
         private bool isLoading;
 
+        private readonly IDatabasePasswordStore databasePasswords = new DatabaseSecurityPasswordStore();
+        private DatabaseLifecycle databaseLifecycle;
+
+        /// <summary>
+        /// The storage-engine-independent half of the file/database lifecycle, moved into
+        /// MyMoney.Business by Task 7. Created lazily rather than in a constructor because
+        /// WpfBusinessLayerUiCallback needs "this", which a field initializer cannot use, and
+        /// MainWindow has two constructors.
+        /// </summary>
+        private DatabaseLifecycle DatabaseLifecycle
+        {
+            get
+            {
+                if (this.databaseLifecycle == null)
+                {
+                    this.databaseLifecycle = new DatabaseLifecycle(
+                        new DatabaseFactory(new SecurityService(), new WpfDataLayerUiCallback()),
+                        this.databasePasswords,
+                        new WpfBusinessLayerUiCallback(this));
+                }
+                return this.databaseLifecycle;
+            }
+        }
+
         private void BeginLoadDatabase()
         {
             this.Cursor = Cursors.Wait;
@@ -1935,7 +1965,7 @@ namespace Walkabout
                     bool error = false;
                     try
                     {
-                        password = DatabaseSecurity.LoadDatabasePassword(name);
+                        password = this.databasePasswords.LoadPassword(name);
                     }
                     catch
                     {
@@ -2028,94 +2058,26 @@ namespace Walkabout
             try
             {
                 this.ShowMessage("Loading...");
-                string ext = Path.GetExtension(databaseName).ToLowerInvariant();
-                if (ext == ".xml")
+
+                // Engine selection, the schema-upgrade prompt and password persistence all
+                // moved into MyMoney.Business's DatabaseLifecycle (Task 7). Load itself stays
+                // here: it needs this window as the IStatusService, and the status-message
+                // suppression window below has to be stamped immediately before it starts.
+                DatabaseOpenResult opened = this.DatabaseLifecycle.Open(new DatabaseConnectionInfo()
                 {
-                    database = new XmlStore(databaseName, password)
-                    {
-                        UserId = userId,
-                        Password = password,
-                        BackupPath = backupPath,
-                    };
-                }
-                else if (ext == ".bxml")
+                    Server = server,
+                    DatabasePath = databaseName,
+                    UserId = userId,
+                    Password = password,
+                    BackupPath = backupPath,
+                });
+
+                if (opened.UpgradeDeclined)
                 {
-                    database = new BinaryXmlStore(databaseName, password)
-                    {
-                        UserId = userId,
-                        Password = password,
-                        BackupPath = backupPath,
-                    };
-                }
-                else if (databaseName.EndsWith(".sdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!SqlCeDatabase.IsSqlCEInstalled)
-                    {
-                        throw new Exception("SQL Express does not appear to be installed any more so we can't open your existing database. " +
-                            "If you want to open it, then please visit http://www.microsoft.com/download/en/details.aspx?id=184 to install " +
-                            "SQL Server Compact Edition 4.0 and try again");
-                    }
-                    else
-                    {
-                        database = new SqlCeDatabase()
-                        {
-                            DatabasePath = Path.GetFullPath(databaseName),
-                            UserId = userId,
-                            Password = password,
-                            BackupPath = backupPath
-                        };
-                        database.Create();
-                    }
-                }
-                else if (databaseName.EndsWith(".db", StringComparison.OrdinalIgnoreCase) || databaseName.EndsWith(".mmdb", StringComparison.OrdinalIgnoreCase))
-                {
-                    database = new SqliteDatabase()
-                    {
-                        DatabasePath = Path.GetFullPath(databaseName),
-                        UserId = userId,
-                        Password = password,
-                        BackupPath = backupPath
-                    };
-                    database.Create();
-                }
-                else
-                {
-                    database = new SqlServerDatabase()
-                    {
-                        Server = server,
-                        DatabasePath = databaseName,
-                        UserId = userId,
-                        Password = password,
-                        BackupPath = backupPath,
-                        SecurityService = new SecurityService(),
-                        UiCallback = new WpfDataLayerUiCallback()
-                    };
-                    database.Create();
+                    return;
                 }
 
-
-                if (database.UpgradeRequired)
-                {
-                    if (MessageBoxEx.Show(
-                        @"Your database needs to be upgraded to the latest format;
-                        \n
-                        click YES to upgrade,
-                        \n
-                        click NO to leave your database untouched and abort loading",
-                        "Confirm upgrade",
-                        "Upgrade Required",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question) == MessageBoxResult.Yes)
-                    {
-                        database.Upgrade();
-                    }
-                    else
-                    {
-                        return;
-                    }
-                }
-
-                DatabaseSecurity.SaveDatabasePassword(database.DatabasePath, password);
+                database = opened.Database;
 
                 this.loadTime = NativeMethods.TickCount;
                 watch.Start();
@@ -2230,6 +2192,14 @@ namespace Walkabout
 
         /// <summary>
         /// This method is only used during testing when we need to create a new test database on the fly.
+        ///
+        /// Deliberately NOT routed through DatabaseLifecycle (Task 7): its engine selection is
+        /// genuinely different from LoadDatabase's, not just a copy of it. It matches on
+        /// SqlCeDatabase/SqliteDatabase's Official*FileExtension constants (".myMoney.sdf" and
+        /// ".mmdb") rather than ".sdf"/".db"/".mmdb", has no .xml/.bxml cases, hard-codes
+        /// ".\SQLEXPRESS" as the server, skips the SQL CE install check, and neither negotiates a
+        /// schema upgrade nor persists a password. Unifying the two would silently change which
+        /// engine the -nd command line produces for several extensions.
         /// </summary>
         private void CreateNewDatabase(string databaseName)
         {
@@ -2398,7 +2368,7 @@ namespace Walkabout
                 database.LazyCreateTables();
 
                 // save the settings
-                DatabaseSecurity.SaveDatabasePassword(database.DatabasePath, password);
+                this.databasePasswords.SavePassword(database.DatabasePath, password);
                 this.settings.BackupPath = null;
 
                 // switch over
@@ -2462,7 +2432,7 @@ namespace Walkabout
             try
             {
                 BinaryXmlStore xs = new BinaryXmlStore(filename, password);
-                DatabaseSecurity.SaveDatabasePassword(xs.DatabasePath, password);
+                this.databasePasswords.SavePassword(xs.DatabasePath, password);
                 this.settings.BackupPath = null;
 
                 this.database = xs;
@@ -2516,7 +2486,7 @@ namespace Walkabout
 
         private int ImportXml(string file)
         {
-            var importer = new XmlImporter(this.myMoney, this);
+            var importer = new XmlImporter(this.myMoney, new WpfBusinessLayerUiCallback(this));
             int total = importer.Import(file);
             Account acct = importer.LastAccount;
 
@@ -4286,7 +4256,7 @@ namespace Walkabout
         {
             TabItem item = this.ShowDownloadTab();
             DownloadControl dc = item.Content as DownloadControl;
-            CsvImportController importer = new CsvImportController(dc, this.myMoney, this.GetDatabaseDir(), this.cache);
+            CsvImportController importer = new CsvImportController(new DownloadControlProgressReporter(dc), new WpfBusinessLayerUiCallback(this), this.myMoney, this.GetDatabaseDir(), this.cache);
             return await importer.ImportCsv(fileName);
         }
 
@@ -4322,7 +4292,7 @@ namespace Walkabout
             {
                 string fname = saveFileDialog1.FileName;
 
-                Exporters ex = new Exporters();
+                Exporters ex = new Exporters(new WpfBusinessLayerUiCallback(this));
                 ex.ExportDgmlAccountMap(this.myMoney, fname);
 
                 NativeMethods.ShellExecute(IntPtr.Zero, "edit", fname, "", null, 1);

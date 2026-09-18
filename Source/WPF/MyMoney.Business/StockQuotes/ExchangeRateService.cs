@@ -7,13 +7,8 @@ using System.Security.Policy;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using System.Windows.Documents;
-using System.Windows.Forms;
 using System.Xml.Linq;
-using Walkabout.Configuration;
-using Walkabout.Controls;
 using Walkabout.Data;
-using Walkabout.Sgml;
 using Walkabout.StockQuotes;
 using Walkabout.Utilities;
 
@@ -187,6 +182,8 @@ namespace Walkabout.StockQuotes
 
     public class ExchangeRateService : IDisposable
     {
+        public IBusinessLayerUiCallback UiCallback { get; set; }
+
         private static readonly string name = "fastforex.io";
         private static string endPoint = "https://api.fastforex.io/";
         private string query = "fetch-all?from=USD";
@@ -197,12 +194,10 @@ namespace Walkabout.StockQuotes
         private DateTime lastDownload = DateTime.MinValue;
         private Dictionary<string, decimal> ratesCache = new Dictionary<string, decimal>();
         OnlineServiceSettings settings;
-        IServiceProvider provider;
 
         public ExchangeRateService(OnlineServiceSettings settings, string logPath, IServiceProvider provider)
         {
             this.settings = settings;
-            this.provider = provider;
             if (string.IsNullOrEmpty(settings.ServiceType))
             {
                 settings.ServiceType = "ExchangeRate";
@@ -231,17 +226,11 @@ namespace Walkabout.StockQuotes
 
         public void LogError(string msg)
         {
-            if (this.provider != null)
+            if (this.UiCallback != null)
             {
-                Paragraph p = new Paragraph();
-                p.Inlines.Add(msg);
-                OutputPane output = (OutputPane)this.provider.GetService(typeof(OutputPane));
-                output.AppendParagraph(p);
-                if (this._firstError)
-                {
-                    this._firstError = false;
-                    output.Show();
-                }
+                bool activate = this._firstError;
+                this._firstError = false;
+                this.UiCallback.AppendErrorLog(msg, null, activate);
             }
         }
 
