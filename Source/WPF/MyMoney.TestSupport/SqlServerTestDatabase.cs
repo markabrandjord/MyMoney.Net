@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using Microsoft.Data.SqlClient;
 using Walkabout.Data;
-using Walkabout.Utilities;
 
 namespace Walkabout.TestSupport
 {
@@ -16,9 +16,6 @@ namespace Walkabout.TestSupport
     /// </summary>
     public static class SqlServerTestDatabase
     {
-        public const string AdminConnectionEnvVar = "MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION";
-        public const string DestructiveWipeAckEnvVar = "MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE";
-
         private static readonly string[] TablesToWipe =
         {
             "Splits", "Investments", "Transactions", "TransactionExtras", "StockSplits", "Aliases",
@@ -51,44 +48,43 @@ namespace Walkabout.TestSupport
         };
 
         /// <summary>
-        /// Deletes every row from every table in the target database. For the 11 tables with a
-        /// MyMoneyTest-tier `_Test_Reset` proc, calls that proc via a connection built from the same
-        /// two JSON config files the real app already reads (dataengine.config.json,
-        /// dataengine.credentials.json) - no environment variable for this connection, per project
-        /// preference for JSON-based test configuration over env vars. The remaining 5 owned-child
-        /// tables still use the MyMoneyAdmin connection's raw DELETE, since they have no aggregate-
-        /// root proc of their own. Fails fast (does not skip) if MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE=1
-        /// or the admin connection string aren't set, or if dataengine.config.json/
-        /// dataengine.credentials.json are missing/inconsistent with the admin connection's target -
-        /// see DestructiveWipeAckEnvVar's own callers for why this is an explicit, unskippable
-        /// human-set acknowledgment rather than a default-on convenience.
+        /// Null if a TestDatabase: true SQL Server entry is registered;
+        /// otherwise an explanatory message for a caller's Assert.Ignore.
+        /// </summary>
+        public static string GetSkipReasonIfNotConfigured()
+        {
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            bool hasTestEntry = registry.Databases.Values.Any(e => e.Engine == DataEngineType.SqlServer && e.TestDatabase);
+            return hasTestEntry
+                ? null
+                : "No SQL Server database in the registry is flagged TestDatabase: true -- register one via File | New | SQL Server... with \"Test database:\" checked.";
+        }
+
+        /// <summary>
+        /// MyMoneyUser-tier connection string for the registered test
+        /// database. Throws (does not return null) if none is configured --
+        /// callers that want to skip instead must check
+        /// GetSkipReasonIfNotConfigured() first, matching
+        /// SqlServerStoredProcDatabaseTests' existing pattern.
+        /// </summary>
+        public static string GetUserConnectionString()
+        {
+            var (registry, entry) = GetTestEntryOrThrow();
+            return registry.BuildConnectionString(entry, DatabaseRole.User);
+        }
+
+        /// <summary>
+        /// Deletes every row from every table in the registered test
+        /// database. Fails fast (does not skip) if no TestDatabase: true
+        /// SQL Server entry is registered -- same explicit, unskippable
+        /// safety posture the old env-var guard had, just sourced from the
+        /// registry's TestDatabase flag instead of a separate ack variable.
         /// </summary>
         public static void WipeAllTables()
         {
-            string ack = Environment.GetEnvironmentVariable(DestructiveWipeAckEnvVar);
-            if (ack != "1")
-            {
-                throw new InvalidOperationException(
-                    $"{DestructiveWipeAckEnvVar}=1 must be set to acknowledge that this will " +
-                    "unconditionally DELETE all rows from every table in the target database before each test. " +
-                    "This is a safety guard against accidentally running SQL-Server-backed tests against a real, populated database.");
-            }
-
-            string adminConnectionString = Environment.GetEnvironmentVariable(AdminConnectionEnvVar);
-            if (string.IsNullOrEmpty(adminConnectionString))
-            {
-                throw new InvalidOperationException(
-                    $"{AdminConnectionEnvVar} must be set to a MyMoneyAdmin connection string so SQL-Server-backed tests can " +
-                    "clean up the shared test database between runs.");
-            }
-
-            string configPath = System.IO.Path.Combine(ProcessHelper.AppDataPath, "dataengine.config.json");
-            DataEngineConfig config = DataEngineConfig.Load(configPath);
-            MyMoneyTestConnectionResolver.ValidateMatchesAdminConnection(adminConnectionString, config);
-
-            DataEngineCredentialStore credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
-            DataEngineCredential testCredential = credentialStore.GetCredential("MyMoneyTest");
-            string testConnectionString = MyMoneyTestConnectionResolver.BuildConnectionString(config, testCredential);
+            var (registry, entry) = GetTestEntryOrThrow();
+            string adminConnectionString = registry.BuildConnectionString(entry, DatabaseRole.Admin);
+            string testConnectionString = registry.BuildConnectionString(entry, DatabaseRole.Test);
 
             using (var adminConnection = new SqlConnection(adminConnectionString))
             using (var testConnection = new SqlConnection(testConnectionString))
@@ -114,6 +110,18 @@ namespace Walkabout.TestSupport
                     }
                 }
             }
+        }
+
+        private static (DatabaseRegistry registry, DatabaseEntry entry) GetTestEntryOrThrow()
+        {
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            var entry = registry.Databases.Values.FirstOrDefault(e => e.Engine == DataEngineType.SqlServer && e.TestDatabase);
+            if (entry == null)
+            {
+                throw new InvalidOperationException(
+                    "No SQL Server database in the registry is flagged TestDatabase: true. Register one via File | New | SQL Server... with \"Test database:\" checked before running SQL-Server-backed tests.");
+            }
+            return (registry, entry);
         }
     }
 }
