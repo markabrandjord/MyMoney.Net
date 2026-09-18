@@ -104,7 +104,7 @@ in-process (no separate `.exe`) SQL Server bootstrap mechanism.
   database enters the picture (see Future Work).
 - **A database-upgrade rehearsal pipeline** (backup → schema/proc
   migration → app binary update → test run) for real, non-test databases.
-  Not needed while every database in this environment is `isTest: true`.
+  Not needed while every database in this environment is `TestDatabase: true`.
   See Future Work.
 
 ## Architecture Overview
@@ -133,7 +133,7 @@ in-process (no separate `.exe`) SQL Server bootstrap mechanism.
    master.dbo.MyMoney_CreateCatalog @CatalogName ──► reconnect with
    InitialCatalog=<new catalog> ──► run every Schema/Access/Test .sql file's
    CREATE OR ALTER statements directly over that connection ──► register
-   the new databases[] entry (engine=SqlServer, server, catalog, isTest)
+   the new databases[] entry (engine=SqlServer, server, catalog, TestDatabase)
 ```
 
 ## Config File Schema
@@ -152,6 +152,7 @@ this WI's in-process, self-generating bootstrap flow).
 {
   "servers": {
     "Redmond": {
+      "comment": "Home NAS, always-on, SQL Server 2022 Developer edition",
       "myMoneyAdmin": { "userId": "MyMoneyAdmin", "password": "..." },
       "myMoneyUser":  { "userId": "MyMoneyUser",  "password": "..." },
       "myMoneyTest":  { "userId": "MyMoneyTest",  "password": "..." }
@@ -160,15 +161,18 @@ this WI's in-process, self-generating bootstrap flow).
   "databases": {
     "My Real Money": {
       "engine": "SqlServer", "server": "Redmond", "catalog": "MyMoney",
-      "isTest": false, "lastUsedUtc": "2026-09-17T20:00:00Z"
+      "TestDatabase": false, "lastUsedUtc": "2026-09-17T20:00:00Z",
+      "comment": "The real one — don't wipe"
     },
     "SQL Server Test": {
       "engine": "SqlServer", "server": "Redmond", "catalog": "MyMoneyTest",
-      "isTest": true, "lastUsedUtc": null
+      "TestDatabase": true, "lastUsedUtc": null,
+      "comment": "Wiped freely by SqlServerStoredProcDatabaseTests"
     },
     "Personal.mmdb": {
       "engine": "Sqlite", "path": "C:\\Users\\...\\MyMoney\\personal.mmdb",
-      "isTest": false, "lastUsedUtc": "2026-09-17T19:30:00Z"
+      "TestDatabase": false, "lastUsedUtc": "2026-09-17T19:30:00Z",
+      "comment": null
     }
   }
 }
@@ -180,8 +184,16 @@ this WI's in-process, self-generating bootstrap flow).
   is needed (unchanged from the existing accepted behavior).
 - `databases` keys are the unique display names shown in `File | Open` /
   `RecentFilesMenu`. Each entry is either SQL Server (`server` + `catalog`)
-  or SQLite (`path`). `isTest` and `lastUsedUtc` apply uniformly to both
+  or SQLite (`path`). `TestDatabase` and `lastUsedUtc` apply uniformly to both
   engines.
+- **`comment`** is an optional, free-text string on both a `servers` entry
+  and a `databases` entry (`null`/absent is fine — not every entry needs
+  one), purely for making a hand-read config file self-documenting (e.g.
+  "the real one, don't wipe" vs. "throwaway, safe to delete"). The app never
+  reads or writes it except to round-trip it — no dialog collects it in this
+  WI; it's for whoever hand-edits the file later. `DatabaseRegistry`'s
+  load/save must preserve it losslessly (round-trip, not drop unknown/
+  null values).
 - Replaces `DataEngineConfig` and `DataEngineCredentialStore` with one new
   class (working name `DatabaseRegistry`) in `MyMoney.Data` that loads/saves
   this file and exposes typed access to both blocks. Exact class/method
@@ -214,25 +226,26 @@ public enum DatabaseRole { Admin, User, Test }
   Release ever offers, consistent with SQL Server being DEBUG-only per
   Non-Goals). The SQL Server menu item and its dialog are compiled out
   (`#if DEBUG`) in Release, not merely hidden/disabled — same treatment as
-  the "Is test database" checkbox below.
+  the "Test database:" checkbox below.
   - Each variant opens a focused dialog (replacing `CreateDatabaseDialog`'s
     do-everything design). Both collect a **unique display name** (defaults
     to something sensible — catalog name or file name — but editable;
     becomes the `databases` dictionary key).
-  - The **"Is test database" checkbox** is **DEBUG builds only** (`#if
+  - The **"Test database:" checkbox** (label reads "Test database:" followed
+    by the checkbox, not "Is test database") is **DEBUG builds only** (`#if
     DEBUG`, compiled out entirely in Release, not merely hidden) on
     whichever dialog(s) Release still shows — i.e. on Release's direct-to-
     SQLite dialog too, not just on the SQL Server one. Release can never
-    create a database with `isTest: true`.
+    create a database with `TestDatabase: true`.
   - **SQL Server...** (DEBUG only) additionally collects server name
     (offering servers already present in the registry) and catalog name,
     then runs the in-process bootstrap described below.
   - **SQLite...** collects a file location exactly as today's dialog does.
-  - On success, both add a new `databases` entry (name/engine/isTest/
+  - On success, both add a new `databases` entry (name/engine/TestDatabase/
     lastUsedUtc=now) to the registry.
 - **`File | Open`** → a list of registry entries, not a file browser.
   Sorted by `lastUsedUtc` descending. DEBUG builds show every entry;
-  Release builds filter out anything with `isTest: true`. Selecting one
+  Release builds filter out anything with `TestDatabase: true`. Selecting one
   connects directly — opening can never implicitly create a database, since
   every listed entry by definition already exists.
 - **`RecentFilesMenu`** loses its own storage entirely. It becomes a view
@@ -295,12 +308,12 @@ stop reading `MYMONEY_TEST_SQLSERVER_USER_CONNECTION`,
 `MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE` entirely. Instead:
 
 - They read the one `dataengine.config.json` and find the `databases` entry
-  with `engine: "SqlServer"` and `isTest: true` (today, in practice, the
+  with `engine: "SqlServer"` and `TestDatabase: true` (today, in practice, the
   `"SQL Server Test"` entry pointing at the `MyMoneyTest` catalog on
   `Redmond`).
-- `isTest: true` on that entry **is** the acknowledgment that wiping it is
+- `TestDatabase: true` on that entry **is** the acknowledgment that wiping it is
   safe — there is no longer a separate opt-in flag to set. A missing
-  `isTest: true` SQL Server entry means the tests skip (`Assert.Ignore`),
+  `TestDatabase: true` SQL Server entry means the tests skip (`Assert.Ignore`),
   same graceful-skip behavior as today's missing-env-var case.
 - The admin-connection `DELETE` fallback for the 5 owned-child tables still
   uses that server's `myMoneyAdmin` credential from the registry's `servers`
@@ -358,7 +371,7 @@ once this spec is committed.
 - **A database-upgrade rehearsal pipeline**: backup, schema/proc migration,
   app binary update, then a test run against the upgraded copy — for real,
   non-test databases. Not needed while every database in this environment
-  is `isTest: true`.
+  is `TestDatabase: true`.
 
 ## Verification
 
@@ -375,6 +388,6 @@ once this spec is committed.
   a Release configuration, not just `#if DEBUG` inspected statically).
 - Live bootstrap verification against Redmond: `MyMoney_BootstrapServer`
   and `MyMoney_CreateCatalog` both idempotent on a second run, and creating
-  a genuinely new second catalog (a real `isTest: true` entry distinct from
+  a genuinely new second catalog (a real `TestDatabase: true` entry distinct from
   the production one) succeeds and is independently wipeable without
   touching the first.
