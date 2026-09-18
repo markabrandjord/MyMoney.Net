@@ -170,6 +170,45 @@ namespace Walkabout.Tests
         }
 
         [Test]
+        public void Save_PartialFailureRollsBackAllEntityTypes()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            // Pre-seed a Category row directly (bypasses Save(), commits immediately on its own
+            // connection) so inserting a second Category with the same Id later, from inside Save(),
+            // collides with a real PRIMARY KEY violation. This proves Save()'s atomicity using a
+            // constraint already confirmed to exist (every [TableMapping] table's Id column is declared
+            // PRIMARY KEY - see SqlDatabase.cs's GetCreateTableScript) rather than relying on schema
+            // details, like foreign keys, that may not be present on every configured database.
+            var seed = new MyMoney();
+            var seedCategory = new Category(seed.Categories) { Id = 999301, Name = "Issue27PreexistingCategory", Type = CategoryType.Expense };
+            seed.Categories.AddCategory(seedCategory);
+            seedCategory.OnInserted();
+            db.UpdateCategories(seed.Categories);
+
+            var money = new MyMoney();
+            var onlineAccount = money.OnlineAccounts.AddOnlineAccount(999300);
+            onlineAccount.Name = "Issue27RollbackTest Bank";
+            onlineAccount.OnInserted();
+
+            var conflictingCategory = new Category(money.Categories) { Id = 999301, Name = "Issue27ConflictingCategory", Type = CategoryType.Expense };
+            money.Categories.AddCategory(conflictingCategory);
+            conflictingCategory.OnInserted();
+
+            // Save(MyMoney) calls UpdateOnlineAccounts before UpdateCategories (see SqlDatabase.cs's
+            // Save(MyMoney) method), so the OnlineAccount insert below succeeds before the Category
+            // insert hits the PRIMARY KEY violation from the pre-seeded row above.
+            Assert.Throws<Microsoft.Data.SqlClient.SqlException>(() => db.Save(money));
+
+            var reloaded = new MyMoney();
+            db.ReadOnlineAccounts(reloaded.OnlineAccounts, reloaded);
+            Assert.That(reloaded.OnlineAccounts.FindOnlineAccountAt(999300), Is.Null,
+                "Save() must be atomic: the OnlineAccount insert that succeeded before the later " +
+                "Categories PRIMARY KEY violation should have been rolled back along with it.");
+        }
+
+        [Test]
         public void InsertUpdateDeleteCurrency_RoundTripsThroughStoredProcedures()
         {
             string connectionString = this.GetConnectionStringOrSkip();
