@@ -1,34 +1,33 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.DirectoryServices;
 using System.IO;
-using System.Windows;
 using Walkabout.Data;
 using Walkabout.Utilities;
-using Walkabout.Views.Controls;
 
 namespace Walkabout.Importers
 {
     /// <summary>
     /// Implements parts of the QIF specification for importing.
-    /// See http://money.mvps.org/articles/qifspecification.aspx 
+    /// See http://money.mvps.org/articles/qifspecification.aspx
     /// </summary>
     public class QifImporter : Importer
     {
-        private DownloadControl control;
+        private readonly IImportProgressReporter progressReporter;
+        private readonly IBusinessLayerUiCallback uiCallback;
         public static string SpecialImportFileName = "~IMPORT~.QIF";
 
-        public QifImporter(DownloadControl control, MyMoney myMoney)
+        public QifImporter(IImportProgressReporter progressReporter, IBusinessLayerUiCallback uiCallback, MyMoney myMoney)
             : base(myMoney)
         {
-            this.control = control;
+            this.progressReporter = progressReporter;
+            this.uiCallback = uiCallback;
         }
 
         public Account Import(Account currentlySelectedAccount, string filename, out int count)
         {
             count = 0;
             var entries = new ThreadSafeObservableCollection<DownloadData>();
-            this.control.DownloadEventTree.ItemsSource = entries;
+            this.progressReporter.SetEntries(entries);
             string name = Path.GetFileNameWithoutExtension(filename);
             Account a = this.Money.Accounts.FindAccount(name);
             if (a == null)
@@ -42,7 +41,7 @@ namespace Walkabout.Importers
                         Environment.NewLine + Environment.NewLine +
                         "Would you like to create it?", name);
 
-                    if (MessageBoxEx.Show(message, "New Account", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                    if (this.uiCallback != null && this.uiCallback.Confirm(message, "New Account"))
                     {
                         a = this.Money.Accounts.AddAccount(name);
                     }
@@ -53,7 +52,7 @@ namespace Walkabout.Importers
                     if (currentlySelectedAccount == null)
                     {
                         // TODO - PROMPT THE USER TO SELECT AN ACCOUNT
-                        MessageBoxEx.Show("You must first select an account to import to");
+                        this.uiCallback?.ShowError("You must first select an account to import to", "Import Error");
                         return null;
                     }
                     else
@@ -63,7 +62,7 @@ namespace Walkabout.Importers
                             currentlySelectedAccount.Name
                             );
 
-                        if (MessageBoxEx.Show(msg, "Merge QIF", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                        if (this.uiCallback != null && this.uiCallback.Confirm(msg, "Merge QIF"))
                         {
                             a = currentlySelectedAccount;
                         }

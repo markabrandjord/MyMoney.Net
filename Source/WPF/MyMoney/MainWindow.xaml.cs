@@ -1860,7 +1860,7 @@ namespace Walkabout
                         int count;
                         TabItem item = this.ShowDownloadTab();
                         DownloadControl dc = item.Content as DownloadControl;
-                        QifImporter importer = new QifImporter(dc, this.myMoney);
+                        QifImporter importer = new QifImporter(new DownloadControlProgressReporter(dc), new WpfBusinessLayerUiCallback(this), this.myMoney);
                         acct = importer.Import(selected, file, out count);
                         total += count;
                     }
@@ -2522,7 +2522,7 @@ namespace Walkabout
 
         private int ImportXml(string file)
         {
-            var importer = new XmlImporter(this.myMoney, this);
+            var importer = new XmlImporter(this.myMoney, new WpfBusinessLayerUiCallback(this));
             int total = importer.Import(file);
             Account acct = importer.LastAccount;
 
@@ -4292,7 +4292,7 @@ namespace Walkabout
         {
             TabItem item = this.ShowDownloadTab();
             DownloadControl dc = item.Content as DownloadControl;
-            CsvImportController importer = new CsvImportController(dc, this.myMoney, this.GetDatabaseDir(), this.cache);
+            CsvImportController importer = new CsvImportController(new DownloadControlProgressReporter(dc), new WpfBusinessLayerUiCallback(this), this.myMoney, this.GetDatabaseDir(), this.cache);
             return await importer.ImportCsv(fileName);
         }
 
@@ -4328,7 +4328,7 @@ namespace Walkabout
             {
                 string fname = saveFileDialog1.FileName;
 
-                Exporters ex = new Exporters();
+                Exporters ex = new Exporters(new WpfBusinessLayerUiCallback(this));
                 ex.ExportDgmlAccountMap(this.myMoney, fname);
 
                 NativeMethods.ShellExecute(IntPtr.Zero, "edit", fname, "", null, 1);

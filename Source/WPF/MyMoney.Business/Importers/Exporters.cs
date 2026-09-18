@@ -1,36 +1,39 @@
-﻿using Microsoft.Win32;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Text;
-using System.Windows;
 using System.Xml;
 using Walkabout.Data;
 using Walkabout.Utilities;
-using static Walkabout.Data.CsvStore;
+using static Walkabout.Data.CsvTransactionFormat;
 
 namespace Walkabout.Importers
 {
     public class Exporters
     {
         private readonly HashSet<Account> accounts = new HashSet<Account>();
+        private readonly IBusinessLayerUiCallback uiCallback;
+
+        public Exporters(IBusinessLayerUiCallback uiCallback)
+        {
+            this.uiCallback = uiCallback;
+        }
 
         public bool SupportXml { get; set; }
 
         public void ExportPrompt(IEnumerable<object> data)
         {
-            SaveFileDialog sd = new SaveFileDialog();
             string filter = Properties.Resources.CsvFileFilter;
             if (this.SupportXml)
             {
                 filter += "|" + Properties.Resources.XmlFileFilter;
             }
-            sd.Filter = filter;
 
-            if (sd.ShowDialog(App.Current.MainWindow) == true)
+            string fileName = this.uiCallback?.PromptSaveFileName(filter);
+            if (!string.IsNullOrEmpty(fileName))
             {
-                this.Export(sd.FileName, data);
+                this.Export(fileName, data);
             }
         }
 
@@ -49,7 +52,7 @@ namespace Walkabout.Importers
                         this.ExportToXml(writer, data);
                         writer.WriteEndElement();
                     }
-                    InternetExplorer.EditTransform(IntPtr.Zero, fileName);
+                    this.uiCallback?.OpenExportedFile(fileName, true);
                 }
                 else if (ext == ".csv")
                 {
@@ -57,7 +60,7 @@ namespace Walkabout.Importers
                     {
                         this.ExportToCsv(sw, data);
                     }
-                    InternetExplorer.OpenUrl(IntPtr.Zero, fileName);
+                    this.uiCallback?.OpenExportedFile(fileName, false);
                 }
                 else
                 {
@@ -66,7 +69,7 @@ namespace Walkabout.Importers
             }
             catch (Exception e)
             {
-                MessageBoxEx.Show("Error exporting rows\n" + e.Message, "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                this.uiCallback?.ShowError("Error exporting rows\n" + e.Message, "Export Error");
             }
         }
 
@@ -210,9 +213,9 @@ namespace Walkabout.Importers
                     if (first)
                     {
                         first = false;
-                        CsvStore.WriteTransactionHeader(writer, flags);
+                        CsvTransactionFormat.WriteTransactionHeader(writer, flags);
                     }
-                    CsvStore.WriteTransaction(writer, t, flags);
+                    CsvTransactionFormat.WriteTransaction(writer, t, flags);
                 }
                 else
                 {
@@ -222,9 +225,9 @@ namespace Walkabout.Importers
                         if (first)
                         {
                             first = false;
-                            CsvStore.WriteInvestmentHeader(writer);
+                            CsvTransactionFormat.WriteInvestmentHeader(writer);
                         };
-                        CsvStore.WriteInvestment(writer, i);
+                        CsvTransactionFormat.WriteInvestment(writer, i);
                     }
                     else
                     {
@@ -234,9 +237,9 @@ namespace Walkabout.Importers
                             if (first)
                             {
                                 first = false;
-                                CsvStore.WriteLoanPaymentHeader(writer);
+                                CsvTransactionFormat.WriteLoanPaymentHeader(writer);
                             };
-                            CsvStore.WriteLoanPayment(writer, l);
+                            CsvTransactionFormat.WriteLoanPayment(writer, l);
                         }
                     }
                 }

@@ -2,10 +2,8 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Text;
-using System.Windows;
 using Walkabout.Data;
 using Walkabout.Ofx;
-using Walkabout.Sgml;
 using Walkabout.Utilities;
 
 namespace Walkabout.Importers
@@ -104,7 +102,13 @@ namespace Walkabout.Importers
 
         public Exception Error { get { return this.error; } set { this.error = value; this.OnPropertyChanged("Error"); } }
 
-        public Visibility ErrorVisibility { get { return this.error == null ? Visibility.Hidden : Visibility.Visible; } }
+        /// <summary>
+        /// Renamed from ErrorVisibility (which returned a System.Windows.Visibility) in Task 6:
+        /// MyMoney.Business doesn't reference WPF, so this now exposes the plain bool the WPF
+        /// side's DownloadControl.xaml binds through the same BoolToVisibilityConverter it
+        /// already uses for IsOfxError/Success/IsDownloading on this same class.
+        /// </summary>
+        public bool HasErrorDetails { get { return this.error != null; } }
 
         public string LinkCaption { get { return this.linkCaption; } set { this.linkCaption = value; this.OnPropertyChanged("LinkCaption"); } }
 
@@ -146,7 +150,13 @@ namespace Walkabout.Importers
             e.Message = error;
             if (!string.IsNullOrEmpty(error))
             {
-                e.Error = new OfxException(error);
+                // Was "new OfxException(error)". OfxException (Ofx.cs) is a much larger,
+                // still-WPF-adjacent type staying in MyMoney.csproj pending Task 8's full Ofx
+                // move (see OfxErrorCode.cs's comment) - nothing reads this back as an
+                // OfxException specifically (verified: no cast/`as OfxException` site anywhere
+                // in the codebase touches a DownloadData.Error value), so a plain Exception
+                // carrying the same message is behavior-equivalent here.
+                e.Error = new Exception(error);
             }
             e.isError = true;
             this.children.Add(e);

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Xml;
-using Walkabout.Attachments;
 using Walkabout.Data;
 
 namespace Walkabout.Importers
@@ -12,11 +11,17 @@ namespace Walkabout.Importers
     {
         private readonly Dictionary<long, long> remappedIds = new Dictionary<long, long>();
         private Account last;
-        private IServiceProvider site;
+        private readonly IBusinessLayerUiCallback uiCallback;
 
-        public XmlImporter(MyMoney money, IServiceProvider site) : base(money)
+        // Was "(MyMoney money, IServiceProvider site)". The IServiceProvider was only ever used
+        // for one lookup - typeof(Walkabout.Attachments.AttachmentManager), a WPF-coupled type
+        // that can't be referenced from MyMoney.Business (see IBusinessLayerUiCallback.cs's
+        // MoveAttachments doc comment). Replaced with the same IBusinessLayerUiCallback every
+        // other Importer in this task now takes; existing 2-arg call sites (`new XmlImporter(x, y)`)
+        // still compile unchanged either way since both parameter types are reference types.
+        public XmlImporter(MyMoney money, IBusinessLayerUiCallback uiCallback) : base(money)
         {
-            this.site = site;
+            this.uiCallback = uiCallback;
         }
 
         public Account LastAccount => this.last;
@@ -121,8 +126,7 @@ namespace Walkabout.Importers
                                             {
                                                 if (t.HasAttachment)
                                                 {
-                                                    AttachmentManager mgr = this.site.GetService(typeof(AttachmentManager)) as AttachmentManager;
-                                                    mgr.MoveAttachments(original, selected);
+                                                    this.uiCallback?.MoveAttachments(original, selected);
                                                 }
                                                 original.Account = selected;
                                             }
