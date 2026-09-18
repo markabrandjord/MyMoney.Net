@@ -76,6 +76,21 @@ namespace Walkabout.UnitTests
         }
 
         [Test]
+        public void Save_WritesEngineAsReadableStringNotRawInt()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            registry.Databases["x"] = new DatabaseEntry { Engine = DataEngineType.SqlServer, Server = "Redmond", Catalog = "MyMoney" };
+            registry.Save();
+
+            string json = File.ReadAllText(this.tempFile);
+            Assert.That(json, Does.Contain("\"engine\": \"SqlServer\""));
+            Assert.That(json, Does.Not.Contain("\"engine\": 1"));
+
+            var reloaded = DatabaseRegistry.Load(this.tempFile);
+            Assert.That(reloaded.Databases["x"].Engine, Is.EqualTo(DataEngineType.SqlServer));
+        }
+
+        [Test]
         public void GetDefaultPath_EndsWithDataEngineConfigJson()
         {
             Assert.That(DatabaseRegistry.GetDefaultPath(), Does.EndWith(Path.Combine("MyMoney", "dataengine.config.json")));

@@ -89,6 +89,13 @@ namespace Walkabout.Data
                     OverrideSpecifiedNames = false
                 }
             },
+            // Without this, Newtonsoft's default enum handling writes the
+            // Engine field as its raw underlying int (0/1) on Save(),
+            // contradicting the spec's self-documenting-JSON goal and its
+            // own example ("engine": "SqlServer") -- confirmed by
+            // inspecting an actual saved file. Reading already tolerated
+            // both forms; this makes writing match.
+            Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() },
             Formatting = Formatting.Indented,
             NullValueHandling = NullValueHandling.Include
         };
