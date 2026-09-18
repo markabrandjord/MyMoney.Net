@@ -48,18 +48,31 @@ namespace Walkabout.Assistance
                 return;
             }
 
+            string quoteFolder = Path.Combine(temp, "StockQuotes");
+
             if (options.SampleData != extractedSampleDataPath)
             {
                 // The dialog's "browse" button lets the user point at a custom
-                // template file instead of the embedded one -- reload from there.
+                // template file instead of the embedded one -- reload from there,
+                // and rebuild quotes to match the custom file's securities (the
+                // ones loaded from the embedded default won't match by symbol).
                 XmlSerializer serializer = new XmlSerializer(typeof(SampleData));
                 using (XmlReader reader = XmlReader.Create(options.SampleData))
                 {
                     data = (SampleData)serializer.Deserialize(reader);
                 }
+
+                quotes = new Dictionary<string, StockQuoteHistory>();
+                foreach (SampleSecurity ss in data.Securities)
+                {
+                    StockQuoteHistory history = StockQuoteHistory.Load(quoteFolder, ss.Symbol);
+                    if (history != null)
+                    {
+                        quotes[ss.Symbol] = history;
+                    }
+                }
             }
 
-            string quoteFolder = Path.Combine(temp, "StockQuotes");
             foreach (var file in Directory.GetFiles(quoteFolder))
             {
                 var target = Path.Combine(this.stockQuotePath, Path.GetFileName(file));
