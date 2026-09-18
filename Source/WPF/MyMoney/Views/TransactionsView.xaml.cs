@@ -98,6 +98,7 @@ namespace Walkabout.Views
         private IServiceProvider site;
 
         private MyMoney myMoney;
+        private UiThreadHandler onMoneyChangedUi;
         private TypeToFind ttf;
         private readonly DelayedActions delayedUpdates = new DelayedActions();
         private ILogger log;
@@ -411,6 +412,7 @@ namespace Walkabout.Views
         /// </summary>
         public TransactionsView()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.TransactionViewInitialize))
             {
@@ -1327,14 +1329,18 @@ namespace Walkabout.Views
                 {
                     return;
                 }
+                // Wrapped once in the ctor and reused for both subscribe and unsubscribe below - see
+                // UiThreadHandler's doc comment for why a bare re-wrap or a mismatched raw method group here
+                // would silently break unsubscription (a mistake a Roslyn analyzer could catch at compile time
+                // if this class of bug recurs - deferred for now, see issue #49).
                 if (this.myMoney != null)
                 {
-                    this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.myMoney.Changed -= this.onMoneyChangedUi.Handler;
                 }
                 this.myMoney = value;
                 if (value != null)
                 {
-                    this.myMoney.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.myMoney.Changed += this.onMoneyChangedUi.Handler;
                 }
                 this.TheActiveGrid.ClearItemsSource();
 
@@ -5533,6 +5539,7 @@ namespace Walkabout.Views
 
         public TransactionCell()
         {
+            this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);
             DataContextChanged += new DependencyPropertyChangedEventHandler(this.OnDataContextChanged);
             Unloaded += (s, e) =>
             {
@@ -5547,10 +5554,7 @@ namespace Walkabout.Views
         private void OnUnloaded()
         {
             // stop listening
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
         }
 
         private void OnLoaded()
@@ -5558,12 +5562,13 @@ namespace Walkabout.Views
             // start listening
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
+                this.propertyChangeSubscription.Unsubscribe(this.context);
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.UpdateUI();
             }
         }
 
+        private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
         private Transaction context;
         private DataGridCell cell;
         private bool mouseOver;
@@ -5640,16 +5645,9 @@ namespace Walkabout.Views
 
         private void SetContext(Transaction transaction)
         {
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
             this.context = transaction;
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Subscribe(this.context);
         }
 
         private void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -5866,10 +5864,12 @@ namespace Walkabout.Views
 
     public class TransactionAttachmentIcon : Border
     {
+        private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
         private Transaction context;
 
         public TransactionAttachmentIcon()
         {
+            this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnContextPropertyChanged);
             DataContextChanged += this.OnDataContextChanged;
             Unloaded += (s, e) =>
             {
@@ -5884,10 +5884,7 @@ namespace Walkabout.Views
         private void OnUnloaded()
         {
             // stop listening
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnContextPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
         }
 
         private void OnLoaded()
@@ -5895,8 +5892,8 @@ namespace Walkabout.Views
             // start listening
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnContextPropertyChanged;
-                this.context.PropertyChanged += this.OnContextPropertyChanged;
+                this.propertyChangeSubscription.Unsubscribe(this.context);
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.UpdateIcon();
             }
         }
@@ -5912,15 +5909,9 @@ namespace Walkabout.Views
 
         private void SetContext(Transaction t)
         {
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnContextPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
             this.context = t;
-            if (this.context != null)
-            {
-                this.context.PropertyChanged += this.OnContextPropertyChanged;
-            }
+            this.propertyChangeSubscription.Subscribe(this.context);
             this.UpdateIcon();
         }
 
@@ -6922,6 +6913,7 @@ namespace Walkabout.Views
 
     public class TransactionTextField : TextBlock
     {
+        private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
         private Transaction context;
         private readonly string fieldName;
         private readonly bool hasBinding;
@@ -6929,6 +6921,7 @@ namespace Walkabout.Views
 
         public TransactionTextField(string name, Func<Transaction, string> getter, Binding binding, object dataItem)
         {
+            this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);
             this.getter = getter;
             this.Margin = new Thickness(2, 1, 3, 0);
             this.fieldName = name;
@@ -6954,10 +6947,7 @@ namespace Walkabout.Views
         private void OnUnloaded()
         {
             // stop listening
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
         }
 
         private void OnLoaded()
@@ -6965,8 +6955,8 @@ namespace Walkabout.Views
             // start listening
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
+                this.propertyChangeSubscription.Unsubscribe(this.context);
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.UpdateLabel();
             }
         }
@@ -6992,16 +6982,9 @@ namespace Walkabout.Views
 
         private void SetContext(Transaction transaction)
         {
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
             this.context = transaction;
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Subscribe(this.context);
             this.UpdateLabel();
         }
 
@@ -7109,6 +7092,7 @@ namespace Walkabout.Views
     /// </summary>  
     public class TransactionStatusButton : Border
     {
+        private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
         private readonly Button button;
         private readonly TextBlock label;
         private Transaction context;
@@ -7119,6 +7103,7 @@ namespace Walkabout.Views
         /// </summary>
         public TransactionStatusButton()
         {
+            this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);
             this.Child = this.button = new Button() { Padding = new Thickness(8, 0, 8, 0) };
             this.button.PreviewMouseLeftButtonDown += new MouseButtonEventHandler(this.OnStatusButtonClick);
             DataContextChanged += new DependencyPropertyChangedEventHandler(this.OnDataContextChanged);
@@ -7138,10 +7123,7 @@ namespace Walkabout.Views
         private void OnUnloaded()
         {
             // stop listening
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
         }
 
         private void OnLoaded()
@@ -7149,8 +7131,8 @@ namespace Walkabout.Views
             // start listening
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
+                this.propertyChangeSubscription.Unsubscribe(this.context);
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.UpdateLabel();
             }
         }
@@ -7187,16 +7169,9 @@ namespace Walkabout.Views
 
         private void SetContext(Transaction transaction)
         {
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
             this.context = transaction;
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Subscribe(this.context);
         }
 
         private void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -7339,6 +7314,7 @@ namespace Walkabout.Views
     */
     public class TransactionAmountControl : UserControl
     {
+        private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
         private bool editing;
         private string type;
         private Button button;
@@ -7354,6 +7330,7 @@ namespace Walkabout.Views
         /// </summary>
         public TransactionAmountControl()
         {
+            this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);
             var grid = new Grid()
             {
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
@@ -7379,10 +7356,7 @@ namespace Walkabout.Views
         private void OnUnloaded()
         {
             // stop listening
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
         }
 
         private void OnLoaded()
@@ -7390,8 +7364,8 @@ namespace Walkabout.Views
             // start listening
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
+                this.propertyChangeSubscription.Unsubscribe(this.context);
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.UpdateButton();
                 this.UpdateLabel();
             }
@@ -7488,15 +7462,11 @@ namespace Walkabout.Views
 
         private void SetContext(Transaction transaction)
         {
-            if (this.context != null)
-            {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-            }
+            this.propertyChangeSubscription.Unsubscribe(this.context);
             this.context = transaction;
             if (this.context != null)
             {
-                this.context.PropertyChanged -= this.OnPropertyChanged;
-                this.context.PropertyChanged += this.OnPropertyChanged;
+                this.propertyChangeSubscription.Subscribe(this.context);
                 this.FinishConstruction();
             }
         }

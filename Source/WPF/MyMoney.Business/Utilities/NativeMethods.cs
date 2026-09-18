@@ -219,16 +219,16 @@ namespace Walkabout.Utilities
             public int Y;
         }
 
-        public static System.Windows.Point GetMousePosition()
+        public static (double X, double Y) GetMousePosition()
         {
             NativeMethods.POINT p;
             if (!NativeMethods.GetCursorPos(out p))
             {
-                return new System.Windows.Point(0, 0);
+                return (0, 0);
             }
 
             // Convert pixels to device independent WPF coordinates
-            return new System.Windows.Point(ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
+            return (ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
         }
 
         [DllImport("User32.dll")]

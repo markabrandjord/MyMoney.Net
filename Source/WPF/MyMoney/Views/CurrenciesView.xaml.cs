@@ -34,13 +34,14 @@ namespace Walkabout.Views
 
         public CurrenciesView()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
             this.InitializeComponent();
             this.SetupGrid(this.CurrenciesDataGrid);
             Unloaded += (s, e) =>
             {
                 if (this.money != null)
                 {
-                    this.money.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.money.Changed -= this.onMoneyChangedUi.Handler;
                 }
             };
         }
@@ -457,6 +458,7 @@ namespace Walkabout.Views
         #region IView
 
         private MyMoney money;
+        private UiThreadHandler onMoneyChangedUi;
 
         public MyMoney Money
         {
@@ -467,12 +469,12 @@ namespace Walkabout.Views
             {
                 if (this.money != null)
                 {
-                    this.money.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.money.Changed -= this.onMoneyChangedUi.Handler;
                 }
                 this.money = value;
                 if (this.money != null)
                 {
-                    this.money.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                    this.money.Changed += this.onMoneyChangedUi.Handler;
                     this.ShowCurrencies();
                 }
             }

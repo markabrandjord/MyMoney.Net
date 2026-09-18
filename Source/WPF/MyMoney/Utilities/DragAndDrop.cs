@@ -425,7 +425,7 @@ namespace Walkabout.Utilities
         {
             if (this.dragdropWindow != null)
             {
-                Point pos = NativeMethods.GetMousePosition();
+                var pos = NativeMethods.GetMousePosition();
                 this.dragdropWindow.Left = pos.X + 10;
                 this.dragdropWindow.Top = pos.Y + 10;
             }

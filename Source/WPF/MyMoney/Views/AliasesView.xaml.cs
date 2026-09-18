@@ -23,6 +23,7 @@ namespace Walkabout.Views
 
         public AliasesView()
         {
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
             this.InitializeComponent();
             IsVisibleChanged += new DependencyPropertyChangedEventHandler(this.AliasesView_IsVisibleChanged);
             this.AliasDataGrid.RowEditEnding += this.AliasDataGrid_RowEditEnding;
@@ -31,7 +32,7 @@ namespace Walkabout.Views
             {
                 if (this.money != null)
                 {
-                    this.money.Changed += this.OnMoneyChanged;
+                    this.money.Changed += this.onMoneyChangedUi.Handler;
                 }
             };
         }
@@ -211,6 +212,7 @@ namespace Walkabout.Views
         #region IView
 
         private MyMoney money;
+        private UiThreadHandler onMoneyChangedUi;
 
         public MyMoney Money
         {
@@ -220,14 +222,14 @@ namespace Walkabout.Views
             {
                 if (this.money != null)
                 {
-                    this.money.Changed -= this.OnMoneyChanged;
+                    this.money.Changed -= this.onMoneyChangedUi.Handler;
                 }
 
                 this.money = value;
 
                 if (this.money != null)
                 {
-                    this.money.Changed += this.OnMoneyChanged;
+                    this.money.Changed += this.onMoneyChangedUi.Handler;
                     this.ShowAliases();
                 }
             }

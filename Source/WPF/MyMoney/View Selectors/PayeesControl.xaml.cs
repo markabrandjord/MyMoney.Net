@@ -24,6 +24,9 @@ namespace Walkabout.Views.Controls
 
         private MyMoney myMoney;
         private bool programaticChange;
+        private UiThreadHandler onPayeesChangedUi;
+        private UiThreadHandler onBalanceChangedUi;
+        private UiThreadHandler onTransactionsChangedUi;
 
         public MyMoney MyMoney
         {
@@ -32,16 +35,16 @@ namespace Walkabout.Views.Controls
             {
                 if (this.myMoney != null)
                 {
-                    this.myMoney.Payees.Changed -= new EventHandler<ChangeEventArgs>(this.OnPayeesChanged);
-                    this.myMoney.Rebalanced -= new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
-                    this.myMoney.Transactions.Changed -= new EventHandler<ChangeEventArgs>(this.OnTransactionsChanged);
+                    this.myMoney.Payees.Changed -= this.onPayeesChangedUi.Handler;
+                    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+                    this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
                 }
                 this.myMoney = value;
                 if (value != null)
                 {
-                    this.myMoney.Payees.Changed += new EventHandler<ChangeEventArgs>(this.OnPayeesChanged);
-                    this.myMoney.Rebalanced += new EventHandler<ChangeEventArgs>(this.OnBalanceChanged);
-                    this.myMoney.Transactions.Changed += new EventHandler<ChangeEventArgs>(this.OnTransactionsChanged);
+                    this.myMoney.Payees.Changed += this.onPayeesChangedUi.Handler;
+                    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+                    this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
 
                     this.OnPayeesChanged(this, new ChangeEventArgs(this.myMoney.Payees, null, ChangeType.Reloaded));
                 }
@@ -81,6 +84,9 @@ namespace Walkabout.Views.Controls
 
         public PayeesControl()
         {
+            this.onPayeesChangedUi = new UiThreadHandler(this.OnPayeesChanged);
+            this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+            this.onTransactionsChangedUi = new UiThreadHandler(this.OnTransactionsChanged);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.PayeesControlInitialize))
 #endif

@@ -379,7 +379,7 @@ namespace Walkabout.Charts
             HistoryChartColumn last = this.collection[count - 1];
 
             double x = 0;
-            List<Point> points = new List<Point>();
+            List<(double X, double Y)> points = new List<(double X, double Y)>();
             foreach (HistoryChartColumn c in this.collection)
             {
                 if ((c == last || c == last) && c.Values.Count() < (avg / 2))
@@ -388,7 +388,7 @@ namespace Walkabout.Charts
                     continue;
                 }
 
-                points.Add(new Point(x++, (double)c.Amount));
+                points.Add((x++, (double)c.Amount));
             }
 
             double a, b;    //  y = a + b.x

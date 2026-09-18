@@ -93,22 +93,31 @@ namespace Walkabout
         private readonly RecentFilesMenu recentFilesMenu;
         private AnimatedMessage animatedStatus;
         private OfxDownloadController ofxController;
+        private UiThreadHandler onChangedUiHandler;
+        private UiThreadEventHandler<SetupRequestEventArgs> onChangeListRequestCompletedUi;
+        private UiThreadEventHandler<EventArgs> onStockDownloadCompleteUi;
         #endregion
 
         #region CONSTRUCTORS
 
         public MainWindow()
         {
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            this.onChangedUiHandler = new UiThreadHandler(this.OnChangedUI);
+            this.onChangeListRequestCompletedUi = new UiThreadEventHandler<SetupRequestEventArgs>(this.OnChangeListRequestCompleted);
+            this.onStockDownloadCompleteUi = new UiThreadEventHandler<EventArgs>(this.OnStockDownloadComplete);
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
         }
 
         public MainWindow(Settings settings)
         {
+            this.onChangedUiHandler = new UiThreadHandler(this.OnChangedUI);
+            this.onChangeListRequestCompletedUi = new UiThreadEventHandler<SetupRequestEventArgs>(this.OnChangeListRequestCompleted);
+            this.onStockDownloadCompleteUi = new UiThreadEventHandler<EventArgs>(this.OnStockDownloadComplete);
 #if PerformanceBlocks
             using (PerformanceBlock.Create(ComponentId.Money, CategoryId.View, MeasurementId.MainWindowInitialize))
             {
 #endif
-            UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
             this.settings = settings;
             this.settings.PropertyChanged += this.OnSettingsChanged;
 
@@ -124,7 +133,7 @@ namespace Walkabout
                 settings.StockServiceSettings = new List<OnlineServiceSettings>();
             }
 
-            Walkabout.Utilities.UiDispatcher.CurrentDispatcher = this.Dispatcher;
+            Walkabout.Utilities.UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
             this.mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
             this.OnThemeChanged(settings.Theme);
             this.ParseCommandLine();
@@ -582,7 +591,7 @@ namespace Walkabout
             this.statementManager.Stop();
             if (this.myMoney != null)
             {
-                this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnChangedUI);
+                this.myMoney.Changed -= this.onChangedUiHandler.Handler;
             }
         }
 
@@ -594,8 +603,8 @@ namespace Walkabout
             this.attachmentManager.Start();
             this.statementManager.StatementsDirectory = this.settings.StatementsDirectory;
             this.statementManager.Start();
-            this.myMoney.Changed -= new EventHandler<ChangeEventArgs>(this.OnChangedUI);
-            this.myMoney.Changed += new EventHandler<ChangeEventArgs>(this.OnChangedUI);
+            this.myMoney.Changed -= this.onChangedUiHandler.Handler;
+            this.myMoney.Changed += this.onChangedUiHandler.Handler;
         }
 
         private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -730,11 +739,11 @@ namespace Walkabout
             var stockQuotes = this.GetStockQuotePath();
             if (this.quotes != null)
             {
-                this.quotes.DownloadComplete -= this.OnStockDownloadComplete;
+                this.quotes.DownloadComplete -= this.onStockDownloadCompleteUi.Handler;
                 this.quotes.HistoryAvailable -= this.OnStockQuoteHistoryAvailable;
             }
             this.quotes = new StockQuoteManager(this, this.settings.StockServiceSettings, stockQuotes);
-            this.quotes.DownloadComplete += this.OnStockDownloadComplete;
+            this.quotes.DownloadComplete += this.onStockDownloadCompleteUi.Handler;
             this.quotes.HistoryAvailable += this.OnStockQuoteHistoryAvailable;
             this.cache = new StockQuoteCache(money, this.quotes.DownloadLog);
 
@@ -4780,7 +4789,7 @@ namespace Walkabout
         private void CheckLastVersion()
         {
             this.changeList = new ChangeListRequest(this.settings);
-            this.changeList.Completed += new EventHandler<SetupRequestEventArgs>(this.OnChangeListRequestCompleted);
+            this.changeList.Completed += this.onChangeListRequestCompletedUi.Handler;
             this.changeList.BeginGetChangeList(DownloadSite);
         }
 
@@ -4988,7 +4997,7 @@ namespace Walkabout
             {
                 if (this.quotes != null)
                 {
-                    this.quotes.DownloadComplete -= new EventHandler<EventArgs>(this.OnStockDownloadComplete);
+                    this.quotes.DownloadComplete -= this.onStockDownloadCompleteUi.Handler;
                     this.quotes.HistoryAvailable -= this.OnStockQuoteHistoryAvailable;
                     this.quotes = null;
                 }

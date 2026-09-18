@@ -24,6 +24,7 @@ namespace Walkabout.Dialogs
         private readonly List<OnlineAccount> newOnlineAccounts = new List<OnlineAccount>();
         private readonly ObservableCollection<object> onlineAccounts = new ObservableCollection<object>();
         private const string NewLabel = "New...";
+        private UiThreadHandler onMoneyChangedUi;
 
         public Account TheAccount
         {
@@ -88,11 +89,12 @@ namespace Walkabout.Dialogs
 
             this.UpdateUI();
 
-            money.Changed += new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+            this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+            money.Changed += this.onMoneyChangedUi.Handler;
 
             Unloaded += (s, e) =>
             {
-                money.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+                money.Changed -= this.onMoneyChangedUi.Handler;
             };
 
 
@@ -111,7 +113,7 @@ namespace Walkabout.Dialogs
 
         private void AccountDialog_Closed(object sender, EventArgs e)
         {
-            this.money.Changed -= new EventHandler<ChangeEventArgs>(this.OnMoneyChanged);
+            this.money.Changed -= this.onMoneyChangedUi.Handler;
         }
 
         private void OnOnlineAccountsChanged(object sender, ChangeEventArgs args)
