@@ -17,3 +17,13 @@ using System.Runtime.CompilerServices;
 // InternalsVisibleTo("UnitTests") added in Task 3).
 [assembly: InternalsVisibleTo("MyMoney.Data")]
 [assembly: InternalsVisibleTo("UnitTests")]
+
+// Several subsystems being migrated into MyMoney.Business (StockQuotes,
+// Importers, Ofx) have internal types/members that WPF-project-only call
+// sites need to keep reaching once those subsystems move (e.g.
+// Dialogs/ChangePasswordDialog.cs calling Ofx.cs's internal
+// ChangePassword(...); several StockQuoteManager members are internal).
+// Rather than widen dozens of individual members to public just to cross
+// the assembly boundary, grant MyMoney the same internals access already
+// granted to MyMoney.Data/UnitTests above.
+[assembly: InternalsVisibleTo("MyMoney")]
