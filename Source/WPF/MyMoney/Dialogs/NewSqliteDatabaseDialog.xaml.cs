@@ -21,7 +21,7 @@ namespace Walkabout.Dialogs
 
         private void OnBrowse(object sender, RoutedEventArgs e)
         {
-            var dlg = new SaveFileDialog { Filter = "MyMoney Database (*.mmdb)|*.mmdb", DefaultExt = ".mmdb" };
+            var dlg = new OpenFileDialog { Filter = "MyMoney Database (*.mmdb)|*.mmdb", DefaultExt = ".mmdb", CheckFileExists = false };
             if (dlg.ShowDialog(this) == true)
             {
                 this.TextBoxFile.Text = dlg.FileName;
