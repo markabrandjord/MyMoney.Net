@@ -309,8 +309,8 @@ namespace Walkabout
             // statementManager against the *new* MyMoney instance) exactly
             // the same way a normal file-based Open does.
             {
-                string dataEngineConfigPath = Path.Combine(Walkabout.Utilities.ProcessHelper.AppDataPath, "dataengine.config.json");
-                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(dataEngineConfigPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg => this.log.Warning(msg)))
+                string registryPath = DatabaseRegistry.GetDefaultPath();
+                if (Walkabout.Data.DataEngineStartup.TryAutoLoad(registryPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg => this.log.Warning(msg)))
                 {
                     this.database = autoDatabase;
                     this.MenuFileAddUser.Visibility = autoDatabase.SupportsUserLogin ? Visibility.Visible : Visibility.Collapsed;
