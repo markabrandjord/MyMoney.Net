@@ -53,18 +53,55 @@ namespace Walkabout.Tests
         public void Invariant_CategoryTotalsReconcileWithTransactions()
         {
             var money = this.GenerateSample(seed: 42);
-            var byCategory = money.Transactions.GetAllTransactions()
-                .Where(t => !t.IsDeleted && !t.IsSplit && t.Category != null)
-                .GroupBy(t => t.Category)
-                .ToDictionary(g => g.Key, g => g.Sum(t => t.Amount));
+
+            // "Expected" side: a declarative LINQ query. Each transaction is unrolled into
+            // its chargeable units - itself if it's a plain transaction, or one unit per
+            // split if it's split - then grouped by category. This is the only place
+            // GroupBy is used, and it is the only place split amounts are attributed via
+            // a projection rather than an explicit loop.
+            var expectedByCategory = money.Transactions.GetAllTransactions()
+                .Where(t => !t.IsDeleted)
+                .SelectMany(t => t.IsSplit
+                    ? t.Splits.GetSplits().Select(s => (Category: s.Category, Amount: s.Amount))
+                    : new[] { (Category: t.Category, Amount: t.Amount) })
+                .Where(x => x.Category != null)
+                .GroupBy(x => x.Category)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
 
             foreach (var category in money.Categories)
             {
-                if (byCategory.TryGetValue(category, out decimal expectedTotal))
+                if (expectedByCategory.TryGetValue(category, out decimal expectedTotal))
                 {
-                    decimal actualTotal = money.Transactions.GetAllTransactions()
-                        .Where(t => !t.IsDeleted && !t.IsSplit && t.Category == category)
-                        .Sum(t => t.Amount);
+                    // "Actual" side: an independent imperative accumulation over the same
+                    // raw transaction/split data. Deliberately not LINQ and deliberately not
+                    // sharing any code with the query above, so a bug introduced into either
+                    // implementation (e.g. mishandling of the Splits collection, an off-by-one,
+                    // or a wrong category comparison) shows up as a mismatch between the two,
+                    // rather than being invisible because both sides ran the same query.
+                    decimal actualTotal = 0m;
+                    foreach (var t in money.Transactions.GetAllTransactions())
+                    {
+                        if (t.IsDeleted)
+                        {
+                            continue;
+                        }
+
+                        if (t.IsSplit)
+                        {
+                            foreach (var s in t.Splits.GetSplits())
+                            {
+                                if (s.Category == category)
+                                {
+                                    actualTotal += s.Amount;
+                                }
+                            }
+                        }
+                        else if (t.Category == category)
+                        {
+                            actualTotal += t.Amount;
+                        }
+                    }
+
                     Assert.That(actualTotal, Is.EqualTo(expectedTotal).Within(0.01m));
                 }
             }

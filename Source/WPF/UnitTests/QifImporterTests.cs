@@ -18,11 +18,12 @@ namespace Walkabout.Tests
             public void SelectEntry(DownloadData entry) => this.Selected = entry;
         }
 
-        // Implements the full IBusinessLayerUiCallback surface as of Task 6 (10 methods: the
-        // original 3 from Task 4, ClearOutputLog/AppendErrorLog from Task 5, and
+        // Implements the full IBusinessLayerUiCallback surface, now 11 methods: the
+        // original 3 from Task 4, ClearOutputLog/AppendErrorLog from Task 5,
         // PromptForCsvFieldMapping/PromptSaveFileName/OpenExportedFile/MoveAttachments/
-        // PickAccount added in this task). Only ShowError/Confirm are exercised by
-        // QifImporter, but a fake implementing an interface has to implement the whole thing.
+        // PickAccount added in Task 6, and ConfirmWithDetails added in Task 7. Only
+        // ShowError/Confirm are exercised by QifImporter, but a fake implementing an
+        // interface has to implement the whole thing.
         private class FakeBusinessLayerUiCallback : IBusinessLayerUiCallback
         {
             public string LastErrorMessage { get; private set; }
