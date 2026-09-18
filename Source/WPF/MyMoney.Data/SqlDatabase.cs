@@ -710,6 +710,13 @@ namespace Walkabout.Data
 
         private SqlTransaction transaction;
 
+        /// <summary>
+        /// Exposes the ambient transaction Save(MyMoney) begins, so subclasses whose UpdateXxx
+        /// overrides open their own ADO.NET calls (e.g. SqlServerStoredProcDatabase) can enlist in it
+        /// instead of running outside it. Null outside of an in-progress Save() call.
+        /// </summary>
+        protected SqlTransaction AmbientTransaction => this.transaction;
+
         public void Save(MyMoney money)
         {
             this.log.Clear();

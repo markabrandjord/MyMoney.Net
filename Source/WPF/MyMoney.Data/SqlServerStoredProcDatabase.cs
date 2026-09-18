@@ -92,9 +92,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (OnlineAccount i in accounts)
                 {
                     (string Name, object Value)[] parameters =
@@ -114,17 +114,21 @@ namespace Walkabout.Data
 
                     if (i.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.OnlineAccounts_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.OnlineAccounts_Update", parameters);
                     }
                     else if (i.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.OnlineAccounts_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.OnlineAccounts_Insert", parameters);
                     }
                     else if (i.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.OnlineAccounts_Delete", ("@Id", i.Id));
+                        ExecuteProc(connection, transaction, "dbo.OnlineAccounts_Delete", ("@Id", i.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (OnlineAccount i in accounts)
@@ -172,9 +176,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (AccountAlias a in accountAliases)
                 {
                     if (a.IsChanged || a.IsInserted)
@@ -187,18 +191,22 @@ namespace Walkabout.Data
 
                         if (a.IsChanged)
                         {
-                            ExecuteProc(connection, "dbo.AccountAliases_Update", parameters);
+                            ExecuteProc(connection, transaction, "dbo.AccountAliases_Update", parameters);
                         }
                         else
                         {
-                            ExecuteProc(connection, "dbo.AccountAliases_Insert", parameters);
+                            ExecuteProc(connection, transaction, "dbo.AccountAliases_Insert", parameters);
                         }
                     }
                     else if (a.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.AccountAliases_Delete", ("@Id", a.Id));
+                        ExecuteProc(connection, transaction, "dbo.AccountAliases_Delete", ("@Id", a.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (AccountAlias a in accountAliases)
@@ -247,9 +255,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (TransactionExtra e in extras)
                 {
                     if (e.IsChanged || e.IsInserted)
@@ -262,18 +270,22 @@ namespace Walkabout.Data
 
                         if (e.IsChanged)
                         {
-                            ExecuteProc(connection, "dbo.TransactionExtras_Update", parameters);
+                            ExecuteProc(connection, transaction, "dbo.TransactionExtras_Update", parameters);
                         }
                         else
                         {
-                            ExecuteProc(connection, "dbo.TransactionExtras_Insert", parameters);
+                            ExecuteProc(connection, transaction, "dbo.TransactionExtras_Insert", parameters);
                         }
                     }
                     else if (e.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.TransactionExtras_Delete", ("@Id", e.Id));
+                        ExecuteProc(connection, transaction, "dbo.TransactionExtras_Delete", ("@Id", e.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (TransactionExtra e in extras)
@@ -332,9 +344,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (LoanPayment i in loans)
                 {
                     (string Name, object Value)[] parameters =
@@ -345,17 +357,21 @@ namespace Walkabout.Data
 
                     if (i.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.LoanPayments_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.LoanPayments_Update", parameters);
                     }
                     else if (i.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.LoanPayments_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.LoanPayments_Insert", parameters);
                     }
                     else if (i.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.LoanPayments_Delete", ("@Id", i.Id));
+                        ExecuteProc(connection, transaction, "dbo.LoanPayments_Delete", ("@Id", i.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (LoanPayment i in loans)
@@ -398,9 +414,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (RentUnit x in units)
                 {
                     (string Name, object Value)[] parameters =
@@ -411,17 +427,21 @@ namespace Walkabout.Data
 
                     if (x.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.RentUnits_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.RentUnits_Update", parameters);
                     }
                     else if (x.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.RentUnits_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.RentUnits_Insert", parameters);
                     }
                     else if (x.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.RentUnits_Delete", ("@Id", x.Id), ("@Building", x.Building));
+                        ExecuteProc(connection, transaction, "dbo.RentUnits_Delete", ("@Id", x.Id), ("@Building", x.Building));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (RentUnit x in units)
@@ -489,9 +509,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (RentBuilding p in buildings)
                 {
                     (string Name, object Value)[] parameters =
@@ -509,17 +529,21 @@ namespace Walkabout.Data
 
                     if (p.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.RentBuildings_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.RentBuildings_Update", parameters);
                     }
                     else if (p.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.RentBuildings_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.RentBuildings_Insert", parameters);
                     }
                     else if (p.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.RentBuildings_Delete", ("@Id", p.Id));
+                        ExecuteProc(connection, transaction, "dbo.RentBuildings_Delete", ("@Id", p.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (RentBuilding p in buildings)
@@ -605,28 +629,32 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Payee p in payees)
                 {
                     if (p.IsChanged)
                     {
-                        ExecutePayeeProc(connection, "dbo.Payees_Update", p);
+                        ExecutePayeeProc(connection, transaction, "dbo.Payees_Update", p);
                     }
                     else if (p.IsInserted)
                     {
-                        ExecutePayeeProc(connection, "dbo.Payees_Insert", p);
+                        ExecutePayeeProc(connection, transaction, "dbo.Payees_Insert", p);
                     }
                     else if (p.IsDeleted)
                     {
-                        using (var command = new SqlCommand("dbo.Payees_Delete", connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                        using (var command = new SqlCommand("dbo.Payees_Delete", connection) { CommandType = System.Data.CommandType.StoredProcedure, Transaction = transaction })
                         {
                             command.Parameters.AddWithValue("@Id", p.Id);
                             command.ExecuteNonQuery();
                         }
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Payee p in payees)
@@ -709,9 +737,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Account a in accounts)
                 {
                     (string Name, object Value)[] parameters =
@@ -730,17 +758,21 @@ namespace Walkabout.Data
 
                     if (a.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Accounts_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Accounts_Update", parameters);
                     }
                     else if (a.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.Accounts_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Accounts_Insert", parameters);
                     }
                     else if (a.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Accounts_Delete", ("@Id", a.Id));
+                        ExecuteProc(connection, transaction, "dbo.Accounts_Delete", ("@Id", a.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Account a in accounts)
@@ -819,9 +851,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Category c in categories)
                 {
                     (string Name, object Value)[] parameters =
@@ -835,17 +867,21 @@ namespace Walkabout.Data
 
                     if (c.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Categories_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Categories_Update", parameters);
                     }
                     else if (c.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.Categories_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Categories_Insert", parameters);
                     }
                     else if (c.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Categories_Delete", ("@Id", c.Id));
+                        ExecuteProc(connection, transaction, "dbo.Categories_Delete", ("@Id", c.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Category c in categories)
@@ -896,9 +932,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Currency s in currencies)
                 {
                     (string Name, object Value)[] parameters =
@@ -909,17 +945,21 @@ namespace Walkabout.Data
 
                     if (s.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Currencies_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Currencies_Update", parameters);
                     }
                     else if (s.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.Currencies_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Currencies_Insert", parameters);
                     }
                     else if (s.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Currencies_Delete", ("@Id", s.Id));
+                        ExecuteProc(connection, transaction, "dbo.Currencies_Delete", ("@Id", s.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Currency s in currencies)
@@ -979,9 +1019,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Security s in securities)
                 {
                     (string Name, object Value)[] parameters =
@@ -994,17 +1034,21 @@ namespace Walkabout.Data
 
                     if (s.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Securities_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Securities_Update", parameters);
                     }
                     else if (s.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.Securities_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Securities_Insert", parameters);
                     }
                     else if (s.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Securities_Delete", ("@Id", s.Id));
+                        ExecuteProc(connection, transaction, "dbo.Securities_Delete", ("@Id", s.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Security s in securities)
@@ -1051,9 +1095,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (StockSplit s in stockSplits)
                 {
                     if (s.IsChanged || s.IsInserted)
@@ -1071,18 +1115,22 @@ namespace Walkabout.Data
 
                         if (s.IsChanged)
                         {
-                            ExecuteProc(connection, "dbo.StockSplits_Update", parameters);
+                            ExecuteProc(connection, transaction, "dbo.StockSplits_Update", parameters);
                         }
                         else
                         {
-                            ExecuteProc(connection, "dbo.StockSplits_Insert", parameters);
+                            ExecuteProc(connection, transaction, "dbo.StockSplits_Insert", parameters);
                         }
                     }
                     else if (s.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.StockSplits_Delete", ("@Id", s.Id));
+                        ExecuteProc(connection, transaction, "dbo.StockSplits_Delete", ("@Id", s.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (StockSplit s in stockSplits)
@@ -1128,9 +1176,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Alias a in aliases)
                 {
                     if (a.IsChanged || a.IsInserted)
@@ -1143,18 +1191,22 @@ namespace Walkabout.Data
 
                         if (a.IsChanged)
                         {
-                            ExecuteProc(connection, "dbo.Aliases_Update", parameters);
+                            ExecuteProc(connection, transaction, "dbo.Aliases_Update", parameters);
                         }
                         else
                         {
-                            ExecuteProc(connection, "dbo.Aliases_Insert", parameters);
+                            ExecuteProc(connection, transaction, "dbo.Aliases_Insert", parameters);
                         }
                     }
                     else if (a.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Aliases_Delete", ("@Id", a.Id));
+                        ExecuteProc(connection, transaction, "dbo.Aliases_Delete", ("@Id", a.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Alias a in aliases)
@@ -1439,7 +1491,8 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
                 foreach (Transaction t in transactions)
                 {
@@ -1464,7 +1517,6 @@ namespace Walkabout.Data
                         }
                     }
 
-                    connection.Open();
                     (string Name, object Value)[] parameters =
                     {
                         ("@Id", t.Id), ("@Number", (object)t.Number ?? DBNull.Value), ("@Account", t.Account.Id),
@@ -1482,22 +1534,20 @@ namespace Walkabout.Data
 
                     if (t.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Transactions_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Transactions_Update", parameters);
                     }
                     else if (t.IsInserted)
                     {
                         if (t.Id == -1)
                         {
-                            connection.Close();
                             continue;
                         }
-                        ExecuteProc(connection, "dbo.Transactions_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Transactions_Insert", parameters);
                     }
                     else if (t.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Transactions_Delete", ("@Id", t.Id));
+                        ExecuteProc(connection, transaction, "dbo.Transactions_Delete", ("@Id", t.Id));
                     }
-                    connection.Close();
 
                     if (!t.IsDeleted)
                     {
@@ -1512,6 +1562,10 @@ namespace Walkabout.Data
                     }
                 }
             }
+            finally
+            {
+                EndScope(connection, ownsConnection);
+            }
 
             foreach (Transaction t in transactions)
             {
@@ -1522,9 +1576,9 @@ namespace Walkabout.Data
 
         public override void UpdateSplits(Splits splits)
         {
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 foreach (Split s in splits)
                 {
                     (string Name, object Value)[] parameters =
@@ -1538,17 +1592,21 @@ namespace Walkabout.Data
 
                     if (s.IsChanged)
                     {
-                        ExecuteProc(connection, "dbo.Splits_Update", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Splits_Update", parameters);
                     }
                     else if (s.IsInserted)
                     {
-                        ExecuteProc(connection, "dbo.Splits_Insert", parameters);
+                        ExecuteProc(connection, transaction, "dbo.Splits_Insert", parameters);
                     }
                     else if (s.IsDeleted)
                     {
-                        ExecuteProc(connection, "dbo.Splits_Delete", ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
+                        ExecuteProc(connection, transaction, "dbo.Splits_Delete", ("@Id", s.Id), ("@Transaction", s.Transaction.Id));
                     }
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
 
             foreach (Split s in splits)
@@ -1565,9 +1623,9 @@ namespace Walkabout.Data
                 return;
             }
 
-            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            var (connection, transaction, ownsConnection) = this.BeginScope();
+            try
             {
-                connection.Open();
                 (string Name, object Value)[] parameters =
                 {
                     ("@Id", i.Id), ("@Security", i.Security == null ? (object)DBNull.Value : i.Security.Id), ("@UnitPrice", i.UnitPrice),
@@ -1578,16 +1636,20 @@ namespace Walkabout.Data
 
                 if (i.IsChanged)
                 {
-                    ExecuteProc(connection, "dbo.Investments_Update", parameters);
+                    ExecuteProc(connection, transaction, "dbo.Investments_Update", parameters);
                 }
                 else if (i.IsInserted)
                 {
-                    ExecuteProc(connection, "dbo.Investments_Insert", parameters);
+                    ExecuteProc(connection, transaction, "dbo.Investments_Insert", parameters);
                 }
                 else if (i.IsDeleted)
                 {
-                    ExecuteProc(connection, "dbo.Investments_Delete", ("@Id", i.Id));
+                    ExecuteProc(connection, transaction, "dbo.Investments_Delete", ("@Id", i.Id));
                 }
+            }
+            finally
+            {
+                EndScope(connection, ownsConnection);
             }
             i.OnUpdated();
         }
@@ -1597,9 +1659,38 @@ namespace Walkabout.Data
         /// (see the design spec for issue #22). Keeps each entity's
         /// Read/Update override thin: build the parameter list, call this.
         /// </summary>
-        private static void ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)
+        /// <summary>
+        /// Returns the connection+transaction an UpdateXxx override should use. When Save(MyMoney) is
+        /// in progress, this.AmbientTransaction is non-null - reuse the same ambient SqlConnection and
+        /// enlist in that transaction so a later failure rolls back everything Save() already wrote.
+        /// When called standalone (every existing unit test calls UpdateXxx methods directly, with no
+        /// Save() wrapper), AmbientTransaction is null - open a fresh connection with no transaction,
+        /// matching this class's pre-existing standalone behavior (each stored-proc call auto-commits
+        /// independently). OwnsConnection tells the caller whether it must dispose the connection when
+        /// done (true only for the standalone, freshly-opened case).
+        /// </summary>
+        private (SqlConnection Connection, SqlTransaction Transaction, bool OwnsConnection) BeginScope()
         {
-            using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+            if (this.AmbientTransaction != null)
+            {
+                return (this.ConnectSqlServer(), this.AmbientTransaction, false);
+            }
+            var connection = new SqlConnection(this.GetConnectionString(true));
+            connection.Open();
+            return (connection, null, true);
+        }
+
+        private static void EndScope(SqlConnection connection, bool ownsConnection)
+        {
+            if (ownsConnection)
+            {
+                connection.Dispose();
+            }
+        }
+
+        private static void ExecuteProc(SqlConnection connection, SqlTransaction transaction, string procName, params (string Name, object Value)[] parameters)
+        {
+            using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure, Transaction = transaction })
             {
                 foreach (var (name, value) in parameters)
                 {
@@ -1609,9 +1700,9 @@ namespace Walkabout.Data
             }
         }
 
-        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        private static void ExecutePayeeProc(SqlConnection connection, SqlTransaction transaction, string procName, Payee p)
         {
-            ExecuteProc(connection, procName, ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value));
+            ExecuteProc(connection, transaction, procName, ("@Id", p.Id), ("@Name", (object)p.Name ?? DBNull.Value));
         }
 
         public override void SaveOne<T>(T root)
