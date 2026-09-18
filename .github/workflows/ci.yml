@@ -1,11 +1,10 @@
 name: build-and-test
 
-# Runs on Genoa, a Hyper-V VM on Kirkland, registered as a second, distinct
-# self-hosted runner instance (label "mymoney") alongside HomeNetwork's
-# existing "homenetwork" runner on the same machine. Self-hosted is safe
-# here because this repository is PRIVATE -- see docs/dev/index.md and
-# HomeNetwork's own ci.yml for the same reasoning: a public repo would let
-# any fork's pull_request execute on hardware inside the house.
+# Runs on a GitHub-hosted windows-latest runner, not the Genoa self-hosted
+# runner the original repo used -- this fork (markabrandjord/MyMoney.Net)
+# is PUBLIC, and self-hosted runners must never be pointed at a public
+# repo's pull_request event (any fork's PR would execute on that hardware).
+# GitHub-hosted runners are ephemeral per-job VMs, so a public repo is fine.
 
 on:
   push:
@@ -19,21 +18,13 @@ concurrency:
   group: build-and-test-${{ github.ref }}
   cancel-in-progress: true
 
-# Read-only. Nothing here writes to the repository, and a self-hosted
-# runner should be handed the least token that does the job.
+# Read-only. Nothing here writes to the repository.
 permissions:
   contents: read
 
 jobs:
   build-and-test:
-    # Same-repository pull requests only. A fork PR is skipped rather than
-    # executed here -- see the comment above about why self-hosted is safe
-    # only because this repo is private, and this guard is the second half
-    # of that: visibility and collaborators can change.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, mymoney]
+    runs-on: windows-latest
 
     defaults:
       run:
@@ -41,13 +32,19 @@ jobs:
 
     steps:
       # Pinned to a commit SHA, not a tag: a tag can be repointed at new
-      # code, and this workflow executes pull-request code on hardware in
-      # the house. persist-credentials: false because nothing here needs
-      # git write access, and leaving a token in .git/config on a
-      # self-hosted runner outlives the job.
+      # code, and this workflow executes pull-request code (including from
+      # forks). persist-credentials: false because nothing here needs git
+      # write access.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # windows-latest's preinstalled SDKs drift over time; pin explicitly
+      # so a GitHub-side image update can't silently change which SDK
+      # builds this net10.0-windows7.0 project.
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Environment
         run: |
