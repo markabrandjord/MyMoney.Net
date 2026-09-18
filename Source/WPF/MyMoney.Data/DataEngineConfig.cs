@@ -4,11 +4,9 @@ using Newtonsoft.Json;
 
 namespace Walkabout.Data
 {
-    public enum DataEngineType
-    {
-        Sqlite,
-        SqlServer
-    }
+    // DataEngineType moved to DatabaseRegistry.cs (issue #32) -- this class
+    // itself is retired in a later task of that plan, but until then it
+    // still needs the enum, now defined there instead of here.
 
     public class DataEngineConfig
     {
