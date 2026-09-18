@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-17-persistence-concurrency-phase2c-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Phase 2c: SQL Server SaveOne/SaveBatch/SaveTransfer design - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Phase 2c: SQL Server SaveOne/SaveBatch/SaveTransfer design", url: "#_top", children: [
+              {title: "Background", url: "#background" },
+              {title: "Why this isn\u0027t just \"port the SQLite implementation\"", url: "#why-this-isnt-just-port-the-sqlite-implementation" },
+              {title: "Design", url: "#design" },
+              {title: "Scope", url: "#scope" },
+              {title: "What\u0027s next (not this phase)", url: "#whats-next-not-this-phase" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="phase-2c-sql-server-saveonesavebatchsavetransfer-design">Phase 2c: SQL Server <code>SaveOne</code>/<code>SaveBatch</code>/<code>SaveTransfer</code> design<a class="headerlink" href="#phase-2c-sql-server-saveonesavebatchsavetransfer-design" title="Permanent link">#</a></h1>
+<h2 id="background">Background<a class="headerlink" href="#background" title="Permanent link">#</a></h2>
+<p>Phase 2a (PR #37) established the <code>IDatabase.SaveOne&lt;T&gt;</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> contract,
+<code>IAggregateRoot</code>, and <code>ConcurrencyConflictException</code>, with a conflict-detecting <code>MockDatabase</code>
+reference implementation. Phase 2b (PR #38) plus its entity-extension (PR #39), RentBuilding
+(PR #40), and Transaction/SaveTransfer (PR #43) follow-ups gave <code>SqliteDatabase</code> a real
+implementation covering every <code>IAggregateRoot</code> type. Test consolidation (PR #44) moved the
+~60-test <code>SaveOne</code>/<code>SaveBatch</code>/<code>SaveTransfer</code> suite into the shared <code>DatabaseContractTests</code> base
+class, so <code>MockDatabaseContractTests</code>, <code>SqliteDatabaseContractTests</code>, and
+<code>SqlServerDatabaseContractTests</code> all inherit and run the identical suite — closing issue #19.</p>
+<p>Running that suite against <code>SqlServerStoredProcDatabase</code> (via <code>SqlServerDatabaseContractTests</code>)
+confirmed live against the shared Redmond test database that it has zero <code>SaveOne</code>/<code>SaveBatch</code>
+implementation at all: it inherits the Phase 2a <code>NotImplementedException</code> stub from the shared
+<code>SqlServerDatabase</code> base class (<code>SqlDatabase.cs</code>). The 7 whole-graph <code>Save</code>/<code>Load</code> tests pass
+(that path already works); the other ~54 fail. This is Phase 2c: give
+<code>SqlServerStoredProcDatabase</code> a real implementation that makes the exact same shared suite pass,
+with no changes to the suite itself.</p>
+<h2 id="why-this-isnt-just-port-the-sqlite-implementation">Why this isn't just "port the SQLite implementation"<a class="headerlink" href="#why-this-isnt-just-port-the-sqlite-implementation" title="Permanent link">#</a></h2>
+<p><code>SqlServerStoredProcDatabase</code> is architecturally unlike <code>SqliteDatabase</code> in a way that changes the
+whole shape of the work, not just its SQL dialect:</p>
+<ul>
+<li><strong>Stored-procedure-only access.</strong> Per issue #22/#23's tiered-security design, <code>MyMoneyUser</code>/
+  <code>MyMoneyTest</code> have <code>EXECUTE</code> grants only — no direct table access at all. Every read/write in
+  <code>SqlServerStoredProcDatabase</code> already goes through a named stored procedure
+  (<code>Source/WPF/MyMoney.Data/SqlScripts/Access/*_AccessProcs.sql</code>); there is no raw parameterized
+  SQL anywhere in that class, unlike <code>SqliteDatabase</code>'s direct SQL strings. Any new write path has
+  to be new stored procedures, not new C#-side SQL text.</li>
+<li><strong>Every table already has an unused native <code>RowVersion timestamp NOT NULL</code> column</strong> — confirmed
+  live against Redmond using the <code>MyMoneyAdmin</code> connection (an earlier check using <code>MyMoneyUser</code>
+  gave a false "no version column anywhere" reading, because <code>MyMoneyUser</code> is deliberately
+  execute-only and can't see <code>INFORMATION_SCHEMA.COLUMNS</code> for tables it has no direct grant on —
+  worth remembering for any future live-schema check against this database). This column was
+  almost certainly added by the generic <code>GetCreateTableScript</code> path (<code>SqlDatabase.cs</code>:
+  <code>sb.Append("  [RowVersion] ROWVERSION NOT NULL")</code>) when these tables were first created, and no
+  current <code>SqlServerStoredProcDatabase</code> proc selects or writes it — it's dead weight today. This
+  phase still needs a schema migration (a <em>new</em>, differently-named column — see below), just not
+  for the reason originally stated.</li>
+<li><strong>SQL Server's native <code>ROWVERSION</code>/<code>TIMESTAMP</code> type is the wrong mechanism here, correcting this
+  design's own earlier proposal.</strong> The original persistence-concurrency design spec (R4) proposed
+  SQL Server use its native <code>ROWVERSION</code> column — engine-maintained, auto-incrementing
+  <code>binary(8)</code> — explicitly flagged there as "proposed, not walked through, confirm or adjust in
+  review." It doesn't work for this contract: native <code>ROWVERSION</code> is a single counter shared by
+  the <em>entire database</em>, not a per-row counter, so it never resets to 1 for a fresh row. Confirmed
+  live: <code>SELECT @@DBTS</code> against Redmond returned <code>0x0000000000000B32</code> (2866) purely from ordinary
+  test activity, on a database with zero <code>ROWVERSION</code> columns anywhere yet — the first row ever
+  inserted with one would get roughly 2867, not 1. The now-shared contract suite has 11 tests
+  (<code>SaveOne_NewX_PersistsAndSetsRowVersionToOne</code>, one per aggregate root, already passing
+  identically against Mock and SQLite) that assert exactly <code>RowVersion == 1</code> for every freshly
+  inserted row regardless of what else exists in the database. Native <code>ROWVERSION</code> cannot satisfy
+  that and native <code>ROWVERSION</code>'s usual benefits (atomic <code>WHERE</code>-clause compare-and-set, no locking
+  overhead) come from the <em>pattern</em> (<code>UPDATE ... WHERE Id=@Id AND Version=@Expected</code>, checked via
+  rowcount), not from the column being engine-maintained — an application-maintained column gets
+  identical atomicity and locking behavior. <strong>Decision: an application-maintained <code>BIGINT Version</code>
+  column, exactly mirroring what <code>SqliteDatabase</code> already does</strong>, not SQL Server's native type.
+  SQL Server's native Change Tracking feature (<code>CHANGETABLE</code>/<code>CHANGE_TRACKING_CURRENT_VERSION</code>) was
+  also considered and is a good fit for a <em>different</em>, not-yet-started problem — R5's pull-based
+  staleness/refresh ("what changed since I last looked") — but doesn't give an atomic single-row
+  compare-and-set for this problem (its version data lives in system-maintained side tables, not a
+  column usable in an <code>UPDATE</code>'s <code>WHERE</code> clause), so a separate read-then-check-then-write would
+  reopen the exact race window <code>ROWVERSION</code>/an app column exists to close. Noted under "What's next"
+  below for whenever R5 is picked up.</li>
+</ul>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">#</a></h2>
+<h3 id="schema-migration-prerequisite">Schema migration (prerequisite)<a class="headerlink" href="#schema-migration-prerequisite" title="Permanent link">#</a></h3>
+<p><code>ALTER TABLE &lt;Table&gt; ADD Version BIGINT NOT NULL DEFAULT 1</code> for all 11 <code>IAggregateRoot</code> tables:
+<code>Categories</code>, <code>Currencies</code>, <code>OnlineAccounts</code>, <code>Accounts</code>, <code>Payees</code>, <code>Aliases</code>, <code>Securities</code>,
+<code>StockSplits</code>, <code>LoanPayments</code>, <code>RentBuildings</code>, <code>Transactions</code>. Named <code>Version</code>, not <code>RowVersion</code> —
+every one of these tables already has an existing, unused <code>RowVersion timestamp NOT NULL</code> column
+(SQL Server's native type, confirmed live), so the new column needs a distinct name; <code>Version</code>
+matches <code>SqliteDatabase</code>'s own column name for the same concept. Metadata-only change on modern SQL
+Server given a constant default — no full table rewrite. <code>Splits</code>, <code>Investments</code>, <code>RentUnits</code>
+(owned children, not <code>IAggregateRoot</code>) get no <code>Version</code> column of their own, matching the design
+spec's R2 and <code>SqliteDatabase</code>'s existing behavior: gated only by their parent's version — they also
+already have their own unused native <code>RowVersion</code> column, left alone, same as the aggregate roots'.</p>
+<p>Run once, by hand, as <code>MyMoneyAdmin</code> against Redmond — same convention every existing
+<code>*_AccessProcs.sql</code> file already documents ("Run as the MyMoneyAdmin login"), not something app
+code runs implicitly. Purely additive: existing procs, the old whole-graph <code>Save</code>/<code>Load</code> path, and
+every other consumer of these tables are unaffected by an extra column with a default.</p>
+<h3 id="tvp-driven-batch-procs-not-per-row-proc-calls">TVP-driven batch procs, not per-row proc calls<a class="headerlink" href="#tvp-driven-batch-procs-not-per-row-proc-calls" title="Permanent link">#</a></h3>
+<p>Rather than one stored-proc call per row (which is what a direct port of <code>SqliteDatabase</code>'s
+per-root imperative loop would look like), each entity gets <strong>one stored procedure that takes a
+whole batch as a Table-Valued Parameter</strong> and does the insert/update/delete/version-check as
+set-based T-SQL inside its own transaction:</p>
+<ul>
+<li>One new SQL Server User-Defined Table Type per entity, e.g.:
+  <code>sql
+  CREATE TYPE dbo.CategoryVersionedRow AS TABLE (
+      Action CHAR(1) NOT NULL,  -- 'I', 'U', or 'D'
+      Id INT NOT NULL,
+      Name NVARCHAR(80) NULL, Description NVARCHAR(255) NULL, Type INT NULL, ParentId INT NULL,
+      Budget MONEY NULL, Frequency INT NULL, Balance MONEY NULL, Color NVARCHAR(10) NULL,
+      TaxRefNum INT NULL,
+      ExpectedVersion BIGINT NULL
+  );</code></li>
+<li>One new proc per entity, e.g. <code>dbo.Categories_SaveBatch(@Rows dbo.CategoryVersionedRow READONLY)</code>:
+  <code>SET XACT_ABORT ON</code>, <code>BEGIN TRANSACTION</code>, a single set-based conflict check (<code>SELECT</code> every
+  <code>'U'</code>/<code>'D'</code> row whose live <code>Version</code> doesn't match <code>ExpectedVersion</code>, including rows that no
+  longer exist at all — <code>StoredVersion = -1</code> sentinel, matching <code>SqliteDatabase.ThrowConflict</code>'s
+  convention), and if any conflicts: return them and <code>ROLLBACK</code>. Otherwise: three set-based
+  statements (<code>INSERT ... SELECT ... WHERE Action='I'</code>, <code>UPDATE ... FROM ... JOIN @Rows ... WHERE
+  Action='U'</code>, <code>DELETE ... FROM ... JOIN @Rows ... WHERE Action='D'</code>), <code>COMMIT</code>, then return the
+  new <code>Version</code> for every surviving inserted/updated row.</li>
+<li>This is a new, additive proc family (<code>_SaveBatch</code> suffix) alongside the untouched existing
+  <code>_Insert</code>/<code>_Update</code>/<code>_Delete</code>/<code>_SelectAll</code> procs used by the old whole-graph <code>Save(MyMoney)</code> path
+  — not a replacement or extension of that split. <code>GRANT EXECUTE ON TYPE::dbo.CategoryVersionedRow
+  TO MyMoneyUser</code> (and <code>MyMoneyTest</code>) is required alongside the usual proc <code>GRANT EXECUTE</code>.</li>
+<li>Existing <code>_SelectAll</code> procs gain the <code>Version</code> column in their <code>SELECT</code> list in place (purely
+  additive — existing callers get an extra column they already ignore); the corresponding <code>ReadXxx</code>
+  C# methods are extended to hydrate <code>.RowVersion</code> from it, the same way <code>SqliteDatabase</code>'s
+  <code>ReadCategories</code> override already does (that override's own comment anticipated needing a
+  "<code>ROWVERSION</code>'s binary(8)-to-long conversion" for Phase 2c — since Phase 2c uses a plain
+  <code>BIGINT</code> instead, no such conversion is actually needed; that comment gets corrected as part of
+  this phase's implementation).</li>
+</ul>
+<p>C# becomes much thinner as a result: <code>SaveBatch(roots)</code> groups the incoming roots by concrete
+type (every real caller today — <code>SaveOne</code>, <code>SaveTransfer</code>, and the one same-type batch test —
+sends a single type per call). For the common single-type-group case, one <code>SqlCommand</code> with one
+<code>SqlDbType.Structured</code> parameter (a <code>DataTable</code> shaped like the TVP), one <code>ExecuteReader()</code> call,
+no explicit <code>SqlTransaction</code> object needed at all — the proc owns atomicity server-side. A
+<code>SqlTransaction</code> wrapping multiple proc calls is only needed for the rare, currently-untested case
+of a single <code>SaveBatch</code> call mixing genuinely different entity types (contractually legal per
+<code>IDatabase.SaveBatch(IEnumerable&lt;PersistentObject&gt;)</code>'s signature, even though nothing exercises it
+today — see "New test coverage" below). If a batch contains any type without a <code>_SaveBatch</code> proc
+yet, the whole call delegates to <code>base.SaveBatch</code> (the Phase 2a stub) rather than partially
+committing some roots — matching <code>SqliteDatabase</code>'s existing guard, mostly dead code once every
+entity is covered but kept for forward safety with any future new <code>IAggregateRoot</code> type.</p>
+<h3 id="owned-children-transactionsplitsinvestment-rentbuildingrentunit">Owned children: Transaction↔Splits/Investment, RentBuilding↔RentUnit<a class="headerlink" href="#owned-children-transactionsplitsinvestment-rentbuildingrentunit" title="Permanent link">#</a></h3>
+<p>Each parent's batch proc takes additional TVPs for its owned children, populated independently of
+the parent's own dirty state (matching <code>SaveOne_TransactionWithSplitOnlyEdit_
+PersistsSplitEvenThoughTransactionItselfIsUnchanged</code>, which requires processing a changed child
+even when the parent has nothing to do):</p>
+<ul>
+<li><code>dbo.Transactions_SaveBatch(@Transactions dbo.TransactionVersionedRow READONLY, @Splits
+  dbo.SplitRow READONLY, @Investments dbo.InvestmentRow READONLY)</code>.</li>
+<li><code>dbo.RentBuildings_SaveBatch(@Buildings dbo.RentBuildingVersionedRow READONLY, @Units
+  dbo.RentUnitRow READONLY)</code>.</li>
+<li>Child TVP rows carry no <code>ExpectedVersion</code> (children aren't <code>IAggregateRoot</code>) and get no conflict
+  check — written unconditionally alongside the parent's version-gated write.</li>
+<li>Delete ordering: children deleted before the parent row (no <code>ON DELETE CASCADE</code> exists on
+  <code>Splits.Transaction</code>/<code>Investments.Id</code>/<code>RentUnits.Building</code> today — if it did, <code>SqliteDatabase</code>'s
+  existing explicit ordering wouldn't matter, so there isn't one), matching <code>UpdateTransactions</code>'s
+  already-documented FK-ordering rule.</li>
+</ul>
+<h3 id="transfers-self-referencing-fk">Transfer's self-referencing FK<a class="headerlink" href="#transfers-self-referencing-fk" title="Permanent link">#</a></h3>
+<p><code>Transaction.Id</code> is application-assigned (a client-side <code>nextTransaction</code> counter), not a SQL
+Server <code>IDENTITY</code>, so both sides of a new transfer already have their final <code>Id</code> values before
+either row is inserted. Rather than depend on an unverified assumption about whether SQL Server
+validates a self-referencing FK per-row or per-statement within one multi-row <code>INSERT</code>, the new
+rows are inserted with <code>Transfer = NULL</code> first (always FK-valid), then a single follow-up <code>UPDATE
+... FROM @Transactions r WHERE r.Transfer IS NOT NULL</code> sets the real cross-reference on both rows
+once both already exist. No <code>PRAGMA defer_foreign_keys</code>-equivalent needed.</p>
+<h3 id="error-handling">Error handling<a class="headerlink" href="#error-handling" title="Permanent link">#</a></h3>
+<p>The conflict-check <code>SELECT</code> inside each <code>_SaveBatch</code> proc returns <code>(Id, StoredVersion,
+CallerVersion)</code> for every conflicting row — including the <code>StoredVersion = -1</code> sentinel for a row
+deleted entirely by someone else. C# reads that result set (if non-empty) and throws
+<code>ConcurrencyConflictException</code> for the first conflicting row. Unlike <code>SqliteDatabase.ThrowConflict</code>,
+no second round-trip is needed to learn the real stored version — the version check already runs
+inside the same call, before anything commits.</p>
+<h3 id="new-test-coverage">New test coverage<a class="headerlink" href="#new-test-coverage" title="Permanent link">#</a></h3>
+<p>The existing shared <code>DatabaseContractTests</code> suite needs no changes — it already fully specifies
+the required behavior and is already wired to <code>SqlServerDatabaseContractTests</code>. One real gap the
+TVP design surfaces: a genuinely mixed-entity-type <code>SaveBatch</code> call (e.g. one <code>Category</code> + one
+<code>Account</code> together) is contractually legal but has zero coverage today, and is exactly the case
+needing the extra client-side transaction across multiple type-specific proc calls. Add this test
+to the <em>shared</em> base (benefits Mock/SQLite too) — already flagged as a known gap in prior-phase
+notes ("mixed insert/update/delete batch" under known deferred items).</p>
+<h3 id="test-support-stored-procs">Test-support stored procs<a class="headerlink" href="#test-support-stored-procs" title="Permanent link">#</a></h3>
+<p><code>SqlServerTestDatabase.WipeAllTables()</code> currently does a raw <code>DELETE FROM</code> against every table
+using the <code>MyMoneyAdmin</code> connection, with its own doc comment flagging this as a known short-term
+gap ("a tiered-security-appropriate test-support stored proc, not this admin-connection raw
+DELETE"). Only <code>Payees</code> has the real fix today (<code>Payees_Test_Reset</code>, granted to <code>MyMoneyTest</code>
+only — <code>SqlScripts/Test/Payees_TestProcs.sql</code>). Since this phase already touches every one of
+these 11 tables' schema and procs, add the matching <code>&lt;Table&gt;_Test_Reset</code> proc for the other 10 and
+switch <code>WipeAllTables()</code> to call them instead of the raw admin <code>DELETE</code> — closing that gap as a
+natural ride-along, the same way R4 originally folded in issue #24's FK/index fix.</p>
+<h3 id="where-the-new-sql-lives">Where the new SQL lives<a class="headerlink" href="#where-the-new-sql-lives" title="Permanent link">#</a></h3>
+<p>Each entity's existing <code>*_AccessProcs.sql</code> file is extended in place (the <code>ALTER TABLE</code>, new
+<code>TYPE</code>, new <code>_SaveBatch</code> proc, and its <code>GRANT</code>s appended; <code>CREATE OR ALTER</code> plus an <code>IF NOT
+EXISTS</code> guard on the column add keeps it idempotent) — one file stays the single source of truth
+for an entity's whole stored-proc surface. New <code>_Test_Reset</code> procs go into <code>SqlScripts/Test/</code>, one
+file per entity, matching <code>Payees_TestProcs.sql</code>'s existing granularity.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">#</a></h2>
+<p>Full parity in one plan: all 11 <code>IAggregateRoot</code> types (<code>Category</code>, <code>Currency</code>, <code>OnlineAccount</code>,
+<code>Account</code>, <code>Payee</code>, <code>Alias</code>, <code>Security</code>, <code>StockSplit</code>, <code>LoanPayment</code>, <code>RentBuilding</code>,
+<code>Transaction</code>), plus owned-child handling for <code>Splits</code>/<code>Investment</code>/<code>RentUnit</code>, plus
+<code>SaveTransfer</code>. (Considered scoping to <code>Category</code> only first, matching Phase 2b's own original
+scoping — explicitly declined in favor of full parity in one plan.)</p>
+<h2 id="whats-next-not-this-phase">What's next (not this phase)<a class="headerlink" href="#whats-next-not-this-phase" title="Permanent link">#</a></h2>
+<ul>
+<li>R5 (pull-based staleness/refresh) — SQL Server's native Change Tracking
+  (<code>CHANGE_TRACKING_CURRENT_VERSION()</code>/<code>CHANGETABLE(CHANGES ...)</code>) is the recommended mechanism
+  when this is picked up, better than the original spec's "<code>SELECT MAX(Version)</code>" idea, though
+  still a different problem from this phase's write-time conflict detection.</li>
+<li>A real multi-connection SQLite contention test (still open from Phase 2b's own "what's next").</li>
+<li>The detached-root <code>InvalidOperationException</code> path and other untested <code>SaveBatch</code> edge cases
+  already flagged in prior-phase notes remain deferred, unrelated to this phase's scope.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

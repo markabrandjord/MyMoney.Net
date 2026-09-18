@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-14-flaui-test-harness/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>FlaUI Test Harness Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "FlaUI Test Harness Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Task 1: Scaffold UITests project with a launch/close smoke test", url: "#task-1-scaffold-uitests-project-with-a-launchclose-smoke-test" },
+              {title: "Task 2: Generate and commit the SQLite fixture file", url: "#task-2-generate-and-commit-the-sqlite-fixture-file" },
+              {title: "Task 3: The payee-selection scenario test", url: "#task-3-the-payee-selection-scenario-test" },
+              {title: "Plan Self-Review", url: "#plan-self-review" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="flaui-test-harness-implementation-plan">FlaUI Test Harness Implementation Plan<a class="headerlink" href="#flaui-test-harness-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Build a small, independent FlaUI-based UI test project that can reliably launch <code>MyMoney.exe</code>, drive it through opening a database file via the native File→Open dialog, select a payee, and confirm the app survives — the exact scenario raw UI Automation failed to automate during item #2's live verification.</p>
+<p><strong>Architecture:</strong> A new <code>net10.0-windows7.0</code> NUnit test project (<code>Source/WPF/UITests</code>) that drives the built <code>MyMoney.exe</code> as an external process via <code>FlaUI.Core</code>/<code>FlaUI.UIA3</code>, independent of <code>ScenarioTest</code>. Three tasks: a minimal launch/close smoke test to prove FlaUI can see the app at all, a checked-in SQLite fixture file, and the full payee-selection scenario test.</p>
+<p><strong>Tech Stack:</strong> C# / .NET 10.0, <code>FlaUI.Core</code> 5.0.0, <code>FlaUI.UIA3</code> 5.0.0, NUnit 4.6.1 (matching <code>UnitTests.csproj</code>'s existing versions).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-14-flaui-test-harness-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Independent of <code>ScenarioTest</code> — no files under <code>Source/WPF/ScenarioTest</code> are touched by this plan.</li>
+<li>No custom test-framework/page-object abstraction layer — direct, straightforward FlaUI calls in the test files themselves.</li>
+<li>The SQL Server engine path is out of scope — every test in this plan uses the SQLite fixture only.</li>
+<li><code>UITests.csproj</code> is DEBUG-only dev tooling in the sense that nobody runs it as part of shipping the product — same as the pre-existing <code>UnitTests.csproj</code>, which (confirmed by inspecting <code>MyMoney.sln</code>) is also technically buildable under the solution's Release configuration and always has been, without that being treated as a problem. <strong>Revised (caught in Task 1's review):</strong> unlike item #2's <code>MyMoneyAdmin</code> — whose Release-exclusion mattered because its <em>build output</em> gets physically copied into <code>MyMoney.exe</code>'s own shipped output folder, a real contamination risk — <code>UITests.csproj</code> has no such relationship to <code>MyMoney.csproj</code>'s output at all. There is nothing to exclude. Do not add a task to strip <code>UITests</code>'s Release config lines from <code>MyMoney.sln</code>; that would be inconsistent with <code>UnitTests</code>'s own established, unremarkable convention.</li>
+<li>FlaUI's exact API surface (method/property names) should be verified against the actually-installed 5.0.0 package if any code below doesn't compile — treat the code in this plan as a strong, well-researched starting point, not a guarantee; note and explain any deviation in the task's report, the same way earlier plans in this initiative handled MSBuild syntax that needed adjusting once tested for real.</li>
+</ul>
+<hr />
+<h2 id="task-1-scaffold-uitests-project-with-a-launchclose-smoke-test">Task 1: Scaffold <code>UITests</code> project with a launch/close smoke test<a class="headerlink" href="#task-1-scaffold-uitests-project-with-a-launchclose-smoke-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/UITests.csproj</code>
+- Create: <code>Source/WPF/UITests/LaunchSmokeTests.cs</code>
+- Modify: <code>Source/WPF/MyMoney.sln</code> (add the new project)</p>
+<p><strong>Interfaces:</strong>
+- Produces: a working, FlaUI-referencing NUnit test project that can launch and close <code>MyMoney.exe</code>. Relied on by Tasks 2 and 3.</p>
+<p>This is the foundational checkpoint: prove FlaUI can launch the app and see its main window before attempting anything harder. If this doesn't work reliably, nothing else in this plan will either, and that needs to be known now.</p>
+<ul>
+<li>[ ] <strong>Step 1: Create the project</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;
+
+  &lt;PropertyGroup&gt;
+    &lt;TargetFramework&gt;net10.0-windows7.0&lt;/TargetFramework&gt;
+    &lt;IsPackable&gt;false&lt;/IsPackable&gt;
+    &lt;Nullable&gt;disable&lt;/Nullable&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;PackageReference Include=&quot;Microsoft.NET.Test.Sdk&quot; Version=&quot;18.8.1&quot; /&gt;
+    &lt;PackageReference Include=&quot;NUnit&quot; Version=&quot;4.6.1&quot; /&gt;
+    &lt;PackageReference Include=&quot;NUnit3TestAdapter&quot; Version=&quot;6.2.0&quot; /&gt;
+    &lt;PackageReference Include=&quot;NUnit.Analyzers&quot; Version=&quot;4.14.0&quot;&gt;
+      &lt;PrivateAssets&gt;all&lt;/PrivateAssets&gt;
+      &lt;IncludeAssets&gt;runtime; build; native; contentfiles; analyzers; buildtransitive&lt;/IncludeAssets&gt;
+    &lt;/PackageReference&gt;
+    &lt;PackageReference Include=&quot;coverlet.collector&quot; Version=&quot;10.0.1&quot;&gt;
+      &lt;PrivateAssets&gt;all&lt;/PrivateAssets&gt;
+      &lt;IncludeAssets&gt;runtime; build; native; contentfiles; analyzers; buildtransitive&lt;/IncludeAssets&gt;
+    &lt;/PackageReference&gt;
+    &lt;PackageReference Include=&quot;FlaUI.Core&quot; Version=&quot;5.0.0&quot; /&gt;
+    &lt;PackageReference Include=&quot;FlaUI.UIA3&quot; Version=&quot;5.0.0&quot; /&gt;
+  &lt;/ItemGroup&gt;
+
+&lt;/Project&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Add to the solution</strong></li>
+</ul>
+<pre><code class="language-bash">dotnet sln Source/WPF/MyMoney.sln add Source/WPF/UITests/UITests.csproj
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Write the launch/close smoke test</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using FlaUI.Core;
+using FlaUI.UIA3;
+using NUnit.Framework;
+
+namespace Walkabout.UITests
+{
+    public class LaunchSmokeTests
+    {
+        internal static string MyMoneyExePath =&gt;
+            Path.Combine(
+                AppContext.BaseDirectory,
+                &quot;..&quot;, &quot;..&quot;, &quot;..&quot;, &quot;..&quot;, &quot;MyMoney&quot;, &quot;bin&quot;, &quot;Debug&quot;, &quot;net10.0-windows7.0&quot;, &quot;win-x64&quot;, &quot;MyMoney.exe&quot;);
+
+        [Test]
+        public void LaunchAndClose_MainWindowAppears()
+        {
+            Assert.That(File.Exists(MyMoneyExePath), Is.True,
+                $&quot;MyMoney.exe not found at {MyMoneyExePath}. Build Source/WPF/MyMoney.csproj first.&quot;);
+
+            using var app = Application.Launch(MyMoneyExePath);
+            using var automation = new UIA3Automation();
+
+            var mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+
+            Assert.That(mainWindow, Is.Not.Null);
+            Assert.That(mainWindow.Title, Does.Contain(&quot;MyMoney&quot;));
+
+            app.Close();
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Build the main app first (the smoke test needs it to exist)</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors, <code>MyMoney.exe</code> present at the path referenced above.</p>
+<ul>
+<li>[ ] <strong>Step 5: Run the smoke test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~LaunchAndClose_MainWindowAppears"</code>
+Expected: PASS. If <code>MyMoney.exe</code>'s path resolution in <code>MyMoneyExePath</code> doesn't match your actual build output layout (RID-specific folders can vary), adjust the path construction and note why in your report — this is exactly the kind of environment-specific detail worth getting right by testing, not guessing.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/UITests.csproj Source/WPF/UITests/LaunchSmokeTests.cs Source/WPF/MyMoney.sln
+git commit -m &quot;Scaffold UITests project with a FlaUI launch/close smoke test&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-generate-and-commit-the-sqlite-fixture-file">Task 2: Generate and commit the SQLite fixture file<a class="headerlink" href="#task-2-generate-and-commit-the-sqlite-fixture-file" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/FixtureGenerator.cs</code>
+- Create: <code>Source/WPF/UITests/Fixtures/PayeeSmokeTest.mmdb</code> (binary, generated by Step 1-2 below, then committed)
+- Modify: <code>Source/WPF/UITests/UITests.csproj</code> (reference <code>MyMoney.csproj</code> for <code>Walkabout.Data</code> types, and copy the fixture to output)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>Fixtures/PayeeSmokeTest.mmdb</code>, a SQLite database with one account, one payee ("Payee Smoke Test"), one transaction. Relied on by Task 3.</p>
+<p>The generator is kept in the repo (as an <code>[Explicit]</code> NUnit test — excluded from normal test runs, but re-runnable on demand) rather than a throwaway script, so regenerating the fixture later is documented and reproducible.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the <code>MyMoney.csproj</code> reference and fixture copy-to-output</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/UITests/UITests.csproj</code>, inside the existing <code>&lt;Project&gt;</code> element:</p>
+<pre><code class="language-xml">  &lt;ItemGroup&gt;
+    &lt;ProjectReference Include=&quot;..\MyMoney\MyMoney.csproj&quot; /&gt;
+  &lt;/ItemGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;None Include=&quot;Fixtures\PayeeSmokeTest.mmdb&quot; Condition=&quot;Exists('Fixtures\PayeeSmokeTest.mmdb')&quot;&gt;
+      &lt;CopyToOutputDirectory&gt;PreserveNewest&lt;/CopyToOutputDirectory&gt;
+    &lt;/None&gt;
+  &lt;/ItemGroup&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the fixture generator</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UITests
+{
+    /// &lt;summary&gt;
+    /// Regenerates Fixtures/PayeeSmokeTest.mmdb. Marked [Explicit] so it
+    /// never runs as part of a normal test pass -- the fixture is a
+    /// checked-in binary, not something rebuilt on every run. Re-run this
+    /// deliberately (e.g. `dotnet test --filter FixtureGenerator`) only
+    /// when the fixture's shape needs to change.
+    /// &lt;/summary&gt;
+    [Explicit(&quot;Regenerates the checked-in fixture file; not part of normal test runs.&quot;)]
+    public class FixtureGenerator
+    {
+        [Test]
+        public void RegeneratePayeeSmokeTestFixture()
+        {
+            string outputPath = Path.Combine(
+                TestContext.CurrentContext.TestDirectory, &quot;..&quot;, &quot;..&quot;, &quot;..&quot;, &quot;Fixtures&quot;, &quot;PayeeSmokeTest.mmdb&quot;);
+            outputPath = Path.GetFullPath(outputPath);
+
+            if (File.Exists(outputPath))
+            {
+                File.Delete(outputPath);
+            }
+
+            var money = new MyMoney();
+
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;Payee Smoke Test&quot;;
+
+            var account = new Account();
+            account.Name = &quot;Smoke Test Checking&quot;;
+            money.Accounts.AddAccount(account);
+
+            var transaction = new Transaction();
+            transaction.Account = account;
+            transaction.Date = new DateTime(2026, 1, 1);
+            transaction.Amount = -10.00M;
+            transaction.Payee = payee;
+            money.Transactions.AddTransaction(transaction);
+
+            var db = new SqliteDatabase();
+            db.DatabasePath = outputPath;
+            db.Create();
+            db.Save(money);
+
+            Assert.That(File.Exists(outputPath), Is.True);
+            TestContext.WriteLine($&quot;Wrote fixture to {outputPath}&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Run the generator once to produce the fixture</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~RegeneratePayeeSmokeTestFixture"</code></p>
+<p>NUnit skips <code>[Explicit]</code> tests by default under a name-only filter match on the containing class/method unless explicitly selected — if this filter doesn't pick it up, use <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "TestCategory=Explicit"</code> or pass <code>--filter</code> matching the fully-qualified test name exactly; confirm whichever form actually runs it by checking for the <code>Wrote fixture to ...</code> output line, not just a "0 tests run, considered passing" result.</p>
+<p>Expected: <code>Source/WPF/UITests/Fixtures/PayeeSmokeTest.mmdb</code> now exists.</p>
+<ul>
+<li>[ ] <strong>Step 4: Verify the fixture's shape</strong></li>
+</ul>
+<p>Run a quick manual check (e.g. reuse the <code>SqlMappingTests.cs</code> pattern of opening it with <code>SqliteDatabase</code> and asserting <code>money.Payees.Count == 1</code> and the payee's name) — or simply confirm via the file's existence and non-trivial size (a few KB, not 0 bytes) that <code>Create()</code>/<code>Save()</code> actually wrote real content.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/UITests.csproj Source/WPF/UITests/FixtureGenerator.cs Source/WPF/UITests/Fixtures/PayeeSmokeTest.mmdb
+git commit -m &quot;Add checked-in SQLite fixture and its regeneration test&quot;
+</code></pre>
+<hr />
+<h2 id="task-3-the-payee-selection-scenario-test">Task 3: The payee-selection scenario test<a class="headerlink" href="#task-3-the-payee-selection-scenario-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/PayeeSelectionTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>LaunchSmokeTests.MyMoneyExePath</code> (Task 1) — reuse the same path-resolution logic rather than duplicating it (extract to a small shared internal helper class if that reads more cleanly, e.g. <code>TestPaths.MyMoneyExePath</code>).
+- Produces: the spec's acceptance-criterion test.</p>
+<p>This is the actual deliverable this whole plan exists for. Every step of the "First Test" section in the spec, as one continuous scenario.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the scenario test</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using System.Linq;
+using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
+using FlaUI.Core.Tools;
+using FlaUI.UIA3;
+using NUnit.Framework;
+
+namespace Walkabout.UITests
+{
+    public class PayeeSelectionTests
+    {
+        private Application app;
+        private UIA3Automation automation;
+
+        [TearDown]
+        public void TearDown()
+        {
+            try
+            {
+                app?.Close();
+            }
+            catch
+            {
+                // best-effort cleanup; a test failure shouldn't be masked by a teardown exception
+            }
+            app?.Dispose();
+            automation?.Dispose();
+        }
+
+        [Test]
+        public void SelectingAPayee_AfterOpeningFixtureFile_DoesNotCrash()
+        {
+            string fixturePath = Path.Combine(AppContext.BaseDirectory, &quot;Fixtures&quot;, &quot;PayeeSmokeTest.mmdb&quot;);
+            Assert.That(File.Exists(fixturePath), Is.True,
+                $&quot;Fixture not found at {fixturePath}. Run Task 2's FixtureGenerator first.&quot;);
+
+            app = Application.Launch(LaunchSmokeTests.MyMoneyExePath);
+            automation = new UIA3Automation();
+            Window mainWindow = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+
+            OpenFileViaFileMenu(mainWindow, fixturePath);
+
+            // The window title reflects the opened file once loading completes.
+            Retry.WhileFalse(
+                () =&gt; mainWindow.Title.IndexOf(&quot;PayeeSmokeTest&quot;, StringComparison.OrdinalIgnoreCase) &gt;= 0,
+                TimeSpan.FromSeconds(10));
+            Assert.That(mainWindow.Title, Does.Contain(&quot;PayeeSmokeTest&quot;).IgnoreCase);
+
+            AutomationElement payeesHeader = mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;PAYEES&quot;));
+            Assert.That(payeesHeader, Is.Not.Null, &quot;PAYEES section header not found.&quot;);
+            AutomationElement expander = payeesHeader.Parent;
+            var togglePattern = expander.Patterns.Toggle.Pattern;
+            if (togglePattern.ToggleState.Value == ToggleState.Off)
+            {
+                togglePattern.Toggle();
+            }
+
+            AutomationElement payeeRow = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Payee Smoke Test&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(payeeRow, Is.Not.Null, &quot;Fixture payee row not found after expanding PAYEES.&quot;);
+
+            payeeRow.Click();
+            Wait.UntilInputIsProcessed();
+
+            Assert.That(app.HasExited, Is.False, &quot;App exited unexpectedly after selecting the payee.&quot;);
+
+            AutomationElement[] topLevelWindows = automation.GetDesktop().FindAllChildren(
+                cf =&gt; cf.ByProcessId(app.ProcessId));
+            bool errorDialogPresent = topLevelWindows.Any(w =&gt;
+                w.Name.IndexOf(&quot;Unhandled&quot;, StringComparison.OrdinalIgnoreCase) &gt;= 0 ||
+                w.Name.IndexOf(&quot;Exception&quot;, StringComparison.OrdinalIgnoreCase) &gt;= 0);
+            Assert.That(errorDialogPresent, Is.False, &quot;An unhandled-exception dialog appeared after selecting the payee.&quot;);
+        }
+
+        private static void OpenFileViaFileMenu(Window mainWindow, string filePath)
+        {
+            AutomationElement fileMenu = mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;File&quot;));
+            fileMenu.Patterns.ExpandCollapse.Pattern.Expand();
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement openItem = mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Open...&quot;));
+            openItem.Patterns.Invoke.Pattern.Invoke();
+
+            // The native common file dialog is a separate top-level window
+            // belonging to the same process, not a descendant of mainWindow.
+            Window openDialog = Retry.WhileNull(() =&gt;
+                mainWindow.ModalWindows.FirstOrDefault() ??
+                mainWindow.Automation.GetDesktop()
+                    .FindAllChildren(cf =&gt; cf.ByControlType(ControlType.Window))
+                    .Select(w =&gt; w.AsWindow())
+                    .FirstOrDefault(w =&gt; w.Title.IndexOf(&quot;Open&quot;, StringComparison.OrdinalIgnoreCase) &gt;= 0),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(openDialog, Is.Not.Null, &quot;Open file dialog did not appear.&quot;);
+
+            // Standard Windows common-dialog automation IDs for the filename
+            // edit box (1148) and Open button (1).
+            AutomationElement fileNameBox = openDialog.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;1148&quot;));
+            Assert.That(fileNameBox, Is.Not.Null, &quot;File name box not found in Open dialog.&quot;);
+            fileNameBox.Patterns.Value.Pattern.SetValue(filePath);
+
+            AutomationElement openButton = openDialog.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;1&quot;));
+            Assert.That(openButton, Is.Not.Null, &quot;Open button not found in Open dialog.&quot;);
+            openButton.Patterns.Invoke.Pattern.Invoke();
+        }
+    }
+}
+</code></pre>
+<p>Also add the shared path helper reference from Task 1 if you split it out — otherwise this file already reuses <code>LaunchSmokeTests.MyMoneyExePath</code> directly, which is fine for two files in the same project.</p>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/UITests/UITests.csproj</code>
+Expected: 0 errors. FlaUI 5.0.0's exact API (<code>Patterns.Toggle.Pattern</code> vs <code>TogglePattern</code> cast, <code>Retry.WhileNull</code>/<code>WhileFalse</code> signatures, <code>AsWindow()</code>/<code>ModalWindows</code> availability) should be checked against IntelliSense/the installed package here — fix any naming mismatches against the real API, and note what changed and why in your report, the same way earlier plans in this initiative handled unverified library specifics.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run the test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~SelectingAPayee_AfterOpeningFixtureFile_DoesNotCrash"</code>
+Expected: PASS. This is the acceptance criterion for the whole plan — if it's flaky (passes sometimes, fails others) rather than reliably passing, that's a real finding to report, not something to paper over by re-running until green. Run it at least 3 times in a row and report the actual pass rate, not just one result.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/PayeeSelectionTests.cs
+git commit -m &quot;Add the FlaUI payee-selection scenario test&quot;
+</code></pre>
+<hr />
+<h2 id="plan-self-review">Plan Self-Review<a class="headerlink" href="#plan-self-review" title="Permanent link">#</a></h2>
+<p><strong>Spec coverage:</strong>
+- New, independent project, not touching <code>ScenarioTest</code> → Task 1 (Files list confirms no <code>ScenarioTest</code> paths anywhere in this plan).
+- FlaUI.Core + FlaUI.UIA3, NUnit runner → Task 1.
+- First test's full six-step scenario (launch, File→Open dialog, load confirmation, expand Payees, select row, assert survival + no error dialog) → Task 3, one continuous test matching the spec's acceptance criterion exactly.
+- Checked-in fixture, not regenerated per run → Task 2, with the generator kept in-repo as <code>[Explicit]</code> rather than a throwaway script.
+- SQL Server path explicitly out of scope → no task references <code>SqlServerStoredProcDatabase</code>, <code>dataengine.config.json</code>, or any SQL Server type; the fixture is plain <code>SqliteDatabase</code>.</p>
+<p><strong>Placeholder scan:</strong> No TBD/TODO. The FlaUI API surface carries a documented, explicit uncertainty (Global Constraints + Task 3 Step 2) rather than false confidence — that's a named risk with instructions for how to handle it, not an unfilled placeholder.</p>
+<p><strong>Type consistency:</strong> <code>LaunchSmokeTests.MyMoneyExePath</code> (Task 1) is consumed by name in Task 3 exactly as defined (<code>internal static string</code>, same class/namespace <code>Walkabout.UITests</code>). <code>FixtureGenerator</code>'s output path (Task 2) and <code>PayeeSelectionTests</code>'s fixture path (Task 3, <code>AppContext.BaseDirectory</code> + <code>Fixtures/PayeeSmokeTest.mmdb</code>, matching the <code>CopyToOutputDirectory</code> item added in Task 2 Step 1) resolve to the same relative layout.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

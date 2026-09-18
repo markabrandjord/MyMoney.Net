@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-17-database-registry-and-engine-aware-dialogs-plan/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Database Registry &amp; Engine-Aware Dialogs (Issue #32) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Database Registry \u0026amp; Engine-Aware Dialogs (Issue #32) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "File Structure", url: "#file-structure" },
+              {title: "Task 1: DatabaseRegistry model, JSON schema, round-trip tests", url: "#task-1-databaseregistry-model-json-schema-round-trip-tests" },
+              {title: "Task 2: SqlServerConnectionFactory", url: "#task-2-sqlserverconnectionfactory" },
+              {title: "Task 3: Permanent stored procs MyMoney_BootstrapServer / MyMoney_CreateCatalog", url: "#task-3-permanent-stored-procs-mymoney_bootstrapserver-mymoney_createcatalog" },
+              {title: "Task 4: SqlServerBootstrapper (in-process, replaces MyMoneyAdmin\u0027s BootstrapRunner)", url: "#task-4-sqlserverbootstrapper-in-process-replaces-mymoneyadmins-bootstraprunner" },
+              {title: "Task 5: SaCredentialDialog (implements ISaCredentialPrompt)", url: "#task-5-sacredentialdialog-implements-isacredentialprompt" },
+              {title: "Task 6: NewSqlServerDatabaseDialog (DEBUG-only)", url: "#task-6-newsqlserverdatabasedialog-debug-only" },
+              {title: "Task 7: NewSqliteDatabaseDialog", url: "#task-7-newsqlitedatabasedialog" },
+              {title: "Task 8: OpenDatabaseDialog", url: "#task-8-opendatabasedialog" },
+              {title: "Task 9: RecentFilesMenu rework (registry-backed)", url: "#task-9-recentfilesmenu-rework-registry-backed" },
+              {title: "Task 10: Wire up MainWindow \u2014 File | New, File | Open, Recent Files", url: "#task-10-wire-up-mainwindow-file-new-file-open-recent-files" },
+              {title: "Task 11: Migrate the SQL Server test harness off environment variables", url: "#task-11-migrate-the-sql-server-test-harness-off-environment-variables" },
+              {title: "Task 12: Retire MyMoneyAdmin, old config classes, and rewrite DataEngineStartup", url: "#task-12-retire-mymoneyadmin-old-config-classes-and-rewrite-dataenginestartup" },
+              {title: "Task 13: Full verification", url: "#task-13-full-verification" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="database-registry-engine-aware-dialogs-issue-32-implementation-plan">Database Registry &amp; Engine-Aware Dialogs (Issue #32) Implementation Plan<a class="headerlink" href="#database-registry-engine-aware-dialogs-issue-32-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Replace <code>DataEngineConfig</code>/<code>DataEngineCredentialStore</code>/<code>MyMoneyAdmin.exe</code> with one JSON <code>DatabaseRegistry</code>, engine-aware <code>File | New</code> dialogs (SQL Server DEBUG-only, SQLite always), a registry-backed <code>File | Open</code> and <code>RecentFilesMenu</code>, and an in-process (no separate <code>.exe</code>) SQL Server bootstrap driven by two new permanent stored procedures.</p>
+<p><strong>Architecture:</strong> A new <code>DatabaseRegistry</code> class (<code>MyMoney.Data</code>) owns the single <code>dataengine.config.json</code> file (servers' credentials + named database entries). A new <code>SqlServerBootstrapper</code> (<code>MyMoney.Data</code>) replaces <code>MyMoneyAdmin.exe</code>'s <code>BootstrapRunner</code>/<code>SaBootstrapConnection</code>, calling two new permanent <code>master</code>-scoped stored procs instead of the old create-drop temp-proc script. New WPF dialogs (<code>NewSqlServerDatabaseDialog</code>, <code>NewSqliteDatabaseDialog</code>, <code>OpenDatabaseDialog</code>, <code>SaCredentialDialog</code>) replace <code>CreateDatabaseDialog</code>'s File|New/Open usage. <code>RecentFilesMenu</code> becomes a pull-based view over the registry instead of its own path list. The SQL Server test harness reads the registry instead of three env vars.</p>
+<p><strong>Tech Stack:</strong> C# / .NET 10.0-windows7.0, WPF, Newtonsoft.Json 13.0.4, Microsoft.Data.SqlClient 7.0.2, NUnit (existing <code>Source/WPF/UnitTests</code> + <code>Source/WPF/MyMoney.TestSupport</code> projects).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-17-database-registry-and-engine-aware-dialogs-design.md</code> (as amended by the two follow-up conversation turns: Release <code>File | New</code> has no submenu and goes straight to the SQLite dialog with no "Test database" checkbox; the checkbox reads "Test database:" + checkbox; the <code>TestDatabase</code> field is PascalCase against an otherwise camelCase schema; entries carry an optional free-text <code>comment</code>/<code>Comment</code> field). The spec is authoritative for scope/behavior; this plan is authoritative for exact files, signatures, and code.</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>SQL Server stays a <strong>DEBUG-only</strong> engine this WI (<code>#if DEBUG</code>, compiled out — not merely hidden — in Release). Lifting this is explicitly Future Work, not this WI.</li>
+<li><strong>No environment variables anywhere in the startup/connection path</strong> once this plan lands — <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>, <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>, <code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE</code> are all removed, not just deprecated.</li>
+<li><strong><code>sa</code>'s password is never persisted anywhere</strong> (a deliberate break from today's <code>SaBootstrapConnection</code>, which caches it in the credential store) — it is prompted for every time a server needs bootstrapping.</li>
+<li><strong>No <code>RoleGuardedSqliteDatabase</code> enforcement, no remaining 5 <code>_Test_Reset</code> procs, no test-tier business API, no config migration tooling, no secrets-merge mechanism, no upgrade-rehearsal pipeline</strong> — all explicitly out of scope (spec Non-Goals); do not build them.</li>
+<li><code>TestDatabase</code> is <code>false</code> by construction on every database Release ever creates (checkbox compiled out) and Release's <code>File | Open</code> / <code>RecentFilesMenu</code> always filter out <code>TestDatabase: true</code> entries regardless.</li>
+<li><code>Database/SqlScripts/</code> in the spec text actually means <strong><code>Source/WPF/MyMoney.Data/SqlScripts/{Bootstrap,Access,Test,Migrations}/</code></strong> — there is no <code>Schema/</code> folder; schema comes from <code>SqlServerStoredProcDatabase.LazyCreateTables()</code> (reflection over <code>[TableMapping]</code>), not scripts.</li>
+<li>Namespaces: registry/bootstrap/connection-factory classes go in <code>Walkabout.Data</code> (project <code>MyMoney.Data</code>); new WPF dialogs go in <code>Walkabout.Dialogs</code> (project <code>MyMoney</code>); <code>RecentFilesMenu</code> stays in <code>Walkabout.Utilities</code>.</li>
+</ul>
+<hr />
+<h2 id="file-structure">File Structure<a class="headerlink" href="#file-structure" title="Permanent link">#</a></h2>
+<p><strong>New files:</strong>
+- <code>Source/WPF/MyMoney.Data/DatabaseRegistry.cs</code> — <code>DatabaseRole</code> enum, <code>DatabaseCredential</code>, <code>DatabaseServerEntry</code>, <code>DatabaseEntry</code>, <code>DatabaseRegistry</code> (load/save/connection-string building).
+- <code>Source/WPF/MyMoney.Data/SqlServerConnectionFactory.cs</code> — one static helper turning a registry + display name into a ready <code>SqlServerStoredProcDatabase</code>.
+- <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql</code> — new permanent proc (replaces the login-creation half of <code>CreateDatabaseAndLogins.sql</code>).
+- <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql</code> — new permanent proc (replaces the catalog-creation half).
+- <code>Source/WPF/MyMoney.Data/ISaCredentialPrompt.cs</code> — WPF-agnostic abstraction for prompting for <code>sa</code>'s password.
+- <code>Source/WPF/MyMoney.Data/SqlServerBootstrapper.cs</code> — in-process replacement for <code>MyMoneyAdmin</code>'s <code>BootstrapRunner</code>.
+- <code>Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml</code> / <code>.xaml.cs</code> — implements <code>ISaCredentialPrompt</code>.
+- <code>Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml</code> / <code>.xaml.cs</code> — DEBUG-only.
+- <code>Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml</code> / <code>.xaml.cs</code>.
+- <code>Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml</code> / <code>.xaml.cs</code>.
+- <code>Source/WPF/UnitTests/DatabaseRegistryTests.cs</code>.
+- <code>Source/WPF/UnitTests/SqlServerBootstrapperTests.cs</code> (the testable, non-DB parts — batch-splitting/USE-skipping).</p>
+<p><strong>Modified files:</strong>
+- <code>Source/WPF/MyMoney/Database/DataEngineStartup.cs</code> — rewritten to use <code>DatabaseRegistry</code>/<code>SqlServerConnectionFactory</code>, drop the exe shell-out and <code>RequiredDatabaseName</code>.
+- <code>Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs</code> — rewritten to be a pull-based registry view.
+- <code>Source/WPF/MyMoney/Utilities/Settings.cs</code> — drop the <code>RecentFiles</code> property.
+- <code>Source/WPF/MyMoney/MyMoney.csproj</code> — gains its own DEBUG-only <code>SqlScripts</code> content-copy item (see Task 10 Step 5) now that <code>MyMoneyAdmin.csproj</code> — today's only source of that copy — is deleted.
+- <code>Source/WPF/MyMoney/MainWindow.xaml</code> — <code>File | New</code> becomes a DEBUG-only submenu host; <code>CommandBinding Command="New"</code> removed.
+- <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> — new menu wiring, <code>OpenRegisteredDatabase</code>, <code>RegisterRecentDatabase</code>; dead <code>CreateDatabaseDialog</code>-based <code>NewDatabase()</code>/<code>OpenDatabase()</code>/<code>InitializeCreateDatabaseDialog()</code> deleted.
+- <code>Source/WPF/MyMoney.TestSupport/SqlServerTestDatabase.cs</code>, <code>SqlServerDatabaseContractTests.cs</code>, and <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> — read the registry instead of env vars (<code>SqlServerDatabaseContractTests</code> keeps its documented fail-loud-not-skip behavior; only <code>SqlServerStoredProcDatabaseTests</code> skips).
+- <code>Source/WPF/MyMoney/dataengine.config.template.json</code> — updated to the new schema.</p>
+<p><strong>Deleted files:</strong>
+- <code>Source/WPF/MyMoneyAdmin/</code> (entire project: <code>Program.cs</code>, <code>BootstrapRunner.cs</code>, <code>SaBootstrapConnection.cs</code>, <code>RetryLoop.cs</code>, <code>MyMoneyAdmin.csproj</code>), removed from <code>Source/WPF/MyMoney.sln</code>.
+- <code>Source/WPF/MyMoney.Data/DataEngineConfig.cs</code>, <code>Source/WPF/MyMoney.Data/DataEngineCredentialStore.cs</code>.
+- <code>Source/WPF/MyMoney.TestSupport/MyMoneyTestConnectionResolver.cs</code> — its two-config-sources-cross-validation purpose is moot with a single registry source; superseded by <code>DatabaseRegistry.BuildConnectionString</code>.
+- <code>Source/WPF/UnitTests/DataEngineConfigTests.cs</code>, <code>Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs</code>, <code>Source/WPF/UnitTests/MyMoneyTestConnectionResolverTests.cs</code>.
+- <code>Source/WPF/MyMoney/Dialogs/CreateDatabaseDialog.xaml</code> / <code>.xaml.cs</code> (only after Task 10 confirms no remaining callers).
+- <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/CreateDatabaseAndLogins.sql</code>.</p>
+<hr />
+<h2 id="task-1-databaseregistry-model-json-schema-round-trip-tests">Task 1: <code>DatabaseRegistry</code> model, JSON schema, round-trip tests<a class="headerlink" href="#task-1-databaseregistry-model-json-schema-round-trip-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/DatabaseRegistry.cs</code>
+- Test: <code>Source/WPF/UnitTests/DatabaseRegistryTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>enum DatabaseRole { Admin, User, Test }</code>; <code>class DatabaseCredential { string UserId; string Password; }</code>; <code>class DatabaseServerEntry { string Comment; DatabaseCredential MyMoneyAdmin/MyMoneyUser/MyMoneyTest; DatabaseCredential GetCredential(DatabaseRole) }</code>; <code>class DatabaseEntry { DataEngineType Engine; string Server; string Catalog; string Path; bool TestDatabase; DateTime? LastUsedUtc; string Comment; }</code>; <code>class DatabaseRegistry { Dictionary&lt;string,DatabaseServerEntry&gt; Servers; Dictionary&lt;string,DatabaseEntry&gt; Databases; static string GetDefaultPath(); static DatabaseRegistry Load(string path); void Save(); string BuildConnectionString(DatabaseEntry entry, DatabaseRole role); }</code>. Reuses existing <code>Walkabout.Data.DataEngineType</code> enum (<code>Sqlite</code>/<code>SqlServer</code>, already defined in <code>DataEngineConfig.cs</code> — do <strong>not</strong> redefine it; <code>DataEngineConfig.cs</code> itself is deleted in Task 12, by which point <code>DatabaseRegistry.cs</code> is its only home, so move the enum here as part of <em>this</em> task, not Task 12, to avoid a two-task window with the enum in two places).
+- Consumes: <code>Walkabout.Data.SqlServerDatabase.GetConnectionString(string server, string database, string userid, string password)</code> (existing static method, <code>SqlDatabase.cs:222</code>) and <code>Walkabout.Utilities.ProcessHelper.AppDataPath</code> (existing static property).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing round-trip test</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/UnitTests/DatabaseRegistryTests.cs
+using System;
+using System.IO;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UnitTests
+{
+    public class DatabaseRegistryTests
+    {
+        private string tempFile;
+
+        [SetUp]
+        public void Setup()
+        {
+            this.tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(&quot;N&quot;) + &quot;.json&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (File.Exists(this.tempFile)) { File.Delete(this.tempFile); }
+        }
+
+        [Test]
+        public void MissingFile_ReturnsEmptyRegistry()
+        {
+            var registry = DatabaseRegistry.Load(this.tempFile);
+            Assert.That(registry.Servers, Is.Empty);
+            Assert.That(registry.Databases, Is.Empty);
+        }
+
+        [Test]
+        public void SaveThenLoad_RoundTripsServersAndDatabases()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            registry.Servers[&quot;Redmond&quot;] = new DatabaseServerEntry
+            {
+                Comment = &quot;Home NAS&quot;,
+                MyMoneyAdmin = new DatabaseCredential { UserId = &quot;MyMoneyAdmin&quot;, Password = &quot;adminpw&quot; },
+                MyMoneyUser = new DatabaseCredential { UserId = &quot;MyMoneyUser&quot;, Password = &quot;userpw&quot; },
+                MyMoneyTest = new DatabaseCredential { UserId = &quot;MyMoneyTest&quot;, Password = &quot;testpw&quot; }
+            };
+            registry.Databases[&quot;My Real Money&quot;] = new DatabaseEntry
+            {
+                Engine = DataEngineType.SqlServer, Server = &quot;Redmond&quot;, Catalog = &quot;MyMoney&quot;,
+                TestDatabase = false, LastUsedUtc = new DateTime(2026, 9, 17, 20, 0, 0, DateTimeKind.Utc),
+                Comment = &quot;The real one&quot;
+            };
+            registry.Databases[&quot;Personal.mmdb&quot;] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite, Path = @&quot;C:\Users\x\MyMoney\personal.mmdb&quot;,
+                TestDatabase = false, LastUsedUtc = null, Comment = null
+            };
+            registry.Save();
+
+            var reloaded = DatabaseRegistry.Load(this.tempFile);
+
+            Assert.That(reloaded.Servers[&quot;Redmond&quot;].Comment, Is.EqualTo(&quot;Home NAS&quot;));
+            Assert.That(reloaded.Servers[&quot;Redmond&quot;].MyMoneyAdmin.Password, Is.EqualTo(&quot;adminpw&quot;));
+            Assert.That(reloaded.Databases[&quot;My Real Money&quot;].Server, Is.EqualTo(&quot;Redmond&quot;));
+            Assert.That(reloaded.Databases[&quot;My Real Money&quot;].Catalog, Is.EqualTo(&quot;MyMoney&quot;));
+            Assert.That(reloaded.Databases[&quot;My Real Money&quot;].TestDatabase, Is.False);
+            Assert.That(reloaded.Databases[&quot;Personal.mmdb&quot;].Path, Is.EqualTo(@&quot;C:\Users\x\MyMoney\personal.mmdb&quot;));
+        }
+
+        [Test]
+        public void Save_WritesTestDatabaseFieldWithExactCasing()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            registry.Databases[&quot;x&quot;] = new DatabaseEntry { Engine = DataEngineType.Sqlite, Path = &quot;x.mmdb&quot;, TestDatabase = true };
+            registry.Save();
+
+            string json = File.ReadAllText(this.tempFile);
+            Assert.That(json, Does.Contain(&quot;\&quot;TestDatabase\&quot;: true&quot;));
+            Assert.That(json, Does.Not.Contain(&quot;\&quot;testDatabase\&quot;&quot;));
+        }
+
+        [Test]
+        public void GetDefaultPath_EndsWithDataEngineConfigJson()
+        {
+            Assert.That(DatabaseRegistry.GetDefaultPath(), Does.EndWith(Path.Combine(&quot;MyMoney&quot;, &quot;dataengine.config.json&quot;)));
+        }
+
+        [Test]
+        public void BuildConnectionString_ForSqlServerEntry_UsesRequestedRoleCredential()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            registry.Servers[&quot;Redmond&quot;] = new DatabaseServerEntry
+            {
+                MyMoneyUser = new DatabaseCredential { UserId = &quot;MyMoneyUser&quot;, Password = &quot;secret&quot; }
+            };
+            var entry = new DatabaseEntry { Engine = DataEngineType.SqlServer, Server = &quot;Redmond&quot;, Catalog = &quot;MyMoney&quot; };
+
+            string connectionString = registry.BuildConnectionString(entry, DatabaseRole.User);
+
+            Assert.That(connectionString, Does.Contain(&quot;User ID=MyMoneyUser&quot;).IgnoreCase);
+            Assert.That(connectionString, Does.Contain(&quot;Initial Catalog=MyMoney&quot;).IgnoreCase);
+        }
+
+        [Test]
+        public void BuildConnectionString_UnknownServer_ThrowsWithClearMessage()
+        {
+            var registry = new DatabaseRegistry(this.tempFile);
+            var entry = new DatabaseEntry { Engine = DataEngineType.SqlServer, Server = &quot;Nowhere&quot;, Catalog = &quot;MyMoney&quot; };
+
+            var ex = Assert.Throws&lt;InvalidOperationException&gt;(() =&gt; registry.BuildConnectionString(entry, DatabaseRole.User));
+            Assert.That(ex.Message, Does.Contain(&quot;Nowhere&quot;));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run the tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseRegistryTests"</code>
+Expected: FAIL — <code>DatabaseRegistry</code>/<code>DatabaseServerEntry</code>/<code>DatabaseCredential</code>/<code>DatabaseEntry</code> don't exist yet.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement <code>DatabaseRegistry</code></strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney.Data/DatabaseRegistry.cs
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+    // Moved here from the now-deleted DataEngineConfig.cs -- this is its
+    // only home from this task onward.
+    public enum DataEngineType
+    {
+        Sqlite,
+        SqlServer
+    }
+
+    public enum DatabaseRole
+    {
+        Admin,
+        User,
+        Test
+    }
+
+    public class DatabaseCredential
+    {
+        public string UserId { get; set; }
+        public string Password { get; set; }
+    }
+
+    public class DatabaseServerEntry
+    {
+        public string Comment { get; set; }
+        public DatabaseCredential MyMoneyAdmin { get; set; }
+        public DatabaseCredential MyMoneyUser { get; set; }
+        public DatabaseCredential MyMoneyTest { get; set; }
+
+        public DatabaseCredential GetCredential(DatabaseRole role)
+        {
+            switch (role)
+            {
+                case DatabaseRole.Admin: return this.MyMoneyAdmin;
+                case DatabaseRole.User: return this.MyMoneyUser;
+                case DatabaseRole.Test: return this.MyMoneyTest;
+                default: throw new ArgumentOutOfRangeException(nameof(role));
+            }
+        }
+    }
+
+    public class DatabaseEntry
+    {
+        public DataEngineType Engine { get; set; }
+        public string Server { get; set; }
+        public string Catalog { get; set; }
+        public string Path { get; set; }
+
+        // Explicit override: everything else in this schema serializes
+        // camelCase (see DatabaseRegistry.JsonSettings below), but the user
+        // specifically asked for this one field to read &quot;TestDatabase&quot; in
+        // the hand-edited config file, not &quot;testDatabase&quot;.
+        [JsonProperty(&quot;TestDatabase&quot;)]
+        public bool TestDatabase { get; set; }
+
+        public DateTime? LastUsedUtc { get; set; }
+        public string Comment { get; set; }
+    }
+
+    public class DatabaseRegistry
+    {
+        private readonly string path;
+
+        public Dictionary&lt;string, DatabaseServerEntry&gt; Servers { get; private set; } = new Dictionary&lt;string, DatabaseServerEntry&gt;();
+        public Dictionary&lt;string, DatabaseEntry&gt; Databases { get; private set; } = new Dictionary&lt;string, DatabaseEntry&gt;();
+
+        private static readonly JsonSerializerSettings JsonSettings = new JsonSerializerSettings
+        {
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
+            Formatting = Formatting.Indented,
+            NullValueHandling = NullValueHandling.Include
+        };
+
+        public DatabaseRegistry(string path)
+        {
+            this.path = path;
+        }
+
+        public static string GetDefaultPath()
+        {
+            return Path.Combine(ProcessHelper.AppDataPath, &quot;dataengine.config.json&quot;);
+        }
+
+        public static DatabaseRegistry Load(string path)
+        {
+            var registry = new DatabaseRegistry(path);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return registry;
+            }
+
+            string json = File.ReadAllText(path);
+            RawRegistry raw = JsonConvert.DeserializeObject&lt;RawRegistry&gt;(json, JsonSettings);
+            if (raw == null)
+            {
+                return registry;
+            }
+
+            registry.Servers = raw.Servers ?? new Dictionary&lt;string, DatabaseServerEntry&gt;();
+            registry.Databases = raw.Databases ?? new Dictionary&lt;string, DatabaseEntry&gt;();
+            return registry;
+        }
+
+        public void Save()
+        {
+            string dir = Path.GetDirectoryName(this.path);
+            if (!string.IsNullOrEmpty(dir) &amp;&amp; !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            var raw = new RawRegistry { Servers = this.Servers, Databases = this.Databases };
+            string json = JsonConvert.SerializeObject(raw, JsonSettings);
+            File.WriteAllText(this.path, json);
+        }
+
+        public string BuildConnectionString(DatabaseEntry entry, DatabaseRole role)
+        {
+            if (entry.Engine != DataEngineType.SqlServer)
+            {
+                throw new InvalidOperationException(&quot;BuildConnectionString only applies to SqlServer entries.&quot;);
+            }
+
+            if (!this.Servers.TryGetValue(entry.Server, out DatabaseServerEntry server))
+            {
+                throw new InvalidOperationException($&quot;No servers[\&quot;{entry.Server}\&quot;] entry in the registry at {this.path}.&quot;);
+            }
+
+            DatabaseCredential credential = server.GetCredential(role);
+            if (credential == null)
+            {
+                throw new InvalidOperationException($&quot;servers[\&quot;{entry.Server}\&quot;] has no {role} credential in the registry at {this.path}.&quot;);
+            }
+
+            return SqlServerDatabase.GetConnectionString(entry.Server, entry.Catalog, credential.UserId, credential.Password);
+        }
+
+        private class RawRegistry
+        {
+            public Dictionary&lt;string, DatabaseServerEntry&gt; Servers { get; set; }
+            public Dictionary&lt;string, DatabaseEntry&gt; Databases { get; set; }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run the tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseRegistryTests"</code>
+Expected: PASS (6 tests).</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/DatabaseRegistry.cs Source/WPF/UnitTests/DatabaseRegistryTests.cs
+git commit -m &quot;feat: add DatabaseRegistry model with JSON round-trip (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-sqlserverconnectionfactory">Task 2: <code>SqlServerConnectionFactory</code><a class="headerlink" href="#task-2-sqlserverconnectionfactory" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlServerConnectionFactory.cs</code>
+- Test: <code>Source/WPF/UnitTests/DatabaseRegistryTests.cs</code> (append)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>, <code>DatabaseEntry</code>, <code>DatabaseRole</code> (Task 1); <code>Walkabout.Data.SqlServerStoredProcDatabase</code> (existing, <code>ConnectionStringOverride</code>/<code>DatabasePath</code>/<code>UiCallback</code> settable properties); <code>Walkabout.Data.IDataLayerUiCallback</code> (existing interface, implemented by <code>WpfDataLayerUiCallback</code>, already used identically in <code>DataEngineStartup.cs:119</code>).
+- Produces: <code>static class SqlServerConnectionFactory { static SqlServerStoredProcDatabase Connect(DatabaseRegistry registry, string displayName, IDataLayerUiCallback uiCallback); }</code>. Used by Task 10 (MainWindow New/Open handlers) and Task 12 (<code>DataEngineStartup</code> rewrite) — both need to turn "a display name the user picked" into a ready-to-<code>Load()</code> database object without duplicating the <code>ConnectionStringOverride</code>/<code>DatabasePath</code> construction.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">// append to DatabaseRegistryTests.cs
+[Test]
+public void SqlServerConnectionFactory_Connect_BuildsDatabaseWithOverrideAndSyntheticPath()
+{
+    var registry = new DatabaseRegistry(this.tempFile);
+    registry.Servers[&quot;Redmond&quot;] = new DatabaseServerEntry
+    {
+        MyMoneyUser = new DatabaseCredential { UserId = &quot;MyMoneyUser&quot;, Password = &quot;secret&quot; }
+    };
+    registry.Databases[&quot;My Real Money&quot;] = new DatabaseEntry
+    {
+        Engine = DataEngineType.SqlServer, Server = &quot;Redmond&quot;, Catalog = &quot;MyMoney&quot;
+    };
+
+    var database = SqlServerConnectionFactory.Connect(registry, &quot;My Real Money&quot;, uiCallback: null);
+
+    Assert.That(database.ConnectionStringOverride, Does.Contain(&quot;Initial Catalog=MyMoney&quot;).IgnoreCase);
+    Assert.That(database.DatabasePath, Does.EndWith(Path.Combine(&quot;SqlServer&quot;, &quot;MyMoney.sqlserver&quot;)));
+}
+
+[Test]
+public void SqlServerConnectionFactory_Connect_UnknownDisplayName_Throws()
+{
+    var registry = new DatabaseRegistry(this.tempFile);
+    Assert.Throws&lt;InvalidOperationException&gt;(() =&gt; SqlServerConnectionFactory.Connect(registry, &quot;nope&quot;, null));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run to verify failure</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseRegistryTests"</code>
+Expected: FAIL — <code>SqlServerConnectionFactory</code> doesn't exist.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney.Data/SqlServerConnectionFactory.cs
+using System;
+using System.IO;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+    public static class SqlServerConnectionFactory
+    {
+        public static SqlServerStoredProcDatabase Connect(DatabaseRegistry registry, string displayName, IDataLayerUiCallback uiCallback)
+        {
+            if (!registry.Databases.TryGetValue(displayName, out DatabaseEntry entry) || entry.Engine != DataEngineType.SqlServer)
+            {
+                throw new InvalidOperationException($&quot;No registered SQL Server database named '{displayName}'.&quot;);
+            }
+
+            string connectionString = registry.BuildConnectionString(entry, DatabaseRole.User);
+
+            return new SqlServerStoredProcDatabase
+            {
+                ConnectionStringOverride = connectionString,
+                // SqlServerStoredProcDatabase has no on-disk file, but
+                // DatabasePath is read throughout MainWindow (OFX log path,
+                // caption text, attachment/statement/report directories) --
+                // see the identical comment in DataEngineStartup.cs this
+                // replaces.
+                DatabasePath = Path.Combine(ProcessHelper.AppDataPath, &quot;SqlServer&quot;, entry.Catalog + &quot;.sqlserver&quot;),
+                UiCallback = uiCallback
+            };
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run to verify pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseRegistryTests"</code>
+Expected: PASS (8 tests total).</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlServerConnectionFactory.cs Source/WPF/UnitTests/DatabaseRegistryTests.cs
+git commit -m &quot;feat: add SqlServerConnectionFactory (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-3-permanent-stored-procs-mymoney_bootstrapserver-mymoney_createcatalog">Task 3: Permanent stored procs <code>MyMoney_BootstrapServer</code> / <code>MyMoney_CreateCatalog</code><a class="headerlink" href="#task-3-permanent-stored-procs-mymoney_bootstrapserver-mymoney_createcatalog" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql</code>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql</code>
+- Delete: <code>Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/CreateDatabaseAndLogins.sql</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: two permanent, idempotent <code>master</code>-scoped procs, called directly via ADO.NET <code>SqlCommand</code> from Task 4's <code>SqlServerBootstrapper</code> — no more <code>{{AdminPassword}}</code>-style text substitution, no create-then-drop temp proc.
+- Design note carried over from the real <code>CreateDatabaseAndLogins.sql</code> (read in full during research): that single script today conflates three things — (a) server-level <code>CREATE LOGIN</code>/<code>ALTER LOGIN</code> for all three logins (genuinely once-per-server), (b) <code>CREATE DATABASE</code>, and (c) per-catalog <code>CREATE USER</code>×3 + <code>db_owner</code> grant for <code>MyMoneyAdmin</code>. (a) maps to <code>MyMoney_BootstrapServer</code>; <strong>(b) and (c) are catalog-scoped and both belong in <code>MyMoney_CreateCatalog</code></strong>, not just the <code>CREATE DATABASE</code> half. Today's script also never grants <code>dbcreator</code> to <code>MyMoneyAdmin</code> — this WI adds that grant so <code>MyMoneyAdmin</code> can run <code>MyMoney_CreateCatalog</code> itself.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write <code>MyMoney_BootstrapServer.sql</code></strong></li>
+</ul>
+<pre><code class="language-sql">-- Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql
+--
+-- Permanent, idempotent, callable as 'sa'. Creates/updates the three
+-- server-level logins and grants MyMoneyAdmin the dbcreator server role so
+-- it can run MyMoney_CreateCatalog itself afterward. Called once per
+-- server, ever, by SqlServerBootstrapper.BootstrapServerIfNeeded -- never
+-- dropped after use, unlike the temp-proc pattern it replaces.
+USE master;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.MyMoney_BootstrapServer
+    @AdminPassword NVARCHAR(128),
+    @UserPassword  NVARCHAR(128),
+    @TestPassword  NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @sql NVARCHAR(MAX);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyAdmin')
+    BEGIN
+        SET @sql = N'CREATE LOGIN [MyMoneyAdmin] WITH PASSWORD = ' + QUOTENAME(@AdminPassword, N'''') + N', CHECK_POLICY = OFF;';
+        EXEC (@sql);
+    END
+    ELSE
+    BEGIN
+        SET @sql = N'ALTER LOGIN [MyMoneyAdmin] WITH PASSWORD = ' + QUOTENAME(@AdminPassword, N'''') + N';';
+        EXEC (@sql);
+    END
+    IF NOT EXISTS (SELECT 1 FROM sys.server_role_members rm
+                   JOIN sys.server_principals r ON rm.role_principal_id = r.principal_id
+                   JOIN sys.server_principals m ON rm.member_principal_id = m.principal_id
+                   WHERE r.name = N'dbcreator' AND m.name = N'MyMoneyAdmin')
+    BEGIN
+        ALTER SERVER ROLE dbcreator ADD MEMBER [MyMoneyAdmin];
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyUser')
+    BEGIN
+        SET @sql = N'CREATE LOGIN [MyMoneyUser] WITH PASSWORD = ' + QUOTENAME(@UserPassword, N'''') + N', CHECK_POLICY = OFF;';
+        EXEC (@sql);
+    END
+    ELSE
+    BEGIN
+        SET @sql = N'ALTER LOGIN [MyMoneyUser] WITH PASSWORD = ' + QUOTENAME(@UserPassword, N'''') + N';';
+        EXEC (@sql);
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyTest')
+    BEGIN
+        SET @sql = N'CREATE LOGIN [MyMoneyTest] WITH PASSWORD = ' + QUOTENAME(@TestPassword, N'''') + N', CHECK_POLICY = OFF;';
+        EXEC (@sql);
+    END
+    ELSE
+    BEGIN
+        SET @sql = N'ALTER LOGIN [MyMoneyTest] WITH PASSWORD = ' + QUOTENAME(@TestPassword, N'''') + N';';
+        EXEC (@sql);
+    END
+END
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write <code>MyMoney_CreateCatalog.sql</code></strong></li>
+</ul>
+<pre><code class="language-sql">-- Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql
+--
+-- Permanent, idempotent, callable as 'MyMoneyAdmin' (granted dbcreator by
+-- MyMoney_BootstrapServer). Creates one catalog by name -- production, a
+-- test catalog, or any future catalog, no per-catalog script variant
+-- needed -- and creates all three logins as database users inside it with
+-- MyMoneyAdmin as db_owner. QUOTENAME on @CatalogName specifically to
+-- avoid SQL injection through the parameter, per issue #32's design spec.
+USE master;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.MyMoney_CreateCatalog
+    @CatalogName NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @sql NVARCHAR(MAX);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @CatalogName)
+    BEGIN
+        SET @sql = N'CREATE DATABASE ' + QUOTENAME(@CatalogName) + N';';
+        EXEC (@sql);
+    END
+
+    SET @sql = N'
+        USE ' + QUOTENAME(@CatalogName) + N';
+        IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N''MyMoneyAdmin'')
+            CREATE USER [MyMoneyAdmin] FOR LOGIN [MyMoneyAdmin];
+        IF NOT EXISTS (SELECT 1 FROM sys.database_role_members rm
+                        JOIN sys.database_principals r ON rm.role_principal_id = r.principal_id
+                        JOIN sys.database_principals m ON rm.member_principal_id = m.principal_id
+                        WHERE r.name = N''db_owner'' AND m.name = N''MyMoneyAdmin'')
+            ALTER ROLE db_owner ADD MEMBER [MyMoneyAdmin];
+        IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N''MyMoneyUser'')
+            CREATE USER [MyMoneyUser] FOR LOGIN [MyMoneyUser];
+        IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N''MyMoneyTest'')
+            CREATE USER [MyMoneyTest] FOR LOGIN [MyMoneyTest];
+    ';
+    EXEC (@sql);
+END
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Delete the replaced script</strong></li>
+</ul>
+<pre><code class="language-bash">git rm Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/CreateDatabaseAndLogins.sql
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql Source/WPF/MyMoney.Data/SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql
+git commit -m &quot;feat: replace temp-proc SQL Server bootstrap script with two permanent procs (#32)&quot;
+</code></pre>
+<p>(No automated test here — these are plain <code>.sql</code> files with no build-time verification; Task 13's live Redmond verification is what actually exercises them. Task 4's unit tests cover the C# orchestration around them.)</p>
+<hr />
+<h2 id="task-4-sqlserverbootstrapper-in-process-replaces-mymoneyadmins-bootstraprunner">Task 4: <code>SqlServerBootstrapper</code> (in-process, replaces <code>MyMoneyAdmin</code>'s <code>BootstrapRunner</code>)<a class="headerlink" href="#task-4-sqlserverbootstrapper-in-process-replaces-mymoneyadmins-bootstraprunner" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/ISaCredentialPrompt.cs</code>
+- Create: <code>Source/WPF/MyMoney.Data/SqlServerBootstrapper.cs</code>
+- Test: <code>Source/WPF/UnitTests/SqlServerBootstrapperTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>/<code>DatabaseServerEntry</code>/<code>DatabaseCredential</code> (Task 1); <code>Walkabout.Data.DataEnginePasswordGenerator.Generate(int length = 24)</code> (existing, <code>DataEnginePasswordGenerator.cs</code>); <code>Walkabout.Data.SqlServerStoredProcDatabase.LazyCreateTables()</code>/<code>.Disconnect()</code> (existing, used identically by today's <code>BootstrapRunner.cs:99-104</code>).
+- Produces: <code>interface ISaCredentialPrompt { bool TryGetSaPassword(string server, out string password); }</code> (implemented by Task 5's <code>SaCredentialDialog</code>, kept WPF-agnostic so this class has no WPF dependency); <code>class SqlServerBootstrapper { SqlServerBootstrapper(string sqlScriptsRoot); bool BootstrapServerIfNeeded(DatabaseRegistry registry, string server, ISaCredentialPrompt saPrompt, out string error); bool CreateCatalog(DatabaseRegistry registry, string server, string catalogName, bool testDatabase, out string error); }</code>. Task 6/10 call both methods; Task 12 (<code>DataEngineStartup</code>) does <strong>not</strong> call this class at all (auto-load never bootstraps — see Task 12).
+- <strong>Safety decision (not resolved by the spec text, made explicit here):</strong> <code>CreateCatalog</code> deploys all 16 <code>Access/*.sql</code> files to every catalog it creates (test or production), but deploys <code>Test/*.sql</code> files <strong>only when <code>testDatabase == true</code></strong>. Deploying <code>_Test_Reset</code> procs into a production catalog would hand the <code>MyMoneyTest</code> login the ability to destructively wipe real data — the three logins get a <code>CREATE USER</code> in every catalog either way (needed for basic connectivity, ported unchanged from today's script), but the destructive procs themselves stay confined to catalogs the caller explicitly flagged as test databases.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests for the testable (non-DB) parts</strong></li>
+</ul>
+<p><code>ExecuteBatchScript</code>'s GO-splitting and <code>^USE\b</code>-skipping logic is pure string processing — factor it into an internal static method so it's unit-testable without a live SQL Server, matching the spec's explicit claim that the <code>USE</code> line becomes dead weight to skip.</p>
+<pre><code class="language-csharp">// Source/WPF/UnitTests/SqlServerBootstrapperTests.cs
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UnitTests
+{
+    public class SqlServerBootstrapperTests
+    {
+        [Test]
+        public void SplitBatches_SplitsOnGoAndTrims()
+        {
+            string script = &quot;SELECT 1;\r\nGO\r\n  SELECT 2;  \r\nGO\r\n&quot;;
+            var batches = SqlServerBootstrapper.SplitBatches(script);
+            Assert.That(batches, Is.EqualTo(new[] { &quot;SELECT 1;&quot;, &quot;SELECT 2;&quot; }));
+        }
+
+        [Test]
+        public void SplitBatches_SkipsUseStatements()
+        {
+            string script = &quot;USE MyMoney;\r\nGO\r\nSELECT 1;\r\nGO\r\n&quot;;
+            var batches = SqlServerBootstrapper.SplitBatches(script);
+            Assert.That(batches, Is.EqualTo(new[] { &quot;SELECT 1;&quot; }));
+        }
+
+        [Test]
+        public void SplitBatches_IgnoresEmptyBatches()
+        {
+            string script = &quot;GO\r\nSELECT 1;\r\nGO\r\n\r\nGO\r\n&quot;;
+            var batches = SqlServerBootstrapper.SplitBatches(script);
+            Assert.That(batches, Is.EqualTo(new[] { &quot;SELECT 1;&quot; }));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run to verify failure</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerBootstrapperTests"</code>
+Expected: FAIL — <code>SqlServerBootstrapper</code> doesn't exist.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement <code>ISaCredentialPrompt</code> and <code>SqlServerBootstrapper</code></strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney.Data/ISaCredentialPrompt.cs
+namespace Walkabout.Data
+{
+    /// &lt;summary&gt;
+    /// Kept WPF-agnostic so SqlServerBootstrapper (MyMoney.Data, no WPF
+    /// reference) can prompt for 'sa' without depending on the UI layer.
+    /// Implemented by MyMoney's SaCredentialDialog.
+    /// &lt;/summary&gt;
+    public interface ISaCredentialPrompt
+    {
+        /// &lt;returns&gt;false if the user cancelled.&lt;/returns&gt;
+        bool TryGetSaPassword(string server, out string password);
+    }
+}
+</code></pre>
+<pre><code class="language-csharp">// Source/WPF/MyMoney.Data/SqlServerBootstrapper.cs
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
+using Microsoft.Data.SqlClient;
+
+namespace Walkabout.Data
+{
+    public class SqlServerBootstrapper
+    {
+        private readonly string sqlScriptsRoot;
+
+        private static readonly string[] AccessProcFiles =
+        {
+            &quot;Payees_AccessProcs.sql&quot;, &quot;Accounts_AccessProcs.sql&quot;, &quot;Categories_AccessProcs.sql&quot;,
+            &quot;Currencies_AccessProcs.sql&quot;, &quot;Securities_AccessProcs.sql&quot;, &quot;StockSplits_AccessProcs.sql&quot;,
+            &quot;Aliases_AccessProcs.sql&quot;, &quot;Transactions_AccessProcs.sql&quot;, &quot;Splits_AccessProcs.sql&quot;,
+            &quot;Investments_AccessProcs.sql&quot;, &quot;OnlineAccounts_AccessProcs.sql&quot;, &quot;AccountAliases_AccessProcs.sql&quot;,
+            &quot;TransactionExtras_AccessProcs.sql&quot;, &quot;LoanPayments_AccessProcs.sql&quot;, &quot;RentUnits_AccessProcs.sql&quot;,
+            &quot;RentBuildings_AccessProcs.sql&quot;
+        };
+
+        public SqlServerBootstrapper(string sqlScriptsRoot)
+        {
+            this.sqlScriptsRoot = sqlScriptsRoot;
+        }
+
+        public bool BootstrapServerIfNeeded(DatabaseRegistry registry, string server, ISaCredentialPrompt saPrompt, out string error)
+        {
+            error = null;
+            if (registry.Servers.ContainsKey(server))
+            {
+                return true;
+            }
+
+            if (!saPrompt.TryGetSaPassword(server, out string saPassword))
+            {
+                error = &quot;Bootstrap cancelled.&quot;;
+                return false;
+            }
+
+            string adminPassword = DataEnginePasswordGenerator.Generate();
+            string userPassword = DataEnginePasswordGenerator.Generate();
+            string testPassword = DataEnginePasswordGenerator.Generate();
+
+            var saBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = &quot;sa&quot;,
+                Password = saPassword,
+                InitialCatalog = &quot;master&quot;,
+                TrustServerCertificate = true,
+                ConnectTimeout = 10
+            };
+
+            try
+            {
+                DeployScript(saBuilder.ConnectionString, Path.Combine(this.sqlScriptsRoot, &quot;Bootstrap&quot;, &quot;MyMoney_BootstrapServer.sql&quot;));
+                using (var connection = new SqlConnection(saBuilder.ConnectionString))
+                {
+                    connection.Open();
+                    using (var command = new SqlCommand(&quot;master.dbo.MyMoney_BootstrapServer&quot;, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                    {
+                        command.Parameters.AddWithValue(&quot;@AdminPassword&quot;, adminPassword);
+                        command.Parameters.AddWithValue(&quot;@UserPassword&quot;, userPassword);
+                        command.Parameters.AddWithValue(&quot;@TestPassword&quot;, testPassword);
+                        command.ExecuteNonQuery();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                error = $&quot;Could not bootstrap server '{server}' as 'sa': {ex.Message}&quot;;
+                return false;
+            }
+
+            // sa's password is never persisted (Global Constraints) -- only
+            // the three generated role passwords go into the registry.
+            registry.Servers[server] = new DatabaseServerEntry
+            {
+                MyMoneyAdmin = new DatabaseCredential { UserId = &quot;MyMoneyAdmin&quot;, Password = adminPassword },
+                MyMoneyUser = new DatabaseCredential { UserId = &quot;MyMoneyUser&quot;, Password = userPassword },
+                MyMoneyTest = new DatabaseCredential { UserId = &quot;MyMoneyTest&quot;, Password = testPassword }
+            };
+            registry.Save();
+            return true;
+        }
+
+        public bool CreateCatalog(DatabaseRegistry registry, string server, string catalogName, bool testDatabase, out string error)
+        {
+            error = null;
+            if (!registry.Servers.TryGetValue(server, out DatabaseServerEntry serverEntry))
+            {
+                error = $&quot;Server '{server}' has not been bootstrapped yet.&quot;;
+                return false;
+            }
+
+            var adminBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = serverEntry.MyMoneyAdmin.UserId,
+                Password = serverEntry.MyMoneyAdmin.Password,
+                InitialCatalog = &quot;master&quot;,
+                TrustServerCertificate = true,
+                ConnectTimeout = 10
+            };
+
+            try
+            {
+                DeployScript(adminBuilder.ConnectionString, Path.Combine(this.sqlScriptsRoot, &quot;Bootstrap&quot;, &quot;MyMoney_CreateCatalog.sql&quot;));
+                using (var connection = new SqlConnection(adminBuilder.ConnectionString))
+                {
+                    connection.Open();
+                    using (var command = new SqlCommand(&quot;master.dbo.MyMoney_CreateCatalog&quot;, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                    {
+                        command.Parameters.AddWithValue(&quot;@CatalogName&quot;, catalogName);
+                        command.ExecuteNonQuery();
+                    }
+                }
+
+                var catalogBuilder = new SqlConnectionStringBuilder(adminBuilder.ConnectionString) { InitialCatalog = catalogName };
+
+                var adminDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = catalogBuilder.ConnectionString };
+                adminDatabase.LazyCreateTables();
+                adminDatabase.Disconnect();
+
+                foreach (string procFile in AccessProcFiles)
+                {
+                    string script = File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, procFile));
+                    ExecuteBatchScript(catalogBuilder.ConnectionString, script);
+                }
+
+                if (testDatabase)
+                {
+                    // Test/_Test_Reset procs are destructive-wipe capable --
+                    // only ever deployed into a catalog the caller flagged
+                    // as a test database (see this task's Safety decision).
+                    foreach (string testFile in Directory.GetFiles(Path.Combine(this.sqlScriptsRoot, &quot;Test&quot;), &quot;*.sql&quot;))
+                    {
+                        ExecuteBatchScript(catalogBuilder.ConnectionString, File.ReadAllText(testFile));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                error = $&quot;Could not create catalog '{catalogName}' on '{server}': {ex.Message}&quot;;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void DeployScript(string connectionString, string scriptPath)
+        {
+            ExecuteBatchScript(connectionString, File.ReadAllText(scriptPath));
+        }
+
+        /// &lt;summary&gt;
+        /// Ported from MyMoneyAdmin's BootstrapRunner.ExecuteBatchScript,
+        /// plus skipping any batch matching ^USE\b -- the connection is
+        /// already scoped to the right catalog via InitialCatalog, so the
+        /// checked-in scripts' leading &quot;USE &amp;lt;db&amp;gt;;&quot; line (kept for a human
+        /// running them by hand in SSMS) is dead weight for us.
+        /// &lt;/summary&gt;
+        private static void ExecuteBatchScript(string connectionString, string script)
+        {
+            using (var connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+                foreach (string batch in SplitBatches(script))
+                {
+                    using (var command = new SqlCommand(batch, connection) { CommandTimeout = 60 })
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+
+        internal static string[] SplitBatches(string script)
+        {
+            string[] rawBatches = script.Split(new[] { &quot;\r\nGO&quot;, &quot;\nGO&quot; }, StringSplitOptions.RemoveEmptyEntries);
+            var batches = new System.Collections.Generic.List&lt;string&gt;();
+            foreach (string raw in rawBatches)
+            {
+                string trimmed = raw.Trim();
+                if (trimmed.Length == 0 || Regex.IsMatch(trimmed, @&quot;^USE\b&quot;, RegexOptions.IgnoreCase))
+                {
+                    continue;
+                }
+                batches.Add(trimmed);
+            }
+            return batches.ToArray();
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run to verify pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerBootstrapperTests"</code>
+Expected: PASS (3 tests).</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/ISaCredentialPrompt.cs Source/WPF/MyMoney.Data/SqlServerBootstrapper.cs Source/WPF/UnitTests/SqlServerBootstrapperTests.cs
+git commit -m &quot;feat: add in-process SqlServerBootstrapper, replacing MyMoneyAdmin's BootstrapRunner (#32)&quot;
+</code></pre>
+<p>(Live-server behavior — actually calling <code>MyMoney_BootstrapServer</code>/<code>MyMoney_CreateCatalog</code> against Redmond, idempotency on a second run, a genuinely new second catalog — is verified in Task 13, not here; this task's tests cover only the DB-free string logic.)</p>
+<hr />
+<h2 id="task-5-sacredentialdialog-implements-isacredentialprompt">Task 5: <code>SaCredentialDialog</code> (implements <code>ISaCredentialPrompt</code>)<a class="headerlink" href="#task-5-sacredentialdialog-implements-isacredentialprompt" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml</code>
+- Create: <code>Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Walkabout.Data.ISaCredentialPrompt</code> (Task 4).
+- Produces: <code>class SaCredentialDialog : Window, ISaCredentialPrompt</code>. Used by Task 6/10's <code>OnNewSqlServerDatabase</code> handler as the <code>saPrompt</code> argument to <code>SqlServerBootstrapper.BootstrapServerIfNeeded</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the dialog XAML</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;!-- Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml --&gt;
+&lt;Window x:Class=&quot;Walkabout.Dialogs.SaCredentialDialog&quot;
+        xmlns=&quot;http://schemas.microsoft.com/winfx/2006/xaml/presentation&quot;
+        xmlns:x=&quot;http://schemas.microsoft.com/winfx/2006/xaml&quot;
+        Title=&quot;Connect as 'sa'&quot; Height=&quot;160&quot; Width=&quot;360&quot;
+        WindowStartupLocation=&quot;CenterOwner&quot; ResizeMode=&quot;NoResize&quot; ShowInTaskbar=&quot;False&quot;&gt;
+    &lt;StackPanel Margin=&quot;12&quot;&gt;
+        &lt;TextBlock x:Name=&quot;TextBlockPrompt&quot; TextWrapping=&quot;Wrap&quot; Margin=&quot;0,0,0,8&quot;/&gt;
+        &lt;PasswordBox x:Name=&quot;TextBoxPassword&quot; Margin=&quot;0,0,0,12&quot;/&gt;
+        &lt;StackPanel Orientation=&quot;Horizontal&quot; HorizontalAlignment=&quot;Right&quot;&gt;
+            &lt;Button x:Name=&quot;ButtonOk&quot; Content=&quot;_OK&quot; IsDefault=&quot;True&quot; Width=&quot;75&quot; Click=&quot;OnOk&quot;/&gt;
+            &lt;Button x:Name=&quot;ButtonCancel&quot; Content=&quot;_Cancel&quot; IsCancel=&quot;True&quot; Width=&quot;75&quot; Margin=&quot;8,0,0,0&quot;/&gt;
+        &lt;/StackPanel&gt;
+    &lt;/StackPanel&gt;
+&lt;/Window&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the code-behind</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml.cs
+using System.Windows;
+using Walkabout.Data;
+
+namespace Walkabout.Dialogs
+{
+    public partial class SaCredentialDialog : Window, ISaCredentialPrompt
+    {
+        public SaCredentialDialog()
+        {
+            this.InitializeComponent();
+        }
+
+        public bool TryGetSaPassword(string server, out string password)
+        {
+            this.TextBlockPrompt.Text = $&quot;Enter the 'sa' password for server '{server}' to bootstrap it for MyMoney.&quot;;
+            bool? result = this.ShowDialog();
+            password = result == true ? this.TextBoxPassword.Password : null;
+            return result == true;
+        }
+
+        private void OnOk(object sender, RoutedEventArgs e)
+        {
+            this.DialogResult = true;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build to verify it compiles</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build succeeds (this dialog has no automated test — it's a thin, directly-observable UI shell around an interface already covered by <code>SqlServerBootstrapperTests</code>' caller contract; Task 13 exercises it manually against live Redmond).</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml Source/WPF/MyMoney/Dialogs/SaCredentialDialog.xaml.cs
+git commit -m &quot;feat: add SaCredentialDialog implementing ISaCredentialPrompt (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-6-newsqlserverdatabasedialog-debug-only">Task 6: <code>NewSqlServerDatabaseDialog</code> (DEBUG-only)<a class="headerlink" href="#task-6-newsqlserverdatabasedialog-debug-only" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml</code>
+- Create: <code>Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing from earlier tasks directly (a pure data-collection dialog); Task 10 reads its results.
+- Produces: <code>class NewSqlServerDatabaseDialog : Window { string DisplayName; string ServerName; string CatalogName; bool TestDatabase; }</code>, all populated only after <code>ShowDialog() == true</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the dialog XAML</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;!-- Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml --&gt;
+&lt;Window x:Class=&quot;Walkabout.Dialogs.NewSqlServerDatabaseDialog&quot;
+        xmlns=&quot;http://schemas.microsoft.com/winfx/2006/xaml/presentation&quot;
+        xmlns:x=&quot;http://schemas.microsoft.com/winfx/2006/xaml&quot;
+        Title=&quot;New SQL Server Database&quot; Height=&quot;260&quot; Width=&quot;400&quot;
+        WindowStartupLocation=&quot;CenterOwner&quot; ResizeMode=&quot;NoResize&quot; ShowInTaskbar=&quot;False&quot;&gt;
+    &lt;StackPanel Margin=&quot;12&quot;&gt;
+        &lt;TextBlock Text=&quot;Display name:&quot;/&gt;
+        &lt;TextBox x:Name=&quot;TextBoxDisplayName&quot; Margin=&quot;0,0,0,8&quot;/&gt;
+        &lt;TextBlock Text=&quot;Server:&quot;/&gt;
+        &lt;ComboBox x:Name=&quot;ComboBoxServer&quot; IsEditable=&quot;True&quot; Margin=&quot;0,0,0,8&quot;/&gt;
+        &lt;TextBlock Text=&quot;Catalog name:&quot;/&gt;
+        &lt;TextBox x:Name=&quot;TextBoxCatalog&quot; Margin=&quot;0,0,0,8&quot;/&gt;
+        &lt;CheckBox x:Name=&quot;CheckBoxTestDatabase&quot; Content=&quot;Test database:&quot; Margin=&quot;0,0,0,12&quot;/&gt;
+        &lt;StackPanel Orientation=&quot;Horizontal&quot; HorizontalAlignment=&quot;Right&quot;&gt;
+            &lt;Button x:Name=&quot;ButtonOk&quot; Content=&quot;_Create&quot; IsDefault=&quot;True&quot; Width=&quot;75&quot; Click=&quot;OnCreate&quot;/&gt;
+            &lt;Button x:Name=&quot;ButtonCancel&quot; Content=&quot;_Cancel&quot; IsCancel=&quot;True&quot; Width=&quot;75&quot; Margin=&quot;8,0,0,0&quot;/&gt;
+        &lt;/StackPanel&gt;
+    &lt;/StackPanel&gt;
+&lt;/Window&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the code-behind</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml.cs
+using System.Linq;
+using System.Windows;
+using Walkabout.Data;
+
+namespace Walkabout.Dialogs
+{
+    public partial class NewSqlServerDatabaseDialog : Window
+    {
+        public string DisplayName { get; private set; }
+        public string ServerName { get; private set; }
+        public string CatalogName { get; private set; }
+        public bool TestDatabase { get; private set; }
+
+        public NewSqlServerDatabaseDialog(DatabaseRegistry registry)
+        {
+            this.InitializeComponent();
+            foreach (string server in registry.Servers.Keys)
+            {
+                this.ComboBoxServer.Items.Add(server);
+            }
+        }
+
+        private void OnCreate(object sender, RoutedEventArgs e)
+        {
+            this.CatalogName = this.TextBoxCatalog.Text.Trim();
+            this.ServerName = (this.ComboBoxServer.Text ?? string.Empty).Trim();
+            this.DisplayName = string.IsNullOrWhiteSpace(this.TextBoxDisplayName.Text)
+                ? this.CatalogName
+                : this.TextBoxDisplayName.Text.Trim();
+            this.TestDatabase = this.CheckBoxTestDatabase.IsChecked == true;
+
+            if (string.IsNullOrEmpty(this.ServerName) || string.IsNullOrEmpty(this.CatalogName) || string.IsNullOrEmpty(this.DisplayName))
+            {
+                MessageBoxEx.Show(&quot;Server, catalog name, and display name are all required.&quot;, &quot;New SQL Server Database&quot;, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            this.DialogResult = true;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build to verify it compiles</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build succeeds.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml Source/WPF/MyMoney/Dialogs/NewSqlServerDatabaseDialog.xaml.cs
+git commit -m &quot;feat: add NewSqlServerDatabaseDialog (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-7-newsqlitedatabasedialog">Task 7: <code>NewSqliteDatabaseDialog</code><a class="headerlink" href="#task-7-newsqlitedatabasedialog" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml</code>
+- Create: <code>Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>class NewSqliteDatabaseDialog : Window { string DisplayName; string FilePath; bool TestDatabase; }</code>. This is what Release's <code>File | New</code> opens directly, and what DEBUG's <code>File | New | SQLite...</code> opens — <strong>same dialog, same class</strong>, no engine-specific variant needed. The "Test database:" checkbox is compiled out in Release (<code>#if DEBUG</code> around the <code>CheckBox</code> element and its backing field), per the spec amendment.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the dialog XAML</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;!-- Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml --&gt;
+&lt;Window x:Class=&quot;Walkabout.Dialogs.NewSqliteDatabaseDialog&quot;
+        xmlns=&quot;http://schemas.microsoft.com/winfx/2006/xaml/presentation&quot;
+        xmlns:x=&quot;http://schemas.microsoft.com/winfx/2006/xaml&quot;
+        Title=&quot;New Database&quot; Height=&quot;220&quot; Width=&quot;420&quot;
+        WindowStartupLocation=&quot;CenterOwner&quot; ResizeMode=&quot;NoResize&quot; ShowInTaskbar=&quot;False&quot;&gt;
+    &lt;StackPanel Margin=&quot;12&quot;&gt;
+        &lt;TextBlock Text=&quot;Display name:&quot;/&gt;
+        &lt;TextBox x:Name=&quot;TextBoxDisplayName&quot; Margin=&quot;0,0,0,8&quot;/&gt;
+        &lt;TextBlock Text=&quot;File location:&quot;/&gt;
+        &lt;DockPanel Margin=&quot;0,0,0,8&quot;&gt;
+            &lt;Button x:Name=&quot;ButtonBrowse&quot; Content=&quot;_Browse...&quot; DockPanel.Dock=&quot;Right&quot; Width=&quot;75&quot; Click=&quot;OnBrowse&quot;/&gt;
+            &lt;TextBox x:Name=&quot;TextBoxFile&quot; Margin=&quot;0,0,8,0&quot;/&gt;
+        &lt;/DockPanel&gt;
+#if DEBUG
+        &lt;CheckBox x:Name=&quot;CheckBoxTestDatabase&quot; Content=&quot;Test database:&quot; Margin=&quot;0,0,0,12&quot;/&gt;
+#endif
+        &lt;StackPanel Orientation=&quot;Horizontal&quot; HorizontalAlignment=&quot;Right&quot;&gt;
+            &lt;Button x:Name=&quot;ButtonOk&quot; Content=&quot;_Create&quot; IsDefault=&quot;True&quot; Width=&quot;75&quot; Click=&quot;OnCreate&quot;/&gt;
+            &lt;Button x:Name=&quot;ButtonCancel&quot; Content=&quot;_Cancel&quot; IsCancel=&quot;True&quot; Width=&quot;75&quot; Margin=&quot;8,0,0,0&quot;/&gt;
+        &lt;/StackPanel&gt;
+    &lt;/StackPanel&gt;
+&lt;/Window&gt;
+</code></pre>
+<p>Note: WPF XAML does not actually support <code>#if</code> preprocessor directives (confirmed during research — the codebase's only <code>#if DEBUG</code> usage is in <code>.xaml.cs</code>, never <code>.xaml</code>). Replace the block above with an <strong>always-present</strong> <code>CheckBox x:Name="CheckBoxTestDatabase"</code> in the XAML, and instead <strong>collapse its visibility from code-behind</strong> under <code>#if DEBUG</code> in Step 2 below — this achieves the same "Release users never see or can check it" outcome; strict compiled-out-not-hidden only matters for the SQL Server dialog/menu item itself (Task 10), where an entire feature — not just one checkbox on an always-shipped dialog — must not exist in the Release binary.</p>
+<pre><code class="language-xml">        &lt;CheckBox x:Name=&quot;CheckBoxTestDatabase&quot; Content=&quot;Test database:&quot; Margin=&quot;0,0,0,12&quot;/&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the code-behind</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml.cs
+using System.IO;
+using System.Windows;
+using Microsoft.Win32;
+
+namespace Walkabout.Dialogs
+{
+    public partial class NewSqliteDatabaseDialog : Window
+    {
+        public string DisplayName { get; private set; }
+        public string FilePath { get; private set; }
+        public bool TestDatabase { get; private set; }
+
+        public NewSqliteDatabaseDialog()
+        {
+            this.InitializeComponent();
+#if !DEBUG
+            this.CheckBoxTestDatabase.Visibility = Visibility.Collapsed;
+#endif
+        }
+
+        private void OnBrowse(object sender, RoutedEventArgs e)
+        {
+            var dlg = new SaveFileDialog { Filter = &quot;MyMoney Database (*.mmdb)|*.mmdb&quot;, DefaultExt = &quot;.mmdb&quot; };
+            if (dlg.ShowDialog(this) == true)
+            {
+                this.TextBoxFile.Text = dlg.FileName;
+            }
+        }
+
+        private void OnCreate(object sender, RoutedEventArgs e)
+        {
+            this.FilePath = this.TextBoxFile.Text.Trim();
+            this.DisplayName = string.IsNullOrWhiteSpace(this.TextBoxDisplayName.Text)
+                ? Path.GetFileName(this.FilePath)
+                : this.TextBoxDisplayName.Text.Trim();
+#if DEBUG
+            this.TestDatabase = this.CheckBoxTestDatabase.IsChecked == true;
+#endif
+
+            if (string.IsNullOrEmpty(this.FilePath) || string.IsNullOrEmpty(this.DisplayName))
+            {
+                MessageBoxEx.Show(&quot;File location and display name are both required.&quot;, &quot;New Database&quot;, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            this.DialogResult = true;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build to verify it compiles</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build succeeds in both <code>dotnet build -c Debug</code> and <code>dotnet build -c Release</code> (the <code>#if DEBUG</code> around <code>this.TestDatabase = ...</code> must not leave <code>TestDatabase</code>'s auto-property unset in a way that breaks Release — it defaults to <code>false</code>, which is correct: Release can never produce <code>TestDatabase: true</code>).</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml Source/WPF/MyMoney/Dialogs/NewSqliteDatabaseDialog.xaml.cs
+git commit -m &quot;feat: add NewSqliteDatabaseDialog with DEBUG-only test-database checkbox (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-8-opendatabasedialog">Task 8: <code>OpenDatabaseDialog</code><a class="headerlink" href="#task-8-opendatabasedialog" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml</code>
+- Create: <code>Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>/<code>DatabaseEntry</code> (Task 1).
+- Produces: <code>class OpenDatabaseDialog : Window { string SelectedDisplayName; }</code>, populated only after <code>ShowDialog() == true</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the dialog XAML</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;!-- Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml --&gt;
+&lt;Window x:Class=&quot;Walkabout.Dialogs.OpenDatabaseDialog&quot;
+        xmlns=&quot;http://schemas.microsoft.com/winfx/2006/xaml/presentation&quot;
+        xmlns:x=&quot;http://schemas.microsoft.com/winfx/2006/xaml&quot;
+        Title=&quot;Open Database&quot; Height=&quot;320&quot; Width=&quot;420&quot;
+        WindowStartupLocation=&quot;CenterOwner&quot;&gt;
+    &lt;DockPanel Margin=&quot;12&quot;&gt;
+        &lt;StackPanel Orientation=&quot;Horizontal&quot; HorizontalAlignment=&quot;Right&quot; DockPanel.Dock=&quot;Bottom&quot; Margin=&quot;0,12,0,0&quot;&gt;
+            &lt;Button x:Name=&quot;ButtonOk&quot; Content=&quot;_Open&quot; IsDefault=&quot;True&quot; Width=&quot;75&quot; Click=&quot;OnOpen&quot;/&gt;
+            &lt;Button x:Name=&quot;ButtonCancel&quot; Content=&quot;_Cancel&quot; IsCancel=&quot;True&quot; Width=&quot;75&quot; Margin=&quot;8,0,0,0&quot;/&gt;
+        &lt;/StackPanel&gt;
+        &lt;ListBox x:Name=&quot;ListBoxDatabases&quot; DisplayMemberPath=&quot;Key&quot; MouseDoubleClick=&quot;OnOpen&quot;/&gt;
+    &lt;/DockPanel&gt;
+&lt;/Window&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the code-behind</strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml.cs
+using System;
+using System.Linq;
+using System.Windows;
+using Walkabout.Data;
+
+namespace Walkabout.Dialogs
+{
+    public partial class OpenDatabaseDialog : Window
+    {
+        public string SelectedDisplayName { get; private set; }
+
+        public OpenDatabaseDialog(DatabaseRegistry registry)
+        {
+            this.InitializeComponent();
+
+            bool includeTest =
+#if DEBUG
+                true;
+#else
+                false;
+#endif
+            var entries = registry.Databases
+                .Where(kv =&gt; includeTest || !kv.Value.TestDatabase)
+                .OrderByDescending(kv =&gt; kv.Value.LastUsedUtc ?? DateTime.MinValue)
+                .ToList();
+
+            foreach (var kv in entries)
+            {
+                this.ListBoxDatabases.Items.Add(kv);
+            }
+        }
+
+        private void OnOpen(object sender, RoutedEventArgs e)
+        {
+            if (this.ListBoxDatabases.SelectedItem is System.Collections.Generic.KeyValuePair&lt;string, DatabaseEntry&gt; kv)
+            {
+                this.SelectedDisplayName = kv.Key;
+                this.DialogResult = true;
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build to verify it compiles</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build succeeds.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml Source/WPF/MyMoney/Dialogs/OpenDatabaseDialog.xaml.cs
+git commit -m &quot;feat: add OpenDatabaseDialog listing registered databases (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-9-recentfilesmenu-rework-registry-backed">Task 9: <code>RecentFilesMenu</code> rework (registry-backed)<a class="headerlink" href="#task-9-recentfilesmenu-rework-registry-backed" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Utilities/Settings.cs:117-127</code> (remove <code>RecentFiles</code> property)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>/<code>DatabaseEntry</code> (Task 1).
+- Produces: <code>class RecentDatabaseEventArgs : EventArgs { string DisplayName; }</code>; <code>internal class RecentFilesMenu { RecentFilesMenu(MenuItem parent); void Refresh(DatabaseRegistry registry); event EventHandler&lt;RecentDatabaseEventArgs&gt; RecentDatabaseSelected; }</code> — <strong>replaces</strong> <code>SetFiles</code>/<code>AddRecentFile</code>/<code>ToArray</code>/<code>RecentFileSelected</code> entirely, since the registry (not a separately-persisted path list) is now the only source of truth. Task 10 is the sole consumer of the new API.</p>
+<ul>
+<li>[ ] <strong>Step 1: Rewrite <code>RecentFilesMenu.cs</code></strong></li>
+</ul>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs
+using System;
+using System.Linq;
+using System.Windows.Controls;
+using Walkabout.Data;
+
+namespace Walkabout.Utilities
+{
+    public class RecentDatabaseEventArgs : EventArgs
+    {
+        public string DisplayName { get; set; }
+    }
+
+    /// &lt;summary&gt;
+    /// A thin, pull-based view over DatabaseRegistry.Databases -- no
+    /// separate storage of its own (replaces the old path-list/File.Exists
+    /// pruning approach). Call Refresh(registry) after any registry
+    /// mutation (a new database created, a database opened and its
+    /// LastUsedUtc bumped) to keep the menu in sync.
+    /// &lt;/summary&gt;
+    internal class RecentFilesMenu
+    {
+        private const int MaxRecentFiles = 10;
+        private readonly MenuItem parent;
+
+        public event EventHandler&lt;RecentDatabaseEventArgs&gt; RecentDatabaseSelected;
+
+        public RecentFilesMenu(MenuItem parent)
+        {
+            this.parent = parent;
+        }
+
+        public void Refresh(DatabaseRegistry registry)
+        {
+            this.parent.Items.Clear();
+
+            bool includeTest =
+#if DEBUG
+                true;
+#else
+                false;
+#endif
+            var entries = registry.Databases
+                .Where(kv =&gt; includeTest || !kv.Value.TestDatabase)
+                .OrderByDescending(kv =&gt; kv.Value.LastUsedUtc ?? DateTime.MinValue)
+                .Take(MaxRecentFiles);
+
+            foreach (var kv in entries)
+            {
+                string displayName = kv.Key;
+                var item = new MenuItem { Header = displayName };
+                item.Click += (s, e) =&gt; this.RecentDatabaseSelected?.Invoke(this, new RecentDatabaseEventArgs { DisplayName = displayName });
+                this.parent.Items.Add(item);
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Remove <code>Settings.RecentFiles</code></strong></li>
+</ul>
+<p>Delete this exact block from <code>Source/WPF/MyMoney/Utilities/Settings.cs:117-129</code> (confirmed by reading the file directly — sits between the <code>StatementsDirectory</code> and <code>ToolBoxWidth</code> properties):</p>
+<pre><code class="language-csharp">public string[] RecentFiles
+{
+    get
+    {
+        object value = this.map[&quot;RecentFiles&quot;];
+        return value is string[]? (string[])value : null;
+    }
+    set
+    {
+        this.map[&quot;RecentFiles&quot;] = value;
+        this.OnPropertyChanged(&quot;RecentFiles&quot;);
+    }
+}
+</code></pre>
+<p>Grep afterward to confirm nothing else references <code>settings.RecentFiles</code>/<code>Settings.RecentFiles</code> (Task 10 removes the two remaining call sites in <code>MainWindow.xaml.cs</code> as part of its own rewiring, so this should already be zero by the time Task 10 finishes — but Task 9 can land first since C# doesn't error on an unused-but-still-modified-elsewhere property mid-refactor; just don't delete <code>Settings.RecentFiles</code> until Task 10's <code>MainWindow.xaml.cs</code> edits are also in the same commit or a following one that leaves the build green).</p>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build fails at this point (expected — <code>MainWindow.xaml.cs</code> still calls the old <code>RecentFilesMenu</code> API and <code>settings.RecentFiles</code>); this is resolved in Task 10. <strong>Do not commit Task 9 alone if it leaves the build red</strong> — fold the <code>Settings.cs</code> edit into Task 10's commit instead, and land only <code>RecentFilesMenu.cs</code> itself here if it compiles standalone (it does — it has no callers yet to break).</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit <code>RecentFilesMenu.cs</code> alone (compiles standalone; <code>Settings.cs</code> edit moves to Task 10)</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs
+git commit -m &quot;feat: rework RecentFilesMenu into a registry-backed view (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-10-wire-up-mainwindow-file-new-file-open-recent-files">Task 10: Wire up <code>MainWindow</code> — <code>File | New</code>, <code>File | Open</code>, Recent Files<a class="headerlink" href="#task-10-wire-up-mainwindow-file-new-file-open-recent-files" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml:37-38,143-161</code>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs:265-267,1599,2061-2094,2140-2260+,3993-4000</code>
+- Modify: <code>Source/WPF/MyMoney/Utilities/Settings.cs</code> (finish the <code>RecentFiles</code> removal started in Task 9)
+- Delete: <code>Source/WPF/MyMoney/Dialogs/CreateDatabaseDialog.xaml</code>, <code>Source/WPF/MyMoney/Dialogs/CreateDatabaseDialog.xaml.cs</code> (only after Step 1 confirms no other callers)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: everything from Tasks 1–9 (<code>DatabaseRegistry</code>, <code>SqlServerConnectionFactory</code>, <code>SqlServerBootstrapper</code>, <code>SaCredentialDialog</code>, <code>NewSqlServerDatabaseDialog</code>, <code>NewSqliteDatabaseDialog</code>, <code>OpenDatabaseDialog</code>, <code>RecentFilesMenu.Refresh</code>/<code>RecentDatabaseSelected</code>).
+- Produces: nothing further downstream — this is the integration point.</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm <code>CreateDatabaseDialog</code> has no other callers before touching it</strong></li>
+</ul>
+<p>Run: <code>git grep -n "CreateDatabaseDialog\|InitializeCreateDatabaseDialog\|ConnectMode" -- Source/WPF/MyMoney</code>
+Expected: only <code>NewDatabase()</code>, <code>OpenDatabase()</code>, <code>InitializeCreateDatabaseDialog()</code> in <code>MainWindow.xaml.cs</code>, and the dialog's own two files. If anything else turns up, stop and re-scope this step before deleting.</p>
+<ul>
+<li>[ ] <strong>Step 2: Rewrite the <code>File | New</code> XAML to a plain click target</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MainWindow.xaml</code>, change:</p>
+<pre><code class="language-xml">&lt;MenuItem x:Name=&quot;MenuFileNew&quot; Header=&quot;_New&quot; Command=&quot;New&quot;/&gt;
+</code></pre>
+<p>to:</p>
+<pre><code class="language-xml">&lt;MenuItem x:Name=&quot;MenuFileNew&quot; Header=&quot;_New&quot; Click=&quot;OnMenuFileNewClick&quot;/&gt;
+</code></pre>
+<p>and remove the now-unused command binding at line 37:</p>
+<pre><code class="language-xml">&lt;CommandBinding Command=&quot;New&quot; Executed=&quot;OnCommandFileNew&quot;/&gt;
+</code></pre>
+<p>(Leave <code>Command="Open"</code>/<code>OnCommandFileOpen</code>'s <code>CommandBinding</code> alone — <code>File | Open</code> keeps using <code>ApplicationCommands.Open</code>, only its handler body changes in Step 5.)</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the DEBUG-only SQL Server submenu item in the constructor</strong></li>
+</ul>
+<p>In <code>MainWindow.xaml.cs</code>, immediately after the existing <code>this.recentFilesMenu.RecentFileSelected += this.OnRecentFileSelected;</code> line (265-267), replace those three lines with:</p>
+<pre><code class="language-csharp">this.recentFilesMenu = new RecentFilesMenu(this.MenuRecentFiles);
+this.recentFilesMenu.RecentDatabaseSelected += this.OnRecentDatabaseSelected;
+this.recentFilesMenu.Refresh(DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath()));
+
+#if DEBUG
+            var newSqlServerItem = new MenuItem { Header = &quot;_SQL Server...&quot; };
+            newSqlServerItem.Click += this.OnNewSqlServerDatabase;
+            var newSqliteItem = new MenuItem { Header = &quot;S_QLite...&quot; };
+            newSqliteItem.Click += this.OnNewSqliteDatabase;
+            this.MenuFileNew.Items.Add(newSqlServerItem);
+            this.MenuFileNew.Items.Add(newSqliteItem);
+#endif
+</code></pre>
+<p>This is the mechanism that satisfies "compiled out entirely in Release, not merely hidden": in DEBUG, <code>MenuFileNew.Items</code> has two children, so WPF treats it as a submenu container and its own <code>Click</code> event (wired next step) never fires for the parent header itself — only the two children's handlers fire. In Release, <code>MenuFileNew.Items</code> stays empty, so WPF treats it as an ordinary leaf command item and the parent's own <code>Click</code> fires directly.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add the click handlers</strong></li>
+</ul>
+<p>Replace <code>OnCommandFileNew</code> (line 3993) with:</p>
+<pre><code class="language-csharp">private void OnMenuFileNewClick(object sender, RoutedEventArgs e)
+{
+    // DEBUG builds never reach here for a click on MenuFileNew itself --
+    // see the constructor comment above; it has children there, so WPF
+    // opens the submenu instead of raising Click. Release builds have no
+    // children, so this fires directly and goes straight to SQLite.
+    this.OnNewSqliteDatabase(sender, e);
+}
+
+#if DEBUG
+private void OnNewSqlServerDatabase(object sender, RoutedEventArgs e)
+{
+    if (!this.SaveIfDirty()) { return; }
+
+    var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+    var dlg = new NewSqlServerDatabaseDialog(registry) { Owner = this };
+    if (dlg.ShowDialog() != true) { return; }
+
+    var bootstrapper = new SqlServerBootstrapper(Path.Combine(AppContext.BaseDirectory, &quot;SqlScripts&quot;));
+
+    if (!registry.Servers.ContainsKey(dlg.ServerName))
+    {
+        var saPrompt = new SaCredentialDialog { Owner = this };
+        if (!bootstrapper.BootstrapServerIfNeeded(registry, dlg.ServerName, saPrompt, out string bootstrapError))
+        {
+            MessageBoxEx.Show(bootstrapError, &quot;Bootstrap Error&quot;, MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+    }
+
+    if (!bootstrapper.CreateCatalog(registry, dlg.ServerName, dlg.CatalogName, dlg.TestDatabase, out string catalogError))
+    {
+        MessageBoxEx.Show(catalogError, &quot;Create Database Error&quot;, MessageBoxButton.OK, MessageBoxImage.Error);
+        return;
+    }
+
+    registry.Databases[dlg.DisplayName] = new DatabaseEntry
+    {
+        Engine = DataEngineType.SqlServer,
+        Server = dlg.ServerName,
+        Catalog = dlg.CatalogName,
+        TestDatabase = dlg.TestDatabase,
+        LastUsedUtc = DateTime.UtcNow
+    };
+    registry.Save();
+
+    this.OpenRegisteredDatabase(dlg.DisplayName, registry);
+}
+#endif
+
+private void OnNewSqliteDatabase(object sender, RoutedEventArgs e)
+{
+    if (!this.SaveIfDirty()) { return; }
+
+    var dlg = new NewSqliteDatabaseDialog { Owner = this };
+    if (dlg.ShowDialog() != true) { return; }
+
+    this.canSave = false;
+    try
+    {
+        this.LoadDatabase(null, dlg.FilePath, null, null, null);
+    }
+    catch (Exception ex)
+    {
+        this.log.Error(&quot;Error creating new database&quot;, ex);
+        MessageBoxEx.Show(ex.Message, &quot;Create Error&quot;, MessageBoxButton.OKCancel, MessageBoxImage.Error);
+        return;
+    }
+
+    var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+    registry.Databases[dlg.DisplayName] = new DatabaseEntry
+    {
+        Engine = DataEngineType.Sqlite,
+        Path = dlg.FilePath,
+        TestDatabase = dlg.TestDatabase,
+        LastUsedUtc = DateTime.UtcNow
+    };
+    registry.Save();
+    this.recentFilesMenu.Refresh(registry);
+}
+</code></pre>
+<p>Replace <code>OnCommandFileOpen</code> (line 3998) with:</p>
+<pre><code class="language-csharp">private void OnCommandFileOpen(object sender, ExecutedRoutedEventArgs e)
+{
+    if (!this.SaveIfDirty()) { return; }
+
+    var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+    var dlg = new OpenDatabaseDialog(registry) { Owner = this };
+    if (dlg.ShowDialog() == true)
+    {
+        this.OpenRegisteredDatabase(dlg.SelectedDisplayName, registry);
+    }
+}
+
+private void OnRecentDatabaseSelected(object sender, RecentDatabaseEventArgs e)
+{
+    if (!this.SaveIfDirty()) { return; }
+    this.OpenRegisteredDatabase(e.DisplayName, DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath()));
+}
+
+private void OpenRegisteredDatabase(string displayName, DatabaseRegistry registry)
+{
+    if (!registry.Databases.TryGetValue(displayName, out DatabaseEntry entry))
+    {
+        MessageBoxEx.Show($&quot;'{displayName}' is no longer registered.&quot;, &quot;Open Database&quot;, MessageBoxButton.OK, MessageBoxImage.Error);
+        return;
+    }
+
+    if (entry.Engine == DataEngineType.Sqlite)
+    {
+        this.canSave = false;
+        this.LoadDatabase(null, entry.Path, null, null, null);
+    }
+    else
+    {
+        var sqlServerDatabase = SqlServerConnectionFactory.Connect(registry, displayName, new WpfDataLayerUiCallback());
+        MyMoney newMoney = sqlServerDatabase.Load(null);
+        this.database = sqlServerDatabase;
+        this.MenuFileAddUser.Visibility = sqlServerDatabase.SupportsUserLogin ? Visibility.Visible : Visibility.Collapsed;
+        this.DataContext = newMoney;
+        this.canSave = true;
+    }
+
+    entry.LastUsedUtc = DateTime.UtcNow;
+    registry.Save();
+    this.recentFilesMenu.Refresh(registry);
+}
+
+private void RegisterRecentDatabase(IDatabase database)
+{
+    // Only file-based engines land here (via the shared LoadDatabase(string,...)
+    // continuation below); SQL Server loads go through OpenRegisteredDatabase/
+    // OnNewSqlServerDatabase instead, which manage the registry entry themselves.
+    string ext = Path.GetExtension(database.DatabasePath)?.ToLowerInvariant();
+    if (ext != &quot;.db&quot; &amp;&amp; ext != &quot;.mmdb&quot;)
+    {
+        // Legacy XML/BinaryXML/SqlCe formats aren't modeled in DatabaseRegistry
+        // (DataEngineType only has Sqlite/SqlServer) -- out of #32's scope.
+        return;
+    }
+
+    var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+    string displayName = registry.Databases
+        .Where(kv =&gt; kv.Value.Engine == DataEngineType.Sqlite
+            &amp;&amp; string.Equals(kv.Value.Path, database.DatabasePath, StringComparison.OrdinalIgnoreCase))
+        .Select(kv =&gt; kv.Key)
+        .FirstOrDefault() ?? Path.GetFileName(database.DatabasePath);
+
+    bool existingTestFlag = registry.Databases.TryGetValue(displayName, out DatabaseEntry existing) &amp;&amp; existing.TestDatabase;
+
+    registry.Databases[displayName] = new DatabaseEntry
+    {
+        Engine = DataEngineType.Sqlite,
+        Path = database.DatabasePath,
+        TestDatabase = existingTestFlag,
+        LastUsedUtc = DateTime.UtcNow
+    };
+    registry.Save();
+    this.recentFilesMenu.Refresh(registry);
+}
+</code></pre>
+<p>Replace the old <code>this.recentFilesMenu.AddRecentFile(database.DatabasePath);</code> (line 2088, inside the generic <code>LoadDatabase(string,...)</code> success continuation) with:</p>
+<pre><code class="language-csharp">this.RegisterRecentDatabase(database);
+</code></pre>
+<p>Delete <code>s.RecentFiles = this.recentFilesMenu.ToArray();</code> (line 1599) entirely — there is no longer a separate persisted list to save.</p>
+<p>Now finish Task 9's <code>Settings.cs</code> edit: delete the <code>RecentFiles</code> property (<code>Settings.cs:117-127</code>) and its <code>OnPropertyChanged("RecentFiles")</code> call.</p>
+<ul>
+<li>[ ] <strong>Step 5: Delete the dead <code>CreateDatabaseDialog</code>-based code and the dialog itself</strong></li>
+</ul>
+<p>Delete <code>NewDatabase()</code> (2164-2197), <code>OpenDatabase()</code> (2248+, through its closing brace), and <code>InitializeCreateDatabaseDialog()</code> (2140-2144) from <code>MainWindow.xaml.cs</code> — all three are now unreferenced (confirmed by Step 1's grep once these edits land).</p>
+<pre><code class="language-bash">git rm Source/WPF/MyMoney/Dialogs/CreateDatabaseDialog.xaml Source/WPF/MyMoney/Dialogs/CreateDatabaseDialog.xaml.cs
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5b: Give <code>MyMoney.csproj</code> its own <code>SqlScripts</code> content-copy item</strong></li>
+</ul>
+<p><code>SqlServerBootstrapper</code> (Task 4) and this task's <code>OnNewSqlServerDatabase</code> read scripts from <code>Path.Combine(AppContext.BaseDirectory, "SqlScripts")</code> — i.e. next to <code>MyMoney.exe</code> itself. Today, nothing copies them there directly: <code>MyMoneyAdmin.csproj</code> copies <code>..\MyMoney.Data\SqlScripts\**\*.sql</code> into <strong>its own</strong> output directory (<code>None Include ... CopyToOutputDirectory=PreserveNewest</code>), and a separate Debug-only MSBuild target (<code>CopyMyMoneyAdminOutputToMyMoney</code>) then copies MyMoneyAdmin's <em>entire</em> build output — including that <code>SqlScripts</code> folder — into <code>MyMoney</code>'s bin folder. Task 12 deletes <code>MyMoneyAdmin.csproj</code> entirely, taking both mechanisms with it. <code>MyMoney.csproj</code> needs its own equivalent, gated to Debug only (SQL Server stays DEBUG-only per Global Constraints — Release must not ship these scripts at all). Add, in <code>Source/WPF/MyMoney/MyMoney.csproj</code>, right after the existing <code>ProjectReference</code> <code>ItemGroup</code> (after line 651):</p>
+<pre><code class="language-xml">  &lt;ItemGroup Condition=&quot;'$(Configuration)' == 'Debug'&quot;&gt;
+    &lt;None Include=&quot;..\MyMoney.Data\SqlScripts\**\*.sql&quot;&gt;
+      &lt;Link&gt;SqlScripts\%(RecursiveDir)%(Filename)%(Extension)&lt;/Link&gt;
+      &lt;CopyToOutputDirectory&gt;PreserveNewest&lt;/CopyToOutputDirectory&gt;
+    &lt;/None&gt;
+  &lt;/ItemGroup&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Build and run the existing UnitTests suite</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: Build succeeds, both Debug and Release configurations (<code>dotnet build Source/WPF/MyMoney.sln -c Release</code> too — this is the step that actually proves the SQL Server submenu item is compiled out, not just untested).</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: All pre-existing tests still pass (no regressions from the <code>RecentFilesMenu</code>/<code>Settings</code> API changes — nothing else in <code>UnitTests</code> references either).</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MainWindow.xaml Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/Utilities/Settings.cs Source/WPF/MyMoney/MyMoney.csproj
+git commit -m &quot;feat: wire File|New/File|Open/Recent Files to the database registry (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-11-migrate-the-sql-server-test-harness-off-environment-variables">Task 11: Migrate the SQL Server test harness off environment variables<a class="headerlink" href="#task-11-migrate-the-sql-server-test-harness-off-environment-variables" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.TestSupport/SqlServerTestDatabase.cs</code>
+- Modify: <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs</code>
+- Modify: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code>
+- Delete: <code>Source/WPF/MyMoney.TestSupport/MyMoneyTestConnectionResolver.cs</code>, <code>Source/WPF/UnitTests/MyMoneyTestConnectionResolverTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>/<code>DatabaseRole</code> (Task 1) in place of <code>DataEngineConfig</code>/<code>DataEngineCredentialStore</code>/env vars.
+- Produces: <code>SqlServerTestDatabase</code> gains two new public members — <code>static string GetSkipReasonIfNotConfigured()</code> (returns <code>null</code> if a <code>TestDatabase: true</code> SQL Server entry is registered, otherwise an explanatory message for <code>Assert.Ignore</code>) and <code>static string GetUserConnectionString()</code> (throws <code>InvalidOperationException</code> if unconfigured — same fail-loud contract <code>WipeAllTables()</code> already has). <code>WipeAllTables()</code> keeps its existing signature and behavior, only its configuration <em>source</em> changes.</p>
+<p><strong>⚠️ Important, discovered by reading the actual current files in full (not just the excerpts captured during initial research):</strong> <code>SqlServerDatabaseContractTests</code>'s class doc comment is explicit — <em>"Deliberately does NOT skip/Ignore when SQL Server is unreachable... Do not add Assert.Ignore/skip logic to this fixture."</em> This is a real, documented prior design decision (a broken connection there is meant to be a loud regression signal, not a quiet skip), not an artifact of the env-var mechanism. <strong>Do not unify it with <code>SqlServerStoredProcDatabaseTests</code>'s skip behavior</strong> — keep it throwing, just change what it reads. Only <code>SqlServerStoredProcDatabaseTests</code> uses <code>Assert.Ignore</code>, exactly as today.</p>
+<p><code>MyMoneyTestConnectionResolver</code>'s entire purpose — reconciling two independent config sources (<code>dataengine.config.json</code> + an admin-connection env var) that were "supposed to agree but aren't guaranteed to" — is moot once there is only one source (the registry). Its <code>ValidateMatchesAdminConnection</code> has nothing left to validate against; its <code>BuildConnectionString(DataEngineConfig, DataEngineCredential)</code> is superseded by <code>DatabaseRegistry.BuildConnectionString(entry, role)</code>. Delete the class and its test file rather than rewriting them.</p>
+<ul>
+<li>[ ] <strong>Step 1: Rewrite <code>SqlServerTestDatabase.cs</code></strong></li>
+</ul>
+<p>Keep <code>TablesToWipe</code> and <code>TestResetProcs</code> exactly as they are (unrelated to this change). Replace <code>AdminConnectionEnvVar</code>/<code>DestructiveWipeAckEnvVar</code> and the env-var-reading body of <code>WipeAllTables()</code> with:</p>
+<pre><code class="language-csharp">// Source/WPF/MyMoney.TestSupport/SqlServerTestDatabase.cs
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using Microsoft.Data.SqlClient;
+using Walkabout.Data;
+
+namespace Walkabout.TestSupport
+{
+    public static class SqlServerTestDatabase
+    {
+        private static readonly string[] TablesToWipe =
+        {
+            &quot;Splits&quot;, &quot;Investments&quot;, &quot;Transactions&quot;, &quot;TransactionExtras&quot;, &quot;StockSplits&quot;, &quot;Aliases&quot;,
+            &quot;AccountAliases&quot;, &quot;LoanPayments&quot;, &quot;RentUnits&quot;, &quot;RentBuildings&quot;,
+            &quot;Accounts&quot;, &quot;OnlineAccounts&quot;, &quot;Securities&quot;, &quot;Currencies&quot;, &quot;Categories&quot;, &quot;Payees&quot;
+        };
+
+        private static readonly Dictionary&lt;string, string&gt; TestResetProcs = new Dictionary&lt;string, string&gt;
+        {
+            [&quot;Categories&quot;] = &quot;dbo.Categories_Test_Reset&quot;,
+            [&quot;Currencies&quot;] = &quot;dbo.Currencies_Test_Reset&quot;,
+            [&quot;OnlineAccounts&quot;] = &quot;dbo.OnlineAccounts_Test_Reset&quot;,
+            [&quot;Accounts&quot;] = &quot;dbo.Accounts_Test_Reset&quot;,
+            [&quot;Payees&quot;] = &quot;dbo.Payees_Test_Reset&quot;,
+            [&quot;Aliases&quot;] = &quot;dbo.Aliases_Test_Reset&quot;,
+            [&quot;Securities&quot;] = &quot;dbo.Securities_Test_Reset&quot;,
+            [&quot;StockSplits&quot;] = &quot;dbo.StockSplits_Test_Reset&quot;,
+            [&quot;LoanPayments&quot;] = &quot;dbo.LoanPayments_Test_Reset&quot;,
+            [&quot;RentBuildings&quot;] = &quot;dbo.RentBuildings_Test_Reset&quot;,
+            [&quot;Transactions&quot;] = &quot;dbo.Transactions_Test_Reset&quot;,
+        };
+
+        /// &lt;summary&gt;
+        /// Null if a TestDatabase: true SQL Server entry is registered;
+        /// otherwise an explanatory message for a caller's Assert.Ignore.
+        /// &lt;/summary&gt;
+        public static string GetSkipReasonIfNotConfigured()
+        {
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            bool hasTestEntry = registry.Databases.Values.Any(e =&gt; e.Engine == DataEngineType.SqlServer &amp;&amp; e.TestDatabase);
+            return hasTestEntry
+                ? null
+                : &quot;No SQL Server database in the registry is flagged TestDatabase: true -- register one via File | New | SQL Server... with \&quot;Test database:\&quot; checked.&quot;;
+        }
+
+        /// &lt;summary&gt;
+        /// MyMoneyUser-tier connection string for the registered test
+        /// database. Throws (does not return null) if none is configured --
+        /// callers that want to skip instead must check
+        /// GetSkipReasonIfNotConfigured() first, matching
+        /// SqlServerStoredProcDatabaseTests' existing pattern.
+        /// &lt;/summary&gt;
+        public static string GetUserConnectionString()
+        {
+            var (registry, entry) = GetTestEntryOrThrow();
+            return registry.BuildConnectionString(entry, DatabaseRole.User);
+        }
+
+        /// &lt;summary&gt;
+        /// Deletes every row from every table in the registered test
+        /// database. Fails fast (does not skip) if no TestDatabase: true
+        /// SQL Server entry is registered -- same explicit, unskippable
+        /// safety posture the old env-var guard had, just sourced from the
+        /// registry's TestDatabase flag instead of a separate ack variable.
+        /// &lt;/summary&gt;
+        public static void WipeAllTables()
+        {
+            var (registry, entry) = GetTestEntryOrThrow();
+            string adminConnectionString = registry.BuildConnectionString(entry, DatabaseRole.Admin);
+            string testConnectionString = registry.BuildConnectionString(entry, DatabaseRole.Test);
+
+            using (var adminConnection = new SqlConnection(adminConnectionString))
+            using (var testConnection = new SqlConnection(testConnectionString))
+            {
+                adminConnection.Open();
+                testConnection.Open();
+
+                foreach (string table in TablesToWipe)
+                {
+                    if (TestResetProcs.TryGetValue(table, out string procName))
+                    {
+                        using (var command = new SqlCommand(procName, testConnection) { CommandType = CommandType.StoredProcedure })
+                        {
+                            command.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        using (var command = new SqlCommand($&quot;DELETE FROM dbo.[{table}];&quot;, adminConnection))
+                        {
+                            command.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+        }
+
+        private static (DatabaseRegistry registry, DatabaseEntry entry) GetTestEntryOrThrow()
+        {
+            var registry = DatabaseRegistry.Load(DatabaseRegistry.GetDefaultPath());
+            var entry = registry.Databases.Values.FirstOrDefault(e =&gt; e.Engine == DataEngineType.SqlServer &amp;&amp; e.TestDatabase);
+            if (entry == null)
+            {
+                throw new InvalidOperationException(
+                    &quot;No SQL Server database in the registry is flagged TestDatabase: true. Register one via File | New | SQL Server... with \&quot;Test database:\&quot; checked before running SQL-Server-backed tests.&quot;);
+            }
+            return (registry, entry);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Delete <code>MyMoneyTestConnectionResolver</code> and its test</strong></li>
+</ul>
+<pre><code class="language-bash">git rm Source/WPF/MyMoney.TestSupport/MyMoneyTestConnectionResolver.cs Source/WPF/UnitTests/MyMoneyTestConnectionResolverTests.cs
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Update <code>SqlServerStoredProcDatabaseTests.cs</code> — keep its skip behavior, swap the source</strong></li>
+</ul>
+<p>Replace the <code>EnvVarName</code> constant and every use of <code>Environment.GetEnvironmentVariable(EnvVarName)</code> (both in <code>[SetUp]</code> and the private <code>GetConnectionStringOrSkip()</code> helper every <code>[Test]</code> method calls) with:</p>
+<pre><code class="language-csharp">[SetUp]
+public void SetUp()
+{
+    string skipReason = SqlServerTestDatabase.GetSkipReasonIfNotConfigured();
+    if (skipReason != null)
+    {
+        Assert.Ignore(skipReason);
+    }
+    SqlServerTestDatabase.WipeAllTables();
+}
+
+private string GetConnectionStringOrSkip()
+{
+    string skipReason = SqlServerTestDatabase.GetSkipReasonIfNotConfigured();
+    if (skipReason != null)
+    {
+        Assert.Ignore(skipReason);
+    }
+    return SqlServerTestDatabase.GetUserConnectionString();
+}
+</code></pre>
+<p>Every individual <code>[Test]</code> method's own call to <code>GetConnectionStringOrSkip()</code> is unchanged — only its implementation moved.</p>
+<ul>
+<li>[ ] <strong>Step 4: Update <code>SqlServerDatabaseContractTests.cs</code> — keep it fail-loud, swap the source</strong></li>
+</ul>
+<pre><code class="language-csharp">public override void SetUp()
+{
+    SqlServerTestDatabase.WipeAllTables(); // still throws if unconfigured -- unchanged fail-loud contract, see this task's note above
+    base.SetUp();
+}
+
+protected override IDatabase CreateDatabase()
+{
+    string connectionString = SqlServerTestDatabase.GetUserConnectionString(); // throws if unconfigured, matching this fixture's documented &quot;fails rather than skips&quot; intent
+    string catalogName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+    return new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString, DatabasePath = catalogName };
+}
+</code></pre>
+<p>Delete the now-unused <code>UserConnectionEnvVar</code> constant and the <code>using System;</code> import if nothing else in the file needs it. Update the class doc comment's "Requires three environment variables..." paragraph to instead say it requires a <code>TestDatabase: true</code> SQL Server entry in the registry — the <em>content</em> of the "do not add skip logic" rationale stays accurate and must stay in the comment; only the configuration-source description changes.</p>
+<ul>
+<li>[ ] <strong>Step 5: Build and run without a live SQL Server available</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: <code>SqlServerStoredProcDatabaseTests</code> reports <code>Ignored</code> with the new message (no <code>TestDatabase: true</code> entry exists yet in this dev environment). <code>SqlServerDatabaseContractTests</code> <strong>fails</strong> (not ignored) with <code>InvalidOperationException</code>'s message surfaced — this is the correct, unchanged fail-loud behavior for that fixture, not a regression. Full live-server re-verification (where both fixtures actually run and pass) is Task 13.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.TestSupport/SqlServerTestDatabase.cs Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;refactor: migrate SQL Server test harness from env vars to DatabaseRegistry (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-12-retire-mymoneyadmin-old-config-classes-and-rewrite-dataenginestartup">Task 12: Retire <code>MyMoneyAdmin</code>, old config classes, and rewrite <code>DataEngineStartup</code><a class="headerlink" href="#task-12-retire-mymoneyadmin-old-config-classes-and-rewrite-dataenginestartup" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Delete: <code>Source/WPF/MyMoneyAdmin/</code> (entire directory and its <code>.csproj</code>)
+- Modify: <code>Source/WPF/MyMoney.sln</code> (remove the <code>MyMoneyAdmin</code> project entry and its build-configuration lines)
+- Delete: <code>Source/WPF/MyMoney.Data/DataEngineConfig.cs</code>, <code>Source/WPF/MyMoney.Data/DataEngineCredentialStore.cs</code>
+- Delete: <code>Source/WPF/UnitTests/DataEngineConfigTests.cs</code>, <code>Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Database/DataEngineStartup.cs</code>
+- Modify: <code>Source/WPF/MyMoney/dataengine.config.template.json</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseRegistry</code>/<code>SqlServerConnectionFactory</code> (Tasks 1-2).
+- Produces: nothing further downstream — this is the cleanup task.</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm nothing outside the files already touched references the classes being deleted</strong></li>
+</ul>
+<p>Run: <code>git grep -n "DataEngineConfig\|DataEngineCredentialStore\|MyMoneyAdmin" -- Source/WPF</code>
+Expected: only <code>DataEngineStartup.cs</code> (rewritten in this task), the <code>MyMoneyAdmin</code> project itself (deleted in this task), the two <code>UnitTests</code> files (deleted in this task), and <code>MyMoney.sln</code>'s project-reference lines (edited in this task). If <code>DatabaseRegistry.cs</code> or anything from Tasks 1-11 shows up, something upstream wasn't fully migrated — stop and fix it there first, not here.</p>
+<ul>
+<li>[ ] <strong>Step 2: Delete <code>MyMoneyAdmin</code> and remove it from the solution</strong></li>
+</ul>
+<pre><code class="language-bash">git rm -r Source/WPF/MyMoneyAdmin
+</code></pre>
+<p>Open <code>Source/WPF/MyMoney.sln</code> and remove the <code>Project("...") = "MyMoneyAdmin", "MyMoneyAdmin\MyMoneyAdmin.csproj", "{...}"</code> block plus every line referencing that project's GUID under <code>GlobalSection(ProjectConfigurationPlatforms)</code>. (Research confirmed no other project has a <code>ProjectReference</code> to <code>MyMoneyAdmin.csproj</code> and its own <code>CopyMyMoneyAdminOutputToMyMoney</code> MSBuild target dies with the file, so this is a clean removal with no dangling references elsewhere.)</p>
+<ul>
+<li>[ ] <strong>Step 3: Delete the old config classes and their tests</strong></li>
+</ul>
+<pre><code class="language-bash">git rm Source/WPF/MyMoney.Data/DataEngineConfig.cs Source/WPF/MyMoney.Data/DataEngineCredentialStore.cs Source/WPF/UnitTests/DataEngineConfigTests.cs Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs
+</code></pre>
+<p>(<code>DataEngineType</code> was already moved into <code>DatabaseRegistry.cs</code> in Task 1, so this delete does not remove that enum — only the two classes and their now-superseded tests.)</p>
+<ul>
+<li>[ ] <strong>Step 4: Rewrite <code>DataEngineStartup.TryAutoLoad</code></strong></li>
+</ul>
+<p>Replace the whole <code>#if DEBUG</code> class body with a registry-driven version. Auto-load now means "reconnect to whichever SQL Server database was used most recently," not "bootstrap a new one" — bootstrapping is explicitly a <code>File | New</code> action (Task 10), never something that happens silently at app startup:</p>
+<pre><code class="language-csharp">// Source/WPF/MyMoney/Database/DataEngineStartup.cs
+using System;
+using System.Diagnostics;
+using System.Linq;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+#if DEBUG
+    public static class DataEngineStartup
+    {
+        /// &lt;summary&gt;
+        /// Reconnects to whichever registered SQL Server database was used
+        /// most recently, if any. Never bootstraps -- if no SQL Server
+        /// entry exists yet in the registry, returns false and the caller
+        /// falls through to its normal SQLite/File-menu-driven behavior.
+        /// Bootstrapping only ever happens via File | New | SQL Server...
+        /// (see MainWindow.OnNewSqlServerDatabase).
+        /// &lt;/summary&gt;
+        public static bool TryAutoLoad(string registryPath, out IDatabase database, out MyMoney money, Action&lt;string&gt; log = null)
+        {
+            database = null;
+            money = null;
+
+            DatabaseRegistry registry;
+            try
+            {
+                registry = DatabaseRegistry.Load(registryPath);
+            }
+            catch (Exception ex)
+            {
+                LogFailure(log, $&quot;DataEngineStartup: could not read '{registryPath}', falling back to SQLite. {ex.Message}&quot;);
+                return false;
+            }
+
+            var mostRecent = registry.Databases
+                .Where(kv =&gt; kv.Value.Engine == DataEngineType.SqlServer)
+                .OrderByDescending(kv =&gt; kv.Value.LastUsedUtc ?? DateTime.MinValue)
+                .FirstOrDefault();
+
+            if (mostRecent.Value == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var sqlServerDatabase = SqlServerConnectionFactory.Connect(registry, mostRecent.Key, new WpfDataLayerUiCallback());
+                money = sqlServerDatabase.Load(null);
+                database = sqlServerDatabase;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // The server may be unreachable, MyMoneyUser's login may
+                // have been revoked, or the database may have been dropped
+                // since the registry was written -- fall through to
+                // MainWindow's normal SQLite/File-menu-driven behavior
+                // instead of crashing app startup.
+                LogFailure(log, $&quot;DataEngineStartup: {ex.GetType().FullName}: {ex.Message}&quot;);
+                database = null;
+                money = null;
+                return false;
+            }
+        }
+
+        private static void LogFailure(Action&lt;string&gt; log, string message)
+        {
+            Debug.WriteLine(message);
+            log?.Invoke(message);
+        }
+    }
+#endif
+}
+</code></pre>
+<p>This drops <code>RequiredDatabaseName</code>, <code>DatabaseExists()</code>, and <code>RunMyMoneyAdmin()</code> entirely (no more hardcoded catalog-name validation, no more credential-file-key-existence check standing in for "is this bootstrapped," no more <code>Process.Start</code>).</p>
+<ul>
+<li>[ ] <strong>Step 5: Update the call site in <code>MainWindow.xaml.cs</code></strong></li>
+</ul>
+<p>The constructor's <code>#if DEBUG</code> block (around line 297) currently builds <code>dataEngineConfigPath</code> from <code>"dataengine.config.json"</code> and calls <code>DataEngineStartup.TryAutoLoad(dataEngineConfigPath, ...)</code>. Change the variable name and source to match the registry (same physical file, same path — only the type reading it changed across Tasks 1-12):</p>
+<pre><code class="language-csharp">string registryPath = DatabaseRegistry.GetDefaultPath();
+if (Walkabout.Data.DataEngineStartup.TryAutoLoad(registryPath, out Walkabout.Data.IDatabase autoDatabase, out MyMoney autoMoney, msg =&gt; this.log.Warning(msg)))
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Update <code>dataengine.config.template.json</code></strong></li>
+</ul>
+<pre><code class="language-json">{
+  &quot;servers&quot;: {
+    &quot;ExampleServer&quot;: {
+      &quot;comment&quot;: &quot;Delete this template block and replace with your own -- populated automatically the first time you use File | New | SQL Server...&quot;,
+      &quot;myMoneyAdmin&quot;: { &quot;userId&quot;: &quot;MyMoneyAdmin&quot;, &quot;password&quot;: &quot;&quot; },
+      &quot;myMoneyUser&quot;: { &quot;userId&quot;: &quot;MyMoneyUser&quot;, &quot;password&quot;: &quot;&quot; },
+      &quot;myMoneyTest&quot;: { &quot;userId&quot;: &quot;MyMoneyTest&quot;, &quot;password&quot;: &quot;&quot; }
+    }
+  },
+  &quot;databases&quot;: {
+    &quot;Example Database&quot;: {
+      &quot;engine&quot;: &quot;SqlServer&quot;,
+      &quot;server&quot;: &quot;ExampleServer&quot;,
+      &quot;catalog&quot;: &quot;MyMoney&quot;,
+      &quot;TestDatabase&quot;: false,
+      &quot;lastUsedUtc&quot;: null,
+      &quot;comment&quot;: null
+    }
+  }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Full solution build and test, both configurations</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> and <code>dotnet build Source/WPF/MyMoney.sln -c Release</code>
+Expected: both succeed with <code>MyMoneyAdmin</code> gone from the solution.</p>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: all non-<code>RequiresSqlServer</code> tests pass; SQL Server-dependent ones skip gracefully (no live server configured yet in this dev environment — expected until Task 13).</p>
+<ul>
+<li>[ ] <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add -A Source/WPF/MyMoneyAdmin Source/WPF/MyMoney.sln Source/WPF/MyMoney.Data/DataEngineConfig.cs Source/WPF/MyMoney.Data/DataEngineCredentialStore.cs Source/WPF/UnitTests/DataEngineConfigTests.cs Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/dataengine.config.template.json
+git commit -m &quot;refactor: retire MyMoneyAdmin.exe and old DataEngineConfig/CredentialStore; DataEngineStartup now registry-driven (#32)&quot;
+</code></pre>
+<hr />
+<h2 id="task-13-full-verification">Task 13: Full verification<a class="headerlink" href="#task-13-full-verification" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong> none (verification only).</p>
+<ul>
+<li>[ ] <strong>Step 1: Full local build and test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> and <code>dotnet build Source/WPF/MyMoney.sln -c Release</code>
+Expected: both succeed.</p>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: every non-<code>RequiresSqlServer</code> test passes; <code>RequiresSqlServer</code>-tagged tests skip with the new "no <code>TestDatabase: true</code> entry registered" message (no live server configured on this machine's registry file yet).</p>
+<ul>
+<li>[ ] <strong>Step 2: Manually register a live Redmond test database and re-run the SQL Server suite</strong></li>
+</ul>
+<p>Using a DEBUG build, <code>File | New | SQL Server...</code> against the real Redmond server: server name <code>Redmond</code>, catalog <code>MyMoneyTest</code>, display name <code>SQL Server Test</code>, <strong>"Test database:" checked</strong>. This exercises <code>MyMoney_BootstrapServer</code> (first-time, prompts for <code>sa</code>) and <code>MyMoney_CreateCatalog</code> end-to-end for the first time against a live server.</p>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: the previously-skipped SQL Server tests now run and pass — this is the direct re-verification of the 16 + 191 + 79 tests noted in the #27 handoff, now sourced from the registry instead of the three retired env vars.</p>
+<ul>
+<li>[ ] <strong>Step 3: Idempotency and second-catalog verification</strong></li>
+</ul>
+<p>Re-run <code>File | New | SQL Server...</code> a second time with the <strong>same</strong> server (<code>Redmond</code>) but a <strong>different</strong>, genuinely new catalog name (e.g. <code>MyMoneyTest2</code>), test database checked. Expected: no <code>sa</code> prompt this time (server already in registry), <code>MyMoney_BootstrapServer</code> and <code>MyMoney_CreateCatalog</code> both no-op/succeed idempotently, the new catalog is created and independently wipeable without touching <code>MyMoneyTest</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Release-build UI verification</strong></li>
+</ul>
+<p>Build and run <code>Source/WPF/MyMoney</code> in Release configuration. Confirm: <code>File | New</code> has no submenu and opens <code>NewSqliteDatabaseDialog</code> directly with no "Test database:" checkbox visible; <code>File | Open</code> and the Recent Files menu never show the <code>TestDatabase: true</code> entries created in Steps 2-3.</p>
+<ul>
+<li>[ ] <strong>Step 5: DEBUG-build UI verification</strong></li>
+</ul>
+<p>Build and run in DEBUG configuration. Confirm: <code>File | New</code> shows the <strong>SQL Server...</strong> / <strong>SQLite...</strong> submenu; <code>File | Open</code> and Recent Files show every registered entry including the test ones; opening a database updates its position in Recent Files (most-recently-used ordering).</p>
+<p>No commit for this task — it's verification of Tasks 1-12's already-committed work. If any step surfaces a bug, fix it as a small follow-up commit against the specific task's files, re-run the relevant step, and continue.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

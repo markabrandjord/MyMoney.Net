@@ -1,0 +1,2022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-17-uidispatcher-portability-rewrite/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>UiDispatcher Portability Rewrite (Issue #7) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "UiDispatcher Portability Rewrite (Issue #7) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="uidispatcher-portability-rewrite-issue-7-implementation-plan">UiDispatcher Portability Rewrite (Issue #7) Implementation Plan<a class="headerlink" href="#uidispatcher-portability-rewrite-issue-7-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Remove <code>MyMoney.Business</code>'s dependency on <code>WindowsBase</code> (<code>System.Windows.Threading.Dispatcher</code>/<code>System.Windows.DependencyObject</code>) so it has zero references to any WPF-family assembly, unblocking true portability to the Uno/Xamarin thin clients (item #5), while preserving every WPF call site's existing UI-thread-delivery behavior exactly.</p>
+<p><strong>Architecture:</strong> <code>UiDispatcher</code> wraps <code>System.Threading.SynchronizationContext</code> instead of <code>Dispatcher</code>. <code>EventHandlerCollection&lt;T,Q&gt;.RaiseEvent</code> drops its <code>DependencyObject</code> auto-marshaling check entirely and becomes a pure synchronous multicast. Two new portable wrapper classes, <code>UiThreadHandler</code> (for <code>EventHandler&lt;ChangeEventArgs&gt;</code>) and <code>UiThreadPropertyChangedHandler</code> (for <code>PropertyChangedEventHandler</code>), let WPF call sites opt in to UI-thread marshaling explicitly, each wrapping its inner handler exactly once so subscribe/unsubscribe always match. 30 real WPF subscriptions across 13 files migrate to use them.</p>
+<p><strong>Tech Stack:</strong> C#/.NET 10.0, WPF, NUnit.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li><code>MyMoney.Business</code> must end this plan with zero references to <code>PresentationFramework</code>, <code>PresentationCore</code>, or <code>WindowsBase</code> — verified by the tightened <code>LayerBoundaryTests</code> in the final task.</li>
+<li>Every migrated call site's <em>observable behavior</em> must be identical before and after migration — this is a plumbing rewrite, not a behavior change. Do not "fix" the two pre-existing anomalies documented below; migrate them exactly as they are today.</li>
+<li><code>dotnet build Source/WPF/MyMoney.sln</code> and <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code> must both be clean at the end of every task in this plan — the solution must never be left in a broken intermediate state between tasks (Task 1 lands the core rewrite and the 5 <code>UiDispatcher.CurrentContext</code> setter call sites together for exactly this reason: removing the old <code>CurrentDispatcher</code> property breaks the build everywhere it's referenced).</li>
+<li>Pre-existing anomalies to preserve as-is, not fix: <code>Views/AliasesView.xaml.cs</code>'s constructor subscribes (<code>+=</code>) on <code>Unloaded</code> where <code>-=</code> looks intended; <code>View Selectors/BalanceControl.xaml.cs</code>'s <code>Transactions.Changed</code> re-subscribe pattern lives outside a property setter, inside a method that runs unconditionally every call.</li>
+<li><code>UiThreadHandler</code>/<code>UiThreadPropertyChangedHandler</code> instances must be constructed exactly once per logical subscription (typically a <code>readonly</code> field) and their <code>.Handler</code> property used for both <code>+=</code> and <code>-=</code> — never re-constructed at each use, or subscribe/unsubscribe will stop matching (the exact bug class this whole rewrite exists to prevent).</li>
+</ul>
+<hr />
+<h3 id="task-1-core-rewrite-uidispatcher-eventhandlercollection-new-wrapper-classes-and-the-5-wpf-setter-call-sites">Task 1: Core rewrite — <code>UiDispatcher</code>, <code>EventHandlerCollection</code>, new wrapper classes, and the 5 WPF setter call sites<a class="headerlink" href="#task-1-core-rewrite-uidispatcher-eventhandlercollection-new-wrapper-classes-and-the-5-wpf-setter-call-sites" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs</code>
+- Create: <code>Source/WPF/MyMoney.Business/Utilities/UiThreadHandler.cs</code>
+- Create: <code>Source/WPF/MyMoney.Business/Utilities/UiThreadPropertyChangedHandler.cs</code>
+- Modify: <code>Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs</code>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> (3 call sites, in the <code>MainWindow()</code> and <code>MainWindow(Settings)</code> constructors)
+- Modify: <code>Source/WPF/PerformanceViewer/MainWindow.xaml.cs</code> (1 call site, its constructor)
+- Modify: <code>Source/WPF/UIControlsTest/MainWindow.xaml.cs</code> (1 call site, its constructor)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>UiDispatcher.CurrentContext</code> (<code>SynchronizationContext</code>, replaces <code>CurrentDispatcher</code>), <code>UiDispatcher.BeginInvoke(Delegate, params object[])</code> / <code>UiDispatcher.Invoke(Delegate, params object[])</code> (signatures unchanged). <code>UiThreadHandler(EventHandler&lt;ChangeEventArgs&gt; inner)</code> with <code>.Handler</code> property of type <code>EventHandler&lt;ChangeEventArgs&gt;</code>. <code>UiThreadPropertyChangedHandler(PropertyChangedEventHandler inner)</code> with <code>.Handler</code> property of type <code>PropertyChangedEventHandler</code>. All later tasks consume these two wrapper classes.</p>
+<p>This task must land atomically — the solution will not build between these individual file changes, only once all of them are done together.</p>
+<ul>
+<li>[ ] <strong>Step 1: Rewrite <code>Dispatcher.cs</code></strong></li>
+</ul>
+<p>Replace the entire contents of <code>Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs</code> with:</p>
+<pre><code class="language-csharp">using System;
+using System.Threading;
+
+namespace Walkabout.Utilities
+{
+    /// &lt;summary&gt;
+    /// During shutdown when window handles are not available, we cannot use ISynchronizeInvoke
+    /// &lt;/summary&gt;
+    public static class UiDispatcher
+    {
+        private static SynchronizationContext context;
+        private static int uiThreadId;
+
+        public static SynchronizationContext CurrentContext
+        {
+            get
+            {
+                return context;
+            }
+            set
+            {
+                uiThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+                context = value;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Only use the SynchronizationContext if we are not already on the UI Thread.
+        /// This avoids exceptions saying the context is unavailable.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;d&quot;&gt;The delegate to invoke&lt;/param&gt;
+        /// &lt;param name=&quot;args&quot;&gt;Optional parameters&lt;/param&gt;
+        public static object BeginInvoke(System.Delegate d, params object[] args)
+        {
+            if (context != null &amp;&amp; System.Threading.Thread.CurrentThread.ManagedThreadId != uiThreadId)
+            {
+                // Note: we cannot use context.Send because that can lead to deadlocks.
+                // For example, if this is a background thread with a lock() on a money data object
+                // (like account.rebalance does) then UI thread might be blocked on trying to get
+                // that lock and this dispatcher invoke would therefore create a deadlock.
+                context.Post(_ =&gt; d.DynamicInvoke(args), null);
+                return null;
+            }
+            else
+            {
+                // we are already on the UI thread so call the delegate directly.
+                return d.DynamicInvoke(args);
+            }
+        }
+
+
+        /// &lt;summary&gt;
+        /// Only use the SynchronizationContext if we are not already on the UI Thread.
+        /// This avoids exceptions saying the context is unavailable.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;d&quot;&gt;The delegate to invoke&lt;/param&gt;
+        /// &lt;param name=&quot;args&quot;&gt;Optional parameters&lt;/param&gt;
+        public static object Invoke(System.Delegate d, params object[] args)
+        {
+            if (context != null &amp;&amp; System.Threading.Thread.CurrentThread.ManagedThreadId != uiThreadId)
+            {
+                // Note: must be careful using this method, it could deadlock the UI, so make sure
+                // it cannot be interleaved with similar calls.
+                object result = null;
+                context.Send(_ =&gt; result = d.DynamicInvoke(args), null);
+                return result;
+            }
+            else
+            {
+                // we are already on the UI thread so call the delegate directly.
+                return d.DynamicInvoke(args);
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Rewrite <code>EventHandlerCollection.cs</code>'s <code>RaiseEvent</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs</code>, remove the <code>using System.Windows;</code> line, and replace the <code>RaiseEvent</code> method body with:</p>
+<pre><code class="language-csharp">        // This collection has no concept of UI threads or marshaling - every handler is invoked
+        // synchronously, directly, on whichever thread raises the event. A listener that needs
+        // UI-thread delivery must opt in explicitly via UiThreadHandler/UiThreadPropertyChangedHandler
+        // (see Utilities/UiThreadHandler.cs) at its own subscription site; this class deliberately
+        // does not - and must not - try to detect that need itself (see
+        // docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md for why an
+        // automatic per-listener check was removed from here).
+        //
+        // If bugs recur from callers forgetting to wrap a UI-bound subscription in one of those
+        // wrappers, or from unsubscribing with a different delegate than was subscribed, consider a
+        // Roslyn analyzer over a runtime check here - both mistakes are structural and syntactic
+        // (visible in the subscription code itself), which is exactly what an analyzer is
+        // well-suited to catch at compile time instead of at whatever point in the future the
+        // mistake happens to surface at runtime. Deferred for now - see issue #49.
+        public void RaiseEvent(object sender, Q args)
+        {
+            object[] array = new object[] { sender, args };
+            foreach (Delegate d in this.list)
+            {
+                try
+                {
+                    this.Invoke(d, array);
+                }
+                catch (System.Reflection.TargetInvocationException e)
+                {
+                    if (e.InnerException != null)
+                    {
+                        throw e.InnerException;
+                    }
+                    throw;
+                }
+            }
+        }
+</code></pre>
+<p>The <code>protected virtual void Invoke(Delegate d, object[] args) =&gt; d.Method.Invoke(d.Target, args);</code> method below it is unchanged.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create <code>UiThreadHandler.cs</code></strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+
+namespace Walkabout.Utilities
+{
+    /// &lt;summary&gt;
+    /// Wraps a Changed/Rebalanced-event handler so it's delivered via UiDispatcher's marshaling
+    /// instead of running synchronously on whichever thread raised the event. Wraps exactly once, at
+    /// construction, and always exposes the same delegate reference - subscribing and
+    /// unsubscribing with `Handler` therefore always match, unlike a bare wrapping function
+    /// (which allocates a new closure per call and silently breaks unsubscribe - see
+    /// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md).
+    ///
+    /// Always store the UiThreadHandler instance (e.g. as a field) and subscribe/unsubscribe via
+    /// its Handler property - never call `new UiThreadHandler(...)` a second time expecting the
+    /// same Handler back, and never subscribe with this.Handler but unsubscribe with the bare
+    /// original method group (or vice versa). Both mistakes are easy to make by hand and easy to
+    /// miss in review; if they recur across enough call sites, a Roslyn analyzer flagging a
+    /// subscribe/unsubscribe pair that doesn't reference the same UiThreadHandler instance would be
+    /// more reliable than continuing to catch these by hand. Deferred for now - see issue #49.
+    /// &lt;/summary&gt;
+    public sealed class UiThreadHandler
+    {
+        public EventHandler&lt;ChangeEventArgs&gt; Handler { get; }
+
+        public UiThreadHandler(EventHandler&lt;ChangeEventArgs&gt; inner)
+        {
+            this.Handler = (sender, args) =&gt; UiDispatcher.BeginInvoke(inner, sender, args);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Create <code>UiThreadPropertyChangedHandler.cs</code></strong></li>
+</ul>
+<pre><code class="language-csharp">using System.ComponentModel;
+
+namespace Walkabout.Utilities
+{
+    /// &lt;summary&gt;
+    /// Same shape and same rationale as UiThreadHandler, for PersistentObject.PropertyChanged
+    /// subscribers instead of Changed/Rebalanced subscribers - PropertyChangedEventHandler is a
+    /// distinct delegate type from EventHandler&amp;lt;ChangeEventArgs&amp;gt;, not interchangeable with it,
+    /// so this needs its own concrete wrapper rather than reusing UiThreadHandler.
+    /// &lt;/summary&gt;
+    public sealed class UiThreadPropertyChangedHandler
+    {
+        public PropertyChangedEventHandler Handler { get; }
+
+        public UiThreadPropertyChangedHandler(PropertyChangedEventHandler inner)
+        {
+            this.Handler = (sender, args) =&gt; UiDispatcher.BeginInvoke(inner, sender, args);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Rewrite <code>CrossThreadEventMarshalingTests.cs</code></strong></li>
+</ul>
+<p>Replace the entire contents of <code>Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs</code> with:</p>
+<pre><code class="language-csharp">using System;
+using System.Threading;
+using System.Windows;
+using System.Windows.Threading;
+using NUnit.Framework;
+using Walkabout.Data;
+using Walkabout.Utilities;
+
+namespace Walkabout.Tests
+{
+    /// &lt;summary&gt;
+    /// Real cross-thread coverage for EventHandlerCollection.RaiseEvent (now a pure synchronous
+    /// multicast with no UI awareness) and UiThreadHandler (the explicit opt-in wrapper WPF call
+    /// sites use for UI-thread delivery) - see
+    /// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md. Uses a real
+    /// Dispatcher on a dedicated thread (standing in for the WPF UI thread) and the domain model's
+    /// own Category/Categories change-notification path (PersistentObject.OnInserted -&gt;
+    /// FireChangeEvent -&gt; PersistentContainer.SendEvent -&gt; handlers.RaiseEvent), not just the raw
+    /// EventHandlerCollection in isolation.
+    /// &lt;/summary&gt;
+    public class CrossThreadEventMarshalingTests
+    {
+        private SynchronizationContext previousContext;
+        private Dispatcher uiDispatcher;
+        private Thread uiThread;
+
+        [SetUp]
+        public void SetUp()
+        {
+            this.previousContext = UiDispatcher.CurrentContext;
+
+            Dispatcher captured = null;
+            var ready = new ManualResetEventSlim(false);
+            this.uiThread = new Thread(() =&gt;
+            {
+                captured = Dispatcher.CurrentDispatcher;
+                ready.Set();
+                Dispatcher.Run();
+            });
+            this.uiThread.IsBackground = true;
+            this.uiThread.SetApartmentState(ApartmentState.STA);
+            this.uiThread.Start();
+            Assert.That(ready.Wait(TimeSpan.FromSeconds(5)), Is.True, &quot;UI dispatcher thread never started.&quot;);
+
+            this.uiDispatcher = captured;
+            UiDispatcher.CurrentContext = new DispatcherSynchronizationContext(this.uiDispatcher);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            this.uiDispatcher?.InvokeShutdown();
+            this.uiThread?.Join(TimeSpan.FromSeconds(5));
+            UiDispatcher.CurrentContext = this.previousContext;
+        }
+
+        // A minimal stand-in for a real WPF UI element - still useful here to prove
+        // EventHandlerCollection no longer auto-marshals based on DependencyObject-ness, and as the
+        // listener type for UiThreadHandler-based tests below.
+        private class FakeUiElement : DependencyObject
+        {
+            public volatile int HandlerThreadId = -1;
+            public readonly ManualResetEventSlim Handled = new ManualResetEventSlim(false);
+
+            public void OnChanged(object sender, ChangeEventArgs e)
+            {
+                this.HandlerThreadId = Thread.CurrentThread.ManagedThreadId;
+                this.Handled.Set();
+            }
+        }
+
+        private class PlainListener
+        {
+            public volatile int HandlerThreadId = -1;
+            public volatile bool Handled;
+
+            public void OnChanged(object sender, ChangeEventArgs e)
+            {
+                this.HandlerThreadId = Thread.CurrentThread.ManagedThreadId;
+                this.Handled = true;
+            }
+        }
+
+        private void AddCategoryFromBackgroundThread(MyMoney money, string name)
+        {
+            Thread backgroundThread = new Thread(() =&gt;
+            {
+                Category category = new Category(money.Categories) { Name = name, Type = CategoryType.Expense };
+                money.Categories.AddCategory(category);
+            });
+            backgroundThread.IsBackground = true;
+            backgroundThread.Start();
+            Assert.That(backgroundThread.Join(TimeSpan.FromSeconds(5)), Is.True, &quot;Background thread never finished AddCategory.&quot;);
+        }
+
+        [Test]
+        public void RaiseEvent_DependencyObjectListener_NoLongerAutoMarshals_RunsSynchronouslyOnCallingThread()
+        {
+            MyMoney money = new MyMoney();
+            FakeUiElement listener = new FakeUiElement();
+            money.Categories.Changed += listener.OnChanged; // raw subscription, no UiThreadHandler wrapper
+
+            int callingThreadId = -1;
+            Thread backgroundThread = new Thread(() =&gt;
+            {
+                callingThreadId = Thread.CurrentThread.ManagedThreadId;
+                Category category = new Category(money.Categories) { Name = &quot;BackgroundCategory&quot;, Type = CategoryType.Expense };
+                money.Categories.AddCategory(category);
+                Assert.That(listener.Handled.IsSet, Is.True,
+                    &quot;Listener must already have run synchronously by the time AddCategory returns - &quot; +
+                    &quot;EventHandlerCollection no longer auto-marshals based on DependencyObject-ness.&quot;);
+            });
+            backgroundThread.IsBackground = true;
+            backgroundThread.Start();
+            Assert.That(backgroundThread.Join(TimeSpan.FromSeconds(5)), Is.True, &quot;Background thread never finished AddCategory.&quot;);
+
+            Assert.That(listener.HandlerThreadId, Is.EqualTo(callingThreadId),
+                &quot;A raw DependencyObject listener (no UiThreadHandler wrapper) must run on the calling &quot; +
+                &quot;thread now - the automatic DependencyObject-based marshaling this test used to prove &quot; +
+                &quot;is gone.&quot;);
+        }
+
+        [Test]
+        public void RaiseEvent_PlainListener_RunsSynchronouslyOnCallingThread()
+        {
+            MyMoney money = new MyMoney();
+            PlainListener listener = new PlainListener();
+            money.Categories.Changed += listener.OnChanged;
+
+            int callingThreadId = -1;
+            Thread backgroundThread = new Thread(() =&gt;
+            {
+                callingThreadId = Thread.CurrentThread.ManagedThreadId;
+                Category category = new Category(money.Categories) { Name = &quot;BackgroundCategory2&quot;, Type = CategoryType.Expense };
+                money.Categories.AddCategory(category);
+                Assert.That(listener.Handled, Is.True,
+                    &quot;Plain listener must be invoked synchronously, before AddCategory returns.&quot;);
+            });
+            backgroundThread.IsBackground = true;
+            backgroundThread.Start();
+            Assert.That(backgroundThread.Join(TimeSpan.FromSeconds(5)), Is.True, &quot;Background thread never finished AddCategory.&quot;);
+
+            Assert.That(listener.HandlerThreadId, Is.EqualTo(callingThreadId),
+                &quot;A non-wrapped listener must run on the calling thread, not be marshaled elsewhere.&quot;);
+        }
+
+        [Test]
+        public void UiThreadHandler_Unsubscribe_ActuallyStopsDelivery()
+        {
+            MyMoney money = new MyMoney();
+            FakeUiElement listener = new FakeUiElement();
+            UiThreadHandler wrapper = new UiThreadHandler(listener.OnChanged);
+
+            money.Categories.Changed += wrapper.Handler;
+            money.Categories.Changed -= wrapper.Handler; // same delegate object reference both times
+
+            this.AddCategoryFromBackgroundThread(money, &quot;ShouldNotBeSubscribed&quot;);
+
+            Assert.That(listener.Handled.Wait(TimeSpan.FromSeconds(1)), Is.False,
+                &quot;The listener must not fire - wrapper.Handler is the same delegate object both &quot; +
+                &quot;times, so RemoveHandler's list.Remove(h) correctly finds and removes it.&quot;);
+        }
+
+        [Test]
+        public void UiThreadHandler_StillMarshalsToUiThreadWhileSubscribed()
+        {
+            MyMoney money = new MyMoney();
+            FakeUiElement listener = new FakeUiElement();
+            UiThreadHandler wrapper = new UiThreadHandler(listener.OnChanged);
+
+            money.Categories.Changed += wrapper.Handler;
+
+            int callingThreadId = -1;
+            Thread backgroundThread = new Thread(() =&gt;
+            {
+                callingThreadId = Thread.CurrentThread.ManagedThreadId;
+                Category category = new Category(money.Categories) { Name = &quot;ShouldStillBeSubscribed&quot;, Type = CategoryType.Expense };
+                money.Categories.AddCategory(category);
+            });
+            backgroundThread.IsBackground = true;
+            backgroundThread.Start();
+            Assert.That(backgroundThread.Join(TimeSpan.FromSeconds(5)), Is.True, &quot;Background thread never finished AddCategory.&quot;);
+
+            Assert.That(listener.Handled.Wait(TimeSpan.FromSeconds(5)), Is.True,
+                &quot;The wrapped handler must still fire while subscribed - this rules out a trivial &quot; +
+                &quot;'never delivers anything' implementation passing the unsubscribe test by accident.&quot;);
+            Assert.That(listener.HandlerThreadId, Is.EqualTo(this.uiThread.ManagedThreadId),
+                &quot;Must run on the UI dispatcher thread, not the calling thread.&quot;);
+            Assert.That(listener.HandlerThreadId, Is.Not.EqualTo(callingThreadId));
+        }
+
+        [Test]
+        public void RaiseEvent_FromThreadHoldingALockTheUiThreadWants_DoesNotDeadlock()
+        {
+            // Regression guard for the documented reason BeginInvoke (not Invoke/Send) is used in
+            // UiDispatcher: &quot;if this is a background thread with a lock() on a money data object
+            // ... then UI thread might be blocked on trying to get that lock and this dispatcher
+            // invoke would therefore create a deadlock.&quot; This reproduces exactly that shape.
+            //
+            // The competing &quot;UI&quot; action below uses Monitor.TryEnter with a bounded timeout, not a
+            // raw lock, deliberately: a real regression here would otherwise create a genuine,
+            // unkillable OS-level deadlock between this test's two threads (a real one was hit and
+            // confirmed manually while designing this test - the process had to be killed
+            // externally, it never recovered on its own). The bounded timeout means even a
+            // regression fails this test quickly and cleanly instead of hanging the whole test host.
+            // What's actually asserted is TIMING: BeginInvoke returns near-instantly regardless of
+            // dispatcher contention; Send/Invoke would block for roughly the full contention timeout
+            // below before returning.
+            MyMoney money = new MyMoney();
+            FakeUiElement listener = new FakeUiElement();
+            money.Categories.Changed += new UiThreadHandler(listener.OnChanged).Handler;
+
+            object gate = new object();
+            TimeSpan contentionTimeout = TimeSpan.FromSeconds(2);
+            var stopwatch = new System.Diagnostics.Stopwatch();
+            bool addCategoryReturned = false;
+
+            Thread backgroundThread = new Thread(() =&gt;
+            {
+                lock (gate)
+                {
+                    this.uiDispatcher.BeginInvoke(new Action(() =&gt;
+                    {
+                        Monitor.TryEnter(gate, contentionTimeout);
+                    }));
+
+                    stopwatch.Start();
+                    Category category = new Category(money.Categories) { Name = &quot;DeadlockRegressionCategory&quot;, Type = CategoryType.Expense };
+                    money.Categories.AddCategory(category);
+                    stopwatch.Stop();
+                    addCategoryReturned = true;
+                }
+            });
+            backgroundThread.IsBackground = true;
+            backgroundThread.Start();
+            bool joined = backgroundThread.Join(TimeSpan.FromSeconds(10));
+
+            Assert.That(joined, Is.True, &quot;Background thread never finished.&quot;);
+            Assert.That(addCategoryReturned, Is.True);
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromMilliseconds(500)),
+                $&quot;AddCategory took {stopwatch.ElapsedMilliseconds}ms while the dispatcher was busy - &quot; +
+                &quot;it must return near-instantly (BeginInvoke is fire-and-forget), not block for close &quot; +
+                &quot;to the contention timeout the way a blocking Send/Invoke would.&quot;);
+            Assert.That(listener.Handled.Wait(TimeSpan.FromSeconds(5)), Is.True,
+                &quot;Handler must still eventually run once the lock is released.&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Update the 5 WPF-side <code>UiDispatcher</code> setter call sites</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code>, <code>Source/WPF/PerformanceViewer/MainWindow.xaml.cs</code>, and <code>Source/WPF/UIControlsTest/MainWindow.xaml.cs</code>, every occurrence of:</p>
+<pre><code class="language-csharp">UiDispatcher.CurrentDispatcher = this.Dispatcher;
+</code></pre>
+<p>(and <code>MainWindow.xaml.cs</code>'s one fully-qualified <code>Walkabout.Utilities.UiDispatcher.CurrentDispatcher = this.Dispatcher;</code>) becomes:</p>
+<pre><code class="language-csharp">UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
+</code></pre>
+<p>(fully-qualify the same way the original line did, i.e. keep <code>Walkabout.Utilities.UiDispatcher.CurrentContext = ...</code> for the one occurrence that was already fully qualified).</p>
+<ul>
+<li>[ ] <strong>Step 7: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build, 0 errors. (If any project still references <code>UiDispatcher.CurrentDispatcher</code>, the build will fail there — that means a 6th call site was missed; find it with <code>grep -rn "UiDispatcher.CurrentDispatcher" Source/WPF --include=*.cs</code> and update it the same way as Step 6.)</p>
+<ul>
+<li>[ ] <strong>Step 8: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CrossThreadEventMarshalingTests"</code>
+Expected: all 6 tests pass (<code>RaiseEvent_DependencyObjectListener_NoLongerAutoMarshals_RunsSynchronouslyOnCallingThread</code>, <code>RaiseEvent_PlainListener_RunsSynchronouslyOnCallingThread</code>, <code>UiThreadHandler_Unsubscribe_ActuallyStopsDelivery</code>, <code>UiThreadHandler_StillMarshalsToUiThreadWhileSubscribed</code>, <code>RaiseEvent_FromThreadHoldingALockTheUiThreadWants_DoesNotDeadlock</code>).</p>
+<p>Then run the full suite: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass (0 failed), matching the pre-existing baseline count plus the one net-new test (6 tests in this file now, vs. 3 before).</p>
+<ul>
+<li>[ ] <strong>Step 9: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs Source/WPF/MyMoney.Business/Utilities/UiThreadHandler.cs Source/WPF/MyMoney.Business/Utilities/UiThreadPropertyChangedHandler.cs Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/PerformanceViewer/MainWindow.xaml.cs Source/WPF/UIControlsTest/MainWindow.xaml.cs
+git commit -m &quot;Rewrite UiDispatcher to wrap SynchronizationContext, remove DependencyObject auto-marshal&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-migrate-viewstransactionsviewxamlcs-outer-money-property">Task 2: Migrate <code>Views/TransactionsView.xaml.cs</code> — outer <code>Money</code> property<a class="headerlink" href="#task-2-migrate-viewstransactionsviewxamlcs-outer-money-property" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Views/TransactionsView.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update the <code>Money</code> property setter</strong></li>
+</ul>
+<p>Add a field near <code>private MyMoney myMoney;</code> (around line 100):</p>
+<pre><code class="language-csharp">private readonly UiThreadHandler onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>Wait — a field initializer cannot reference <code>this.OnMoneyChanged</code> as <code>this</code> isn't available until after the constructor runs its base call. Declare it without an initializer and assign it where the field is declared using a constructor-less pattern instead: since <code>TransactionsView</code>'s constructor is at line 412 and the field is far above it, initialize in the constructor. Add this as the <strong>first line</strong> of the <code>TransactionsView()</code> constructor (before <code>this.InitializeComponent();</code> or immediately after — either is fine since it doesn't depend on XAML-loaded state):</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>and declare the field (non-<code>readonly</code>, since it's now constructor-assigned) near <code>private MyMoney myMoney;</code>:</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>Then change the <code>Money</code> property setter (around lines 1330-1338):</p>
+<pre><code class="language-csharp">// Before:
+if (this.myMoney != null)
+{
+    this.myMoney.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+}
+
+// After:
+// Wrapped once in the ctor and reused for both subscribe and unsubscribe below - see
+// UiThreadHandler's doc comment for why a bare re-wrap or a mismatched raw method group here
+// would silently break unsubscription (a mistake a Roslyn analyzer could catch at compile time
+// if this class of bug recurs - deferred for now, see issue #49).
+if (this.myMoney != null)
+{
+    this.myMoney.Changed -= this.onMoneyChangedUi.Handler;
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Changed += this.onMoneyChangedUi.Handler;
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Views/TransactionsView.xaml.cs
+git commit -m &quot;Migrate TransactionsView.xaml.cs's Money.Changed subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-migrate-viewstransactionsviewxamlcs-5-nested-cellfield-classes-via-transactionpropertychangesubscription">Task 3: Migrate <code>Views/TransactionsView.xaml.cs</code> — 5 nested cell/field classes via <code>TransactionPropertyChangeSubscription</code><a class="headerlink" href="#task-3-migrate-viewstransactionsviewxamlcs-5-nested-cellfield-classes-via-transactionpropertychangesubscription" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Views/TransactionPropertyChangeSubscription.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Views/TransactionsView.xaml.cs</code> (5 nested classes: <code>TransactionCell</code>, <code>TransactionAttachmentIcon</code>, <code>TransactionTextField</code>, <code>TransactionStatusButton</code>, <code>TransactionAmountControl</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadPropertyChangedHandler</code> (Task 1).
+- Produces: <code>TransactionPropertyChangeSubscription(PropertyChangedEventHandler onPropertyChanged)</code> with <code>.Subscribe(Transaction to)</code> / <code>.Unsubscribe(Transaction from)</code> methods — used only within this file, no other task depends on it.</p>
+<ul>
+<li>[ ] <strong>Step 1: Create <code>TransactionPropertyChangeSubscription.cs</code></strong></li>
+</ul>
+<pre><code class="language-csharp">using System.ComponentModel;
+using Walkabout.Data;
+using Walkabout.Utilities;
+
+namespace Walkabout.Views
+{
+    /// &lt;summary&gt;
+    /// Shared subscribe/unsubscribe bookkeeping for TransactionsView's several small per-cell
+    /// controls (TransactionCell, TransactionAttachmentIcon, TransactionTextField,
+    /// TransactionStatusButton, TransactionAmountControl), each of which tracks a `Transaction`
+    /// context and needs its PropertyChanged notifications marshaled to the UI thread. Wraps the
+    /// given handler exactly once, in a UiThreadPropertyChangedHandler - the caller still owns its
+    /// own `Transaction` field (this class only manages the subscription, not the reference), so
+    /// existing code that reads the current Transaction elsewhere in these classes needs no change.
+    /// &lt;/summary&gt;
+    internal sealed class TransactionPropertyChangeSubscription
+    {
+        private readonly UiThreadPropertyChangedHandler handler;
+
+        public TransactionPropertyChangeSubscription(PropertyChangedEventHandler onPropertyChanged)
+        {
+            this.handler = new UiThreadPropertyChangedHandler(onPropertyChanged);
+        }
+
+        public void Unsubscribe(Transaction from)
+        {
+            if (from != null)
+            {
+                from.PropertyChanged -= this.handler.Handler;
+            }
+        }
+
+        public void Subscribe(Transaction to)
+        {
+            if (to != null)
+            {
+                to.PropertyChanged += this.handler.Handler;
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Migrate <code>TransactionCell</code> (around line 5488)</strong></li>
+</ul>
+<p>Add a field next to <code>private Transaction context;</code> (around line 5567):</p>
+<pre><code class="language-csharp">private readonly TransactionPropertyChangeSubscription propertyChangeSubscription;
+</code></pre>
+<p>Initialize it in the constructor (<code>public TransactionCell()</code>, around line 5534), as its first line:</p>
+<pre><code class="language-csharp">this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);
+</code></pre>
+<p>Then replace each of the 3 subscribe/unsubscribe call sites:</p>
+<p><code>OnUnloaded</code> (around line 5547-5554):</p>
+<pre><code class="language-csharp">// Before:
+private void OnUnloaded()
+{
+    // stop listening
+    if (this.context != null)
+    {
+        this.context.PropertyChanged -= this.OnPropertyChanged;
+    }
+}
+
+// After:
+private void OnUnloaded()
+{
+    // stop listening
+    this.propertyChangeSubscription.Unsubscribe(this.context);
+}
+</code></pre>
+<p><code>OnLoaded</code> (around line 5556-5565):</p>
+<pre><code class="language-csharp">// Before:
+private void OnLoaded()
+{
+    // start listening
+    if (this.context != null)
+    {
+        this.context.PropertyChanged -= this.OnPropertyChanged;
+        this.context.PropertyChanged += this.OnPropertyChanged;
+        this.UpdateUI();
+    }
+}
+
+// After:
+private void OnLoaded()
+{
+    // start listening
+    if (this.context != null)
+    {
+        this.propertyChangeSubscription.Unsubscribe(this.context);
+        this.propertyChangeSubscription.Subscribe(this.context);
+        this.UpdateUI();
+    }
+}
+</code></pre>
+<p><code>SetContext</code> (around line 5641-5653):</p>
+<pre><code class="language-csharp">// Before:
+private void SetContext(Transaction transaction)
+{
+    if (this.context != null)
+    {
+        this.context.PropertyChanged -= this.OnPropertyChanged;
+    }
+    this.context = transaction;
+    if (this.context != null)
+    {
+        this.context.PropertyChanged -= this.OnPropertyChanged;
+        this.context.PropertyChanged += this.OnPropertyChanged;
+    }
+}
+
+// After:
+private void SetContext(Transaction transaction)
+{
+    this.propertyChangeSubscription.Unsubscribe(this.context);
+    this.context = transaction;
+    this.propertyChangeSubscription.Subscribe(this.context);
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Migrate <code>TransactionAttachmentIcon</code> (around line 5867)</strong></li>
+</ul>
+<p>Same shape as <code>TransactionCell</code>, using <code>this.OnContextPropertyChanged</code> (not <code>this.OnPropertyChanged</code>) as the wrapped handler. Add the field next to <code>private Transaction context;</code> (around line 5869), initialize in the constructor (around line 5871) with <code>new TransactionPropertyChangeSubscription(this.OnContextPropertyChanged)</code>, and replace the 3 call sites in <code>OnUnloaded</code> (~5884-5891), <code>OnLoaded</code> (~5893-5902), and <code>SetContext</code> (~5913-5925) exactly as in Step 2, substituting <code>this.OnContextPropertyChanged</code> for <code>this.OnPropertyChanged</code> in the constructor call only (the <code>Subscribe</code>/<code>Unsubscribe</code> call shapes are identical).</p>
+<ul>
+<li>[ ] <strong>Step 4: Migrate <code>TransactionTextField</code> (around line 6923)</strong></li>
+</ul>
+<p>Same shape, <code>this.OnPropertyChanged</code>. Add the field next to <code>private Transaction context;</code> (around line 6925). This class's constructor (around line 6930) already calls <code>this.SetContext(dataItem as Transaction);</code> as its first statement — the <code>propertyChangeSubscription</code> field must be initialized <strong>before</strong> that call, so add <code>this.propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);</code> as the very first line of the constructor, before <code>this.getter = getter;</code>. Replace the 3 call sites in <code>OnUnloaded</code> (~6954-6961), <code>OnLoaded</code> (~6963-6972), and <code>SetContext</code> (~6993-7006) exactly as in Step 2.</p>
+<ul>
+<li>[ ] <strong>Step 5: Migrate <code>TransactionStatusButton</code> (around line 7110)</strong></li>
+</ul>
+<p>Same shape, <code>this.OnPropertyChanged</code>. Add the field next to <code>private Transaction context;</code> (around line 7114), initialize as the first line of the constructor (around line 7120). Replace the 3 call sites in <code>OnUnloaded</code> (~7138-7145), <code>OnLoaded</code> (~7147-7156), and <code>SetContext</code> (~7188-7200) exactly as in Step 2.</p>
+<ul>
+<li>[ ] <strong>Step 6: Migrate <code>TransactionAmountControl</code> (around line 7340)</strong></li>
+</ul>
+<p>Same shape, <code>this.OnPropertyChanged</code>. Add the field next to <code>private Transaction context;</code> (around line 7346), initialize as the first line of the constructor (around line 7355), before the <code>grid</code> is constructed. Replace the 3 call sites in <code>OnUnloaded</code> (~7379-7386), <code>OnLoaded</code> (~7388-7398), and <code>SetContext</code> (~7489-7502) exactly as in Step 2.</p>
+<ul>
+<li>[ ] <strong>Step 7: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 8: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 9: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Views/TransactionPropertyChangeSubscription.cs Source/WPF/MyMoney/Views/TransactionsView.xaml.cs
+git commit -m &quot;Migrate TransactionsView.xaml.cs's 5 nested PropertyChanged subscribers via TransactionPropertyChangeSubscription&quot;
+</code></pre>
+<hr />
+<h3 id="task-4-migrate-viewssecuritiesviewxamlcs">Task 4: Migrate <code>Views/SecuritiesView.xaml.cs</code><a class="headerlink" href="#task-4-migrate-viewssecuritiesviewxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Views/SecuritiesView.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update the <code>Money</code> (or equivalently-named) property setter</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney money;</code> (around line 469):</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first line:</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>Then update the property setter (around lines 477-486):</p>
+<pre><code class="language-csharp">// Before:
+if (this.money != null)
+{
+    this.money.Changed -= this.OnMoneyChanged;
+}
+this.money = value;
+if (this.money != null)
+{
+    this.money.Changed += this.OnMoneyChanged;
+}
+
+// After:
+if (this.money != null)
+{
+    this.money.Changed -= this.onMoneyChangedUi.Handler;
+}
+this.money = value;
+if (this.money != null)
+{
+    this.money.Changed += this.onMoneyChangedUi.Handler;
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Views/SecuritiesView.xaml.cs
+git commit -m &quot;Migrate SecuritiesView.xaml.cs's Money.Changed subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-5-migrate-viewscurrenciesviewxamlcs">Task 5: Migrate <code>Views/CurrenciesView.xaml.cs</code><a class="headerlink" href="#task-5-migrate-viewscurrenciesviewxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Views/CurrenciesView.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file has <strong>three</strong> call sites all referencing the same handler: the constructor's <code>Unloaded</code> lambda (line 43), and the <code>Money</code> property setter's unsubscribe (line 470) and subscribe (line 475). All three must use the same field.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update all three call sites</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney money;</code> (around line 459):</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>In the constructor (around line 35-46), add as the first line:</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>before <code>this.InitializeComponent();</code>. Then update the <code>Unloaded</code> lambda (around line 39-45):</p>
+<pre><code class="language-csharp">// Before:
+Unloaded += (s, e) =&gt;
+{
+    if (this.money != null)
+    {
+        this.money.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+    }
+};
+
+// After:
+Unloaded += (s, e) =&gt;
+{
+    if (this.money != null)
+    {
+        this.money.Changed -= this.onMoneyChangedUi.Handler;
+    }
+};
+</code></pre>
+<p>Then the <code>Money</code> property setter (around lines 467-478):</p>
+<pre><code class="language-csharp">// Before:
+if (this.money != null)
+{
+    this.money.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+}
+this.money = value;
+if (this.money != null)
+{
+    this.money.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+    this.ShowCurrencies();
+}
+
+// After:
+if (this.money != null)
+{
+    this.money.Changed -= this.onMoneyChangedUi.Handler;
+}
+this.money = value;
+if (this.money != null)
+{
+    this.money.Changed += this.onMoneyChangedUi.Handler;
+    this.ShowCurrencies();
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Views/CurrenciesView.xaml.cs
+git commit -m &quot;Migrate CurrenciesView.xaml.cs's Money.Changed subscriptions to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-6-migrate-viewsaliasesviewxamlcs">Task 6: Migrate <code>Views/AliasesView.xaml.cs</code><a class="headerlink" href="#task-6-migrate-viewsaliasesviewxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Views/AliasesView.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p><strong>Preserve the pre-existing anomaly exactly</strong>: the constructor's <code>Unloaded</code> handler uses <code>+=</code>, not <code>-=</code>, today. Do not change the operator — only replace the raw method group with the wrapper's <code>.Handler</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update both call sites</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney money;</code> (around line 213):</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>In the constructor (around line 24-37), add as the first line:</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>before <code>this.InitializeComponent();</code>. Then update the <code>Unloaded</code> lambda (around line 30-36) — <strong>keep the <code>+=</code> exactly as it is today, this is a pre-existing anomaly, not something to fix</strong>:</p>
+<pre><code class="language-csharp">// Before:
+Unloaded += (s, e) =&gt;
+{
+    if (this.money != null)
+    {
+        this.money.Changed += this.OnMoneyChanged;
+    }
+};
+
+// After:
+Unloaded += (s, e) =&gt;
+{
+    if (this.money != null)
+    {
+        this.money.Changed += this.onMoneyChangedUi.Handler;
+    }
+};
+</code></pre>
+<p>Then the <code>Money</code> property setter (around lines 220-233):</p>
+<pre><code class="language-csharp">// Before:
+if (this.money != null)
+{
+    this.money.Changed -= this.OnMoneyChanged;
+}
+
+this.money = value;
+
+if (this.money != null)
+{
+    this.money.Changed += this.OnMoneyChanged;
+    this.ShowAliases();
+}
+
+// After:
+if (this.money != null)
+{
+    this.money.Changed -= this.onMoneyChangedUi.Handler;
+}
+
+this.money = value;
+
+if (this.money != null)
+{
+    this.money.Changed += this.onMoneyChangedUi.Handler;
+    this.ShowAliases();
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Views/AliasesView.xaml.cs
+git commit -m &quot;Migrate AliasesView.xaml.cs's Money.Changed subscriptions to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-7-migrate-view-selectorsaccountscontrolxamlcs">Task 7: Migrate <code>View Selectors/AccountsControl.xaml.cs</code><a class="headerlink" href="#task-7-migrate-view-selectorsaccountscontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/AccountsControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file has 3 subscriptions in the <code>MyMoney</code> property setter: <code>Accounts.Changed</code>, <code>Changed</code>, and <code>Rebalanced</code>. All three handler methods differ, so this needs 3 separate <code>UiThreadHandler</code> fields.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the 3 fields and update the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<p>Add fields near <code>private MyMoney myMoney;</code>:</p>
+<pre><code class="language-csharp">private UiThreadHandler onAccountsChangedUi;
+private UiThreadHandler onMoneyChangedUi;
+private UiThreadHandler onBalanceChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first lines:</p>
+<pre><code class="language-csharp">this.onAccountsChangedUi = new UiThreadHandler(this.OnAccountsChanged);
+this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+</code></pre>
+<p>Then update the <code>MyMoney</code> property setter (around lines 117-136):</p>
+<pre><code class="language-csharp">// Before:
+if (this.myMoney != null)
+{
+    this.myMoney.Accounts.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnAccountsChanged);
+    this.myMoney.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+    this.myMoney.Rebalanced -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+}
+this.myMoney = value;
+this.Select(null);
+
+if (value != null)
+{
+    this.myMoney.Accounts.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnAccountsChanged);
+    this.myMoney.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+    this.myMoney.Rebalanced += new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+    this.OnAccountsChanged(this, new ChangeEventArgs(this.myMoney.Accounts, null, ChangeType.Reloaded));
+}
+
+// After:
+if (this.myMoney != null)
+{
+    this.myMoney.Accounts.Changed -= this.onAccountsChangedUi.Handler;
+    this.myMoney.Changed -= this.onMoneyChangedUi.Handler;
+    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+}
+this.myMoney = value;
+this.Select(null);
+
+if (value != null)
+{
+    this.myMoney.Accounts.Changed += this.onAccountsChangedUi.Handler;
+    this.myMoney.Changed += this.onMoneyChangedUi.Handler;
+    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+    this.OnAccountsChanged(this, new ChangeEventArgs(this.myMoney.Accounts, null, ChangeType.Reloaded));
+}
+</code></pre>
+<p>(Do not touch <code>this.databaseSettings.PropertyChanged</code> in the same file — its source, <code>DatabaseSettings</code>, implements <code>INotifyPropertyChanged</code> directly and never goes through <code>EventHandlerCollection</code>; it's unaffected by this rewrite. Do not touch <code>AccountItemViewModel</code>'s <code>this.account.PropertyChanged</code> either — that class is a plain, non-<code>DependencyObject</code> view-model, already synchronous today, out of scope.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/AccountsControl.xaml.cs&quot;
+git commit -m &quot;Migrate AccountsControl.xaml.cs's Changed/Rebalanced subscriptions to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-8-migrate-view-selectorsbalancecontrolxamlcs">Task 8: Migrate <code>View Selectors/BalanceControl.xaml.cs</code><a class="headerlink" href="#task-8-migrate-view-selectorsbalancecontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/BalanceControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p><strong>Preserve the pre-existing anomaly exactly</strong>: this subscription is not in a property setter — it's inside a method that runs an unconditional <code>-=</code> immediately followed by <code>+=</code> every time that method is called (a defensive re-subscribe pattern used for several unrelated events in the same method). The <code>UiThreadHandler</code> field must be a class-level field constructed <strong>once</strong>, not re-constructed inside that method, or each call would produce a different wrapper and the pair would stop matching.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update the two call sites</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney myMoney;</code> (around line 22):</p>
+<pre><code class="language-csharp">private UiThreadHandler onTransactionsChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first line:</p>
+<pre><code class="language-csharp">this.onTransactionsChangedUi = new UiThreadHandler(this.Transactions_Changed);
+</code></pre>
+<p>Then update the two lines inside the method that does the defensive re-subscribe (around lines 152-153):</p>
+<pre><code class="language-csharp">// Before:
+this.myMoney.Transactions.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.Transactions_Changed);
+this.myMoney.Transactions.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.Transactions_Changed);
+
+// After:
+this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
+this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/BalanceControl.xaml.cs&quot;
+git commit -m &quot;Migrate BalanceControl.xaml.cs's Transactions.Changed subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-9-migrate-view-selectorspayeescontrolxamlcs">Task 9: Migrate <code>View Selectors/PayeesControl.xaml.cs</code><a class="headerlink" href="#task-9-migrate-view-selectorspayeescontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/PayeesControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file has 3 subscriptions in the <code>MyMoney</code> property setter: <code>Payees.Changed</code>, <code>Rebalanced</code>, <code>Transactions.Changed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the 3 fields and update the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<p>Add fields near <code>private MyMoney myMoney;</code> (around line 25):</p>
+<pre><code class="language-csharp">private UiThreadHandler onPayeesChangedUi;
+private UiThreadHandler onBalanceChangedUi;
+private UiThreadHandler onTransactionsChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first lines:</p>
+<pre><code class="language-csharp">this.onPayeesChangedUi = new UiThreadHandler(this.OnPayeesChanged);
+this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+this.onTransactionsChangedUi = new UiThreadHandler(this.OnTransactionsChanged);
+</code></pre>
+<p>Then update the <code>MyMoney</code> property setter (around lines 28-49):</p>
+<pre><code class="language-csharp">// Before:
+if (this.myMoney != null)
+{
+    this.myMoney.Payees.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnPayeesChanged);
+    this.myMoney.Rebalanced -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+    this.myMoney.Transactions.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnTransactionsChanged);
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Payees.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnPayeesChanged);
+    this.myMoney.Rebalanced += new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+    this.myMoney.Transactions.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnTransactionsChanged);
+
+    this.OnPayeesChanged(this, new ChangeEventArgs(this.myMoney.Payees, null, ChangeType.Reloaded));
+}
+
+// After:
+if (this.myMoney != null)
+{
+    this.myMoney.Payees.Changed -= this.onPayeesChangedUi.Handler;
+    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+    this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Payees.Changed += this.onPayeesChangedUi.Handler;
+    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+    this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
+
+    this.OnPayeesChanged(this, new ChangeEventArgs(this.myMoney.Payees, null, ChangeType.Reloaded));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/PayeesControl.xaml.cs&quot;
+git commit -m &quot;Migrate PayeesControl.xaml.cs's Changed/Rebalanced subscriptions to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-10-migrate-view-selectorscategoriescontrolxamlcs">Task 10: Migrate <code>View Selectors/CategoriesControl.xaml.cs</code><a class="headerlink" href="#task-10-migrate-view-selectorscategoriescontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/CategoriesControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney money;</code> (this class's field is named <code>money</code>, not <code>myMoney</code> — confirm the exact field name in the file before editing):</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first line:</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>Then update the <code>MyMoney</code> property setter (around lines 87-103):</p>
+<pre><code class="language-csharp">// Before:
+if (this.money != null)
+{
+    this.money.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+}
+this.money = value;
+if (value != null)
+{
+    this.money.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+    this.OnMoneyChanged(this, new ChangeEventArgs(this.money.Categories, null, ChangeType.Reloaded));
+}
+
+// After:
+if (this.money != null)
+{
+    this.money.Changed -= this.onMoneyChangedUi.Handler;
+}
+this.money = value;
+if (value != null)
+{
+    this.money.Changed += this.onMoneyChangedUi.Handler;
+    this.OnMoneyChanged(this, new ChangeEventArgs(this.money.Categories, null, ChangeType.Reloaded));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/CategoriesControl.xaml.cs&quot;
+git commit -m &quot;Migrate CategoriesControl.xaml.cs's Money.Changed subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-11-migrate-view-selectorssecuritiescontrolxamlcs">Task 11: Migrate <code>View Selectors/SecuritiesControl.xaml.cs</code><a class="headerlink" href="#task-11-migrate-view-selectorssecuritiescontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/SecuritiesControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file has 3 subscriptions in the <code>MyMoney</code> property setter: <code>Securities.Changed</code>, <code>Rebalanced</code>, <code>Transactions.Changed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the 3 fields and update the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<p>Add fields next to <code>private MyMoney myMoney;</code> (around line 27):</p>
+<pre><code class="language-csharp">private UiThreadHandler onSecuritiesChangedUi;
+private UiThreadHandler onBalanceChangedUi;
+private UiThreadHandler onTransactionsChangedUi;
+</code></pre>
+<p>Find this class's constructor and add as its first lines:</p>
+<pre><code class="language-csharp">this.onSecuritiesChangedUi = new UiThreadHandler(this.OnSecuritiesChanged);
+this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+this.onTransactionsChangedUi = new UiThreadHandler(this.OnTransactionsChanged);
+</code></pre>
+<p>Then update the <code>MyMoney</code> property setter (around lines 29-50):</p>
+<pre><code class="language-csharp">// Before:
+if (this.myMoney != null)
+{
+    this.myMoney.Securities.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnSecuritiesChanged);
+    this.myMoney.Rebalanced -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+    this.myMoney.Transactions.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnTransactionsChanged);
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Securities.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnSecuritiesChanged);
+    this.myMoney.Rebalanced += new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+    this.myMoney.Transactions.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnTransactionsChanged);
+
+    this.OnSecuritiesChanged(this, new ChangeEventArgs(this.myMoney.Securities, null, ChangeType.Reloaded));
+}
+
+// After:
+if (this.myMoney != null)
+{
+    this.myMoney.Securities.Changed -= this.onSecuritiesChangedUi.Handler;
+    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+    this.myMoney.Transactions.Changed -= this.onTransactionsChangedUi.Handler;
+}
+this.myMoney = value;
+if (value != null)
+{
+    this.myMoney.Securities.Changed += this.onSecuritiesChangedUi.Handler;
+    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+    this.myMoney.Transactions.Changed += this.onTransactionsChangedUi.Handler;
+
+    this.OnSecuritiesChanged(this, new ChangeEventArgs(this.myMoney.Securities, null, ChangeType.Reloaded));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/SecuritiesControl.xaml.cs&quot;
+git commit -m &quot;Migrate SecuritiesControl.xaml.cs's Changed/Rebalanced subscriptions to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-12-migrate-view-selectorsrentscontrolxamlcs">Task 12: Migrate <code>View Selectors/RentsControl.xaml.cs</code><a class="headerlink" href="#task-12-migrate-view-selectorsrentscontrolxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/View Selectors/RentsControl.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file was missing from the original (incomplete) audit — it has only one subscription, <code>Rebalanced</code>, no <code>.Changed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<p>Add a field next to <code>private MyMoney myMoney;</code> (around line 29):</p>
+<pre><code class="language-csharp">private UiThreadHandler onBalanceChangedUi;
+</code></pre>
+<p>In the constructor (around lines 18-23), add as the first line:</p>
+<pre><code class="language-csharp">this.onBalanceChangedUi = new UiThreadHandler(this.OnBalanceChanged);
+</code></pre>
+<p>before <code>this.InitializeComponent();</code>. Then update the <code>MyMoney</code> property setter (around lines 31-59):</p>
+<pre><code class="language-csharp">// Before:
+if (this.myMoney != null)
+{
+    this.myMoney.Rebalanced -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+}
+
+this.myMoney = value;
+
+if (this.myMoney == null)
+{
+    // TO DO - clear the list of existing building if any
+}
+else
+{
+    this.myMoney.Rebalanced += new EventHandler&lt;ChangeEventArgs&gt;(this.OnBalanceChanged);
+
+    // Fire initial change to display the Buildings in they new Money db
+    this.OnBalanceChanged(value.Buildings, new ChangeEventArgs(value.Buildings, null, ChangeType.Reloaded));
+}
+
+// After:
+if (this.myMoney != null)
+{
+    this.myMoney.Rebalanced -= this.onBalanceChangedUi.Handler;
+}
+
+this.myMoney = value;
+
+if (this.myMoney == null)
+{
+    // TO DO - clear the list of existing building if any
+}
+else
+{
+    this.myMoney.Rebalanced += this.onBalanceChangedUi.Handler;
+
+    // Fire initial change to display the Buildings in they new Money db
+    this.OnBalanceChanged(value.Buildings, new ChangeEventArgs(value.Buildings, null, ChangeType.Reloaded));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add &quot;Source/WPF/MyMoney/View Selectors/RentsControl.xaml.cs&quot;
+git commit -m &quot;Migrate RentsControl.xaml.cs's Rebalanced subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-13-migrate-dialogsaccountdialogxamlcs">Task 13: Migrate <code>Dialogs/AccountDialog.xaml.cs</code><a class="headerlink" href="#task-13-migrate-dialogsaccountdialogxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Dialogs/AccountDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This dialog is transient (opened/closed repeatedly) — exactly the scenario the concurrency panelist flagged as at risk with a bare wrapping function. <code>money</code> is a constructor parameter here, not a field; the wrapper must be stored in a new field so the same instance is available in both the subscribe line and the <code>Unloaded</code> lambda's unsubscribe line.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update both call sites</strong></li>
+</ul>
+<p>Add a field to the class (near other private fields):</p>
+<pre><code class="language-csharp">private UiThreadHandler onMoneyChangedUi;
+</code></pre>
+<p>In the constructor, before the existing subscribe line (around line 91), add:</p>
+<pre><code class="language-csharp">this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);
+</code></pre>
+<p>Then update both call sites (around lines 91-96):</p>
+<pre><code class="language-csharp">// Before:
+money.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+
+Unloaded += (s, e) =&gt;
+{
+    money.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+};
+
+// After:
+money.Changed += this.onMoneyChangedUi.Handler;
+
+Unloaded += (s, e) =&gt;
+{
+    money.Changed -= this.onMoneyChangedUi.Handler;
+};
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/AccountDialog.xaml.cs
+git commit -m &quot;Migrate AccountDialog.xaml.cs's Money.Changed subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-14-migrate-dialogsrenamepayeedialogxamlcs">Task 14: Migrate <code>Dialogs/RenamePayeeDialog.xaml.cs</code><a class="headerlink" href="#task-14-migrate-dialogsrenamepayeedialogxamlcs" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Dialogs/RenamePayeeDialog.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This file already has an existing <code>readonly EventHandler&lt;ChangeEventArgs&gt; handler</code> field, assigned once in the constructor and consistently reused for both subscribe and unsubscribe — this is already exactly the "wrap once, reuse the same reference" shape this design needs. Migrate by changing the field's type, not by adding a new field.</p>
+<ul>
+<li>[ ] <strong>Step 1: Change the field's declared type and initializer</strong></li>
+</ul>
+<pre><code class="language-csharp">// Before (around line 18):
+private readonly EventHandler&lt;ChangeEventArgs&gt; handler;
+
+// After:
+private readonly UiThreadHandler handler;
+</code></pre>
+<pre><code class="language-csharp">// Before (around line 126, in the constructor):
+this.handler = new EventHandler&lt;ChangeEventArgs&gt;(this.OnPayees_Changed);
+
+// After:
+this.handler = new UiThreadHandler(this.OnPayees_Changed);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Update both usages in the <code>MyMoney</code> property setter</strong></li>
+</ul>
+<pre><code class="language-csharp">// Before (around lines 27-37):
+set
+{
+    if (this.money != null)
+    {
+        this.money.Payees.Changed -= this.handler;
+    }
+    this.money = value;
+    if (this.money != null)
+    {
+        this.money.Payees.Changed -= this.handler;
+        this.money.Payees.Changed += this.handler;
+    }
+    this.LoadPayees();
+}
+
+// After:
+set
+{
+    if (this.money != null)
+    {
+        this.money.Payees.Changed -= this.handler.Handler;
+    }
+    this.money = value;
+    if (this.money != null)
+    {
+        this.money.Payees.Changed -= this.handler.Handler;
+        this.money.Payees.Changed += this.handler.Handler;
+    }
+    this.LoadPayees();
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 4: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/RenamePayeeDialog.xaml.cs
+git commit -m &quot;Migrate RenamePayeeDialog.xaml.cs's handler field to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-15-migrate-mainwindowxamlcss-onchangedui-subscription">Task 15: Migrate <code>MainWindow.xaml.cs</code>'s <code>OnChangedUI</code> subscription<a class="headerlink" href="#task-15-migrate-mainwindowxamlcss-onchangedui-subscription" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>UiThreadHandler</code> (Task 1).</p>
+<p>This handler (<code>OnChangedUI</code>) is referenced at 3 line locations, all in <code>MainWindow.xaml.cs</code>: an unconditional unsubscribe in <code>StopTracking()</code> (around line 585), and an unsubscribe-then-subscribe pair elsewhere (around lines 597-598).</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the field and update all 3 call sites</strong></li>
+</ul>
+<p>Add a field near other private fields in <code>MainWindow</code>:</p>
+<pre><code class="language-csharp">private UiThreadHandler onChangedUiHandler;
+</code></pre>
+<p>This class has two constructors, <code>MainWindow()</code> and <code>MainWindow(Settings settings)</code> — add this as the first executable statement in <strong>both</strong> (each constructor already has one or more <code>UiDispatcher.CurrentContext = ...</code> assignments from Task 1; this new line doesn't need to be adjacent to those, just present once per constructor, before anything that could raise <code>Changed</code>):</p>
+<pre><code class="language-csharp">this.onChangedUiHandler = new UiThreadHandler(this.OnChangedUI);
+</code></pre>
+<p>Then update <code>StopTracking()</code> (around line 585):</p>
+<pre><code class="language-csharp">// Before:
+this.myMoney.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnChangedUI);
+
+// After:
+this.myMoney.Changed -= this.onChangedUiHandler.Handler;
+</code></pre>
+<p>And the other pair (around lines 597-598):</p>
+<pre><code class="language-csharp">// Before:
+this.myMoney.Changed -= new EventHandler&lt;ChangeEventArgs&gt;(this.OnChangedUI);
+this.myMoney.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnChangedUI);
+
+// After:
+this.myMoney.Changed -= this.onChangedUiHandler.Handler;
+this.myMoney.Changed += this.onChangedUiHandler.Handler;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 3: Test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MainWindow.xaml.cs
+git commit -m &quot;Migrate MainWindow.xaml.cs's OnChangedUI subscription to UiThreadHandler&quot;
+</code></pre>
+<hr />
+<h3 id="task-16-characterization-tests-for-mathhelpers-write-against-current-unmigrated-behavior">Task 16: Characterization tests for <code>MathHelpers</code> (write against current, unmigrated behavior)<a class="headerlink" href="#task-16-characterization-tests-for-mathhelpers-write-against-current-unmigrated-behavior" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/MathHelpersTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Walkabout.Utilities.MathHelpers</code> (existing, unmigrated — still <code>System.Windows.Point</code>-based at this point in the plan).
+- Produces: a fixed set of numeric expectations that Task 17 must continue to satisfy after migrating the type.</p>
+<p><strong>Context</strong>: Task 16's original attempt (tightening <code>LayerBoundaryTests</code>) discovered mid-implementation
+that <code>MyMoney.Business</code> still needs <code>WindowsBase</code> for an unrelated reason — <code>System.Windows.Point</code> in
+<code>MathHelpers.cs</code>/<code>NativeMethods.cs</code>. See <code>docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md</code>'s
+"Characterization tests for <code>MathHelpers</code>" section for the full rationale: no test coverage exists
+anywhere for this code today, despite <code>Payments.cs</code> depending on it for real bill/loan amortization
+outlier detection. This task writes that coverage <strong>before</strong> Task 17 changes the type, so the
+migration can be verified as behavior-preserving.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the characterization tests</strong></li>
+</ul>
+<pre><code class="language-csharp">using NUnit.Framework;
+using System.Windows;
+using Walkabout.Utilities;
+
+namespace Walkabout.Tests
+{
+    public class MathHelpersTests
+    {
+        [Test]
+        public void LinearRegression_PerfectlyLinearSeries_ReturnsExactSlopeAndIntercept()
+        {
+            // x implied as 1..N; y = 1 + 2x for x=1..5 gives y = [3, 5, 7, 9, 11].
+            MathHelpers.LinearRegression(new double[] { 3, 5, 7, 9, 11 }, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(1.0).Within(0.0001));
+            Assert.That(b, Is.EqualTo(2.0).Within(0.0001));
+        }
+
+        [Test]
+        public void LinearRegression_NoisySeries_ReturnsHandComputedSlopeAndIntercept()
+        {
+            // x implied as 1..5, y = [2, 4, 5, 4, 5]. Hand-computed OLS: meanX=3, meanY=4,
+            // covariance-sum=6, variance-sum(x)=10, b=6/10=0.6, a=4-0.6*3=2.2.
+            MathHelpers.LinearRegression(new double[] { 2, 4, 5, 4, 5 }, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(2.2).Within(0.0001));
+            Assert.That(b, Is.EqualTo(0.6).Within(0.0001));
+        }
+
+        [Test]
+        public void Covariance_PerfectlyLinearPoints_ReturnsHandComputedSum()
+        {
+            // (1,3), (2,5), (3,7): meanX=2, meanY=5. Covariance is a raw sum of products of
+            // deviations (not divided by count, per this method's own implementation) =
+            // (-1*-2) + (0*0) + (1*2) = 4.
+            var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+            Assert.That(MathHelpers.Covariance(points), Is.EqualTo(4.0).Within(0.0001));
+        }
+
+        [Test]
+        public void LinearRegression_PointBasedOverload_MatchesHandComputedValues()
+        {
+            // Same (1,3), (2,5), (3,7) - perfectly linear y = 1 + 2x, so a=1, b=2.
+            var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+            MathHelpers.LinearRegression(points, out double a, out double b);
+
+            Assert.That(a, Is.EqualTo(1.0).Within(0.0001));
+            Assert.That(b, Is.EqualTo(2.0).Within(0.0001));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run the tests to verify they pass against the CURRENT (unmigrated) code</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~MathHelpersTests"</code>
+Expected: 4/4 pass. If any fail, the hand-computed expected values above are wrong — recompute them,
+do not adjust the assertions to match whatever the code currently outputs (that would validate
+nothing).</p>
+<ul>
+<li>[ ] <strong>Step 3: Run the full test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions (4 new tests added to the prior total).</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/MathHelpersTests.cs
+git commit -m &quot;Add characterization tests for MathHelpers before migrating its Point usage&quot;
+</code></pre>
+<hr />
+<h3 id="task-17-migrate-systemwindowspoint-to-double-x-double-y">Task 17: Migrate <code>System.Windows.Point</code> to <code>(double X, double Y)</code><a class="headerlink" href="#task-17-migrate-systemwindowspoint-to-double-x-double-y" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Utilities/DragAndDrop.cs</code>
+- Modify: <code>Source/WPF/UnitTests/MathHelpersTests.cs</code> (from Task 16 — update inputs only, not expected outputs)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: Task 16's characterization tests as the correctness oracle for this migration.
+- Produces: <code>MathHelpers.Covariance(IEnumerable&lt;(double X, double Y)&gt;)</code>,
+  <code>MathHelpers.LinearRegression(IEnumerable&lt;(double X, double Y)&gt;, out double, out double)</code>,
+  <code>NativeMethods.GetMousePosition()</code> returning <code>(double X, double Y)</code> — no later task consumes these
+  further within this plan, but this is the actual completion of issue #7's stated goal.</p>
+<p>Full exact code for every file is in <code>docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md</code>'s
+"Design: <code>System.Windows.Point</code> → <code>(double X, double Y)</code> migration" section — read it before starting.</p>
+<ul>
+<li>[ ] <strong>Step 1: Re-verify the migration's scope before touching anything</strong></li>
+</ul>
+<p>The spec's own account of which files/callers are affected was itself discovered by exploration, not
+planned from the start — re-confirm it rather than assume it's exhaustive:</p>
+<p>Run: <code>grep -rln "System.Windows.Point\|using System.Windows;" Source/WPF/MyMoney.Business --include=*.cs</code>
+Expected: exactly <code>Utilities/MathHelpers.cs</code> and <code>Utilities/NativeMethods.cs</code>. If anything else
+appears, stop and report it before proceeding — it means the scope is larger than this task assumes.</p>
+<p>Run: <code>grep -rn "NativeMethods.GetMousePosition\(\)" Source/WPF --include=*.cs</code>
+Expected: exactly one call site, <code>Source/WPF/MyMoney/Utilities/DragAndDrop.cs</code>.</p>
+<p>Run: <code>grep -rn "MathHelpers\.\(Covariance\|LinearRegression\)" Source/WPF --include=*.cs</code>
+Expected: <code>Payments.cs</code> (double-only overload, 2 sites) and <code>HistoryBarChart.xaml.cs</code> (<code>Point</code>-based
+overload, 1 site). <code>Covariance</code> itself should have no external callers (only used internally by the
+<code>Point</code>-based <code>LinearRegression</code> overload).</p>
+<ul>
+<li>[ ] <strong>Step 2: Migrate <code>MathHelpers.cs</code></strong></li>
+</ul>
+<p>Remove <code>using System.Windows;</code>. Change <code>Covariance(IEnumerable&lt;Point&gt; pts)</code> to
+<code>Covariance(IEnumerable&lt;(double X, double Y)&gt; pts)</code>:</p>
+<pre><code class="language-csharp">public static double Covariance(IEnumerable&lt;(double X, double Y)&gt; pts)
+{
+    double xsum = 0;
+    double ysum = 0;
+    double count = 0;
+    foreach (var d in pts)
+    {
+        xsum += d.X;
+        ysum += d.Y;
+        count++;
+    }
+    if (count == 0)
+    {
+        return 0;
+    }
+
+    double xMean = xsum / count;
+    double yMean = ysum / count;
+    double covariance = 0;
+    foreach (var d in pts)
+    {
+        covariance += (d.X - xMean) * (d.Y - yMean);
+    }
+    return covariance;
+}
+</code></pre>
+<p>Change the double-only <code>LinearRegression</code> overload's internal point list:</p>
+<pre><code class="language-csharp">public static void LinearRegression(IEnumerable&lt;double&gt; pts, out double a, out double b)
+{
+    List&lt;(double X, double Y)&gt; pts2 = new List&lt;(double X, double Y)&gt;(pts.Count());
+    double x = 1;
+    foreach (double y in pts)
+    {
+        pts2.Add((x++, y));
+    }
+    LinearRegression(pts2, out a, out b);
+}
+</code></pre>
+<p>Change the <code>Point</code>-based <code>LinearRegression</code> overload's signature only (body is unchanged — the LINQ
+projections <code>from p in pts select p.X</code> work identically on a named tuple):</p>
+<pre><code class="language-csharp">public static void LinearRegression(IEnumerable&lt;(double X, double Y)&gt; pts, out double a, out double b)
+{
+    double xMean = Mean(from p in pts select p.X);
+    double yMean = Mean(from p in pts select p.Y);
+    double xVariance = Variance(from p in pts select p.X);
+    double yVariance = Variance(from p in pts select p.Y);
+    double covariance = Covariance(pts);
+    if (xVariance == 0)
+    {
+        a = yMean;
+        b = 1;
+    }
+    else
+    {
+        b = covariance / xVariance;
+        a = yMean - (b * xMean);
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Migrate <code>NativeMethods.cs</code></strong></li>
+</ul>
+<pre><code class="language-csharp">// Before:
+public static System.Windows.Point GetMousePosition()
+{
+    NativeMethods.POINT p;
+    if (!NativeMethods.GetCursorPos(out p))
+    {
+        return new System.Windows.Point(0, 0);
+    }
+
+    // Convert pixels to device independent WPF coordinates
+    return new System.Windows.Point(ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
+}
+
+// After:
+public static (double X, double Y) GetMousePosition()
+{
+    NativeMethods.POINT p;
+    if (!NativeMethods.GetCursorPos(out p))
+    {
+        return (0, 0);
+    }
+
+    // Convert pixels to device independent WPF coordinates
+    return (ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Update <code>HistoryBarChart.xaml.cs</code>'s <code>ComputeLinearRegression()</code></strong></li>
+</ul>
+<p><code>points</code> here is a purely local variable feeding <code>MathHelpers.LinearRegression</code> — never used for WPF
+rendering (confirmed by reading the full method during this plan's design):</p>
+<pre><code class="language-csharp">// Before:
+double x = 0;
+List&lt;Point&gt; points = new List&lt;Point&gt;();
+foreach (HistoryChartColumn c in this.collection)
+{
+    if ((c == last || c == last) &amp;&amp; c.Values.Count() &lt; (avg / 2))
+    {
+        // skip it.
+        continue;
+    }
+
+    points.Add(new Point(x++, (double)c.Amount));
+}
+
+// After:
+double x = 0;
+List&lt;(double X, double Y)&gt; points = new List&lt;(double X, double Y)&gt;();
+foreach (HistoryChartColumn c in this.collection)
+{
+    if ((c == last || c == last) &amp;&amp; c.Values.Count() &lt; (avg / 2))
+    {
+        // skip it.
+        continue;
+    }
+
+    points.Add((x++, (double)c.Amount));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Update <code>DragAndDrop.cs</code>'s <code>UpdateWindowLocation()</code></strong></li>
+</ul>
+<pre><code class="language-csharp">// Before:
+private void UpdateWindowLocation()
+{
+    if (this.dragdropWindow != null)
+    {
+        Point pos = NativeMethods.GetMousePosition();
+        this.dragdropWindow.Left = pos.X + 10;
+        this.dragdropWindow.Top = pos.Y + 10;
+    }
+}
+
+// After:
+private void UpdateWindowLocation()
+{
+    if (this.dragdropWindow != null)
+    {
+        var pos = NativeMethods.GetMousePosition();
+        this.dragdropWindow.Left = pos.X + 10;
+        this.dragdropWindow.Top = pos.Y + 10;
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Update <code>MathHelpersTests.cs</code>'s inputs (Task 16) — expected outputs do not change</strong></li>
+</ul>
+<pre><code class="language-csharp">// Before:
+using System.Windows;
+...
+var points = new[] { new Point(1, 3), new Point(2, 5), new Point(3, 7) };
+
+// After: remove the `using System.Windows;` line entirely, and everywhere `points` is
+// constructed in this file:
+var points = new[] { (1.0, 3.0), (2.0, 5.0), (3.0, 7.0) };
+</code></pre>
+<p>Apply this to both <code>Covariance_PerfectlyLinearPoints_ReturnsHandComputedSum</code> and
+<code>LinearRegression_PointBasedOverload_MatchesHandComputedValues</code>. Do not change any <code>Assert.That(...)</code>
+expected value in this file — identical results after this migration is exactly what proves it
+preserved behavior.</p>
+<ul>
+<li>[ ] <strong>Step 7: Add a minimal sanity test for <code>NativeMethods.GetMousePosition()</code>'s new signature</strong></li>
+</ul>
+<p>This method reads the real OS mouse position, so only its shape (doesn't throw, returns a
+well-formed pair) can be meaningfully asserted — not exact coordinates:</p>
+<pre><code class="language-csharp">[Test]
+public void GetMousePosition_ReturnsWithoutThrowing()
+{
+    Assert.DoesNotThrow(() =&gt; NativeMethods.GetMousePosition());
+}
+</code></pre>
+<p>Add this to <code>MathHelpersTests.cs</code> (add <code>using Walkabout.Utilities;</code> if not already present via
+<code>MathHelpers</code>'s own namespace — confirm <code>NativeMethods</code> is in the same namespace before assuming no
+new <code>using</code> is needed).</p>
+<ul>
+<li>[ ] <strong>Step 8: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build. (<code>MyMoney.Business.csproj</code> still carries its <code>FrameworkReference</code> at this
+point — that's Task 18 — so this build should succeed without any csproj changes yet.)</p>
+<ul>
+<li>[ ] <strong>Step 9: Run the full test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass. The 4 characterization tests from Task 16 must produce <strong>identical</strong> results to
+before this migration — that is the proof this change is behavior-preserving. The new
+<code>GetMousePosition_ReturnsWithoutThrowing</code> test also passes.</p>
+<ul>
+<li>[ ] <strong>Step 10: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs Source/WPF/MyMoney/Utilities/DragAndDrop.cs Source/WPF/UnitTests/MathHelpersTests.cs
+git commit -m &quot;Migrate System.Windows.Point usage to (double X, double Y) tuples&quot;
+</code></pre>
+<hr />
+<h3 id="task-18-remove-mymoneybusinesscsprojs-wpf-frameworkreference-and-guard-targets">Task 18: Remove <code>MyMoney.Business.csproj</code>'s WPF <code>FrameworkReference</code> and guard targets<a class="headerlink" href="#task-18-remove-mymoneybusinesscsprojs-wpf-frameworkreference-and-guard-targets" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: Task 17's completion (nothing in <code>MyMoney.Business</code> references <code>System.Windows.Point</code>
+  anymore) plus Tasks 1-15's completion (nothing references <code>Dispatcher</code>/<code>DependencyObject</code> anymore).</p>
+<ul>
+<li>[ ] <strong>Step 1: Re-verify nothing else in <code>MyMoney.Business</code> needs <code>WindowsBase</code></strong></li>
+</ul>
+<p>Run: <code>grep -rln "System.Windows" Source/WPF/MyMoney.Business --include=*.cs</code>
+Expected: no output. If anything appears, stop — this task cannot proceed until that reference is
+also resolved (it means the scope mapped by this plan and its spec was incomplete).</p>
+<ul>
+<li>[ ] <strong>Step 2: Remove the FrameworkReference and both guard targets</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>, remove:</p>
+<ol>
+<li>The <code>&lt;ItemGroup&gt;</code> containing <code>&lt;FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" /&gt;</code>.</li>
+<li>The doc comment immediately above the <code>RemoveWpfViewRenderingAssemblies</code> target, and the target
+   itself:
+   <code>xml
+   &lt;Target Name="RemoveWpfViewRenderingAssemblies" BeforeTargets="ResolveAssemblyReferences" AfterTargets="ResolveFrameworkReferences"&gt;
+     &lt;ItemGroup&gt;
+       &lt;Reference Remove="@(Reference)" Condition="$([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(Reference.FileName)').StartsWith('PresentationUI'))" /&gt;
+     &lt;/ItemGroup&gt;
+   &lt;/Target&gt;</code></li>
+<li>The doc comment immediately above the <code>VerifyNoWpfViewRenderingAssemblies</code> target (it references
+   issue #11 as its own rationale — leave issue #11 itself alone, it documented why the self-test
+   existed; the self-test's job is now <code>LayerBoundaryTests</code>' job), and the target itself:
+   <code>xml
+   &lt;Target Name="VerifyNoWpfViewRenderingAssemblies" AfterTargets="ResolveAssemblyReferences"&gt;
+     &lt;ItemGroup&gt;
+       &lt;_LeakedWpfViewRenderingAssembly Include="@(ReferencePath)" Condition="$([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationCore')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationFramework')) Or $([System.String]::Copy('%(ReferencePath.FileName)').StartsWith('PresentationUI'))" /&gt;
+     &lt;/ItemGroup&gt;
+     &lt;Error Condition="'@(_LeakedWpfViewRenderingAssembly)' != ''"
+            Text="MyMoney.Business must never reference WPF UI-rendering assemblies, but RemoveWpfViewRenderingAssemblies failed to strip: @(_LeakedWpfViewRenderingAssembly). This target's Remove condition may no longer match this SDK's ResolveAssemblyReferences/ResolveFrameworkReferences target ordering." /&gt;
+   &lt;/Target&gt;</code></li>
+</ol>
+<p>After removal, <code>MyMoney.Business.csproj</code> should have no <code>FrameworkReference</code> <code>ItemGroup</code> and no
+<code>Target</code> elements at all — structurally identical to <code>MyMoney.Data.csproj</code> in this respect (confirm
+this by reading <code>Source/WPF/MyMoney.Data/MyMoney.Data.csproj</code> for comparison if it exists in this
+solution).</p>
+<ul>
+<li>[ ] <strong>Step 3: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build. If this fails with a missing-type error referencing anything in
+<code>WindowsBase</code>/<code>PresentationCore</code>/<code>PresentationFramework</code>, Step 1's verification missed something —
+do not re-add the <code>FrameworkReference</code> as a workaround; find and fix the actual remaining reference.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run the full test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, no regressions.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/MyMoney.Business.csproj
+git commit -m &quot;Remove MyMoney.Business's now-dead WPF FrameworkReference and guard targets&quot;
+</code></pre>
+<hr />
+<h3 id="task-19-tighten-layerboundarytests-final-full-regression-and-manual-smoke-test-callout">Task 19: Tighten <code>LayerBoundaryTests</code>, final full regression, and manual smoke-test callout<a class="headerlink" href="#task-19-tighten-layerboundarytests-final-full-regression-and-manual-smoke-test-callout" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/UnitTests/LayerBoundaryTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: Tasks 1-18's combined completion — this is the acceptance gate for the whole plan.</p>
+<ul>
+<li>[ ] <strong>Step 1: Verify there is no remaining WPF-family reference in <code>MyMoney.Business</code></strong></li>
+</ul>
+<p>Before editing the test, confirm the claim it's about to assert is actually true. This should now
+genuinely pass, having failed at this exact point once already (Task 17/18 exist because of that):</p>
+<p>Run: <code>grep -rln "System.Windows" Source/WPF/MyMoney.Business --include=*.cs</code>
+Expected: no output. If anything appears, stop — Tasks 1-18 are not actually complete.</p>
+<ul>
+<li>[ ] <strong>Step 2: Tighten <code>MyMoneyBusiness_HasNoUiRenderingAssemblyReference</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/UnitTests/LayerBoundaryTests.cs</code>, update the class doc comment and the test itself:</p>
+<pre><code class="language-csharp">// Before:
+// MyMoney.Business is allowed WindowsBase (the domain model's
+// event-marshaling backbone has a load-bearing dependency on
+// System.Windows.Threading.Dispatcher/DependencyObject -- Ruling,
+// 2026-09-15, see the plan's Global Constraints) but never the two
+// true UI-rendering assemblies. MyMoney.Data forbids all three --
+// nothing in it needs WindowsBase even transitively through its own
+// direct references (it only reaches MyMoney.Business's WindowsBase
+// dependency via the ProjectReference, which GetReferencedAssemblies
+// does not surface -- that method returns only an assembly's own
+// direct references).
+
+// After:
+// MyMoney.Business and MyMoney.Data both forbid all three WPF-family
+// assemblies. MyMoney.Business's former WindowsBase dependency (the
+// domain model's event-marshaling backbone had a load-bearing
+// dependency on System.Windows.Threading.Dispatcher/DependencyObject)
+// was removed by the issue #7 rewrite - see
+// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md.
+// UiDispatcher now wraps System.Threading.SynchronizationContext, and
+// EventHandlerCollection has no UI-framework awareness of any kind.
+</code></pre>
+<pre><code class="language-csharp">// Before:
+[Test]
+public void MyMoneyBusiness_HasNoUiRenderingAssemblyReference()
+{
+    var assembly = typeof(Walkabout.Data.MyMoney).Assembly;
+    var referenced = assembly.GetReferencedAssemblies().Select(a =&gt; a.Name).ToList();
+    CollectionAssert.IsEmpty(
+        referenced.Where(n =&gt; UiRenderingAssemblyNames.Contains(n)).ToList(),
+        $&quot;MyMoney.Business referenced a UI-rendering assembly: {string.Join(&quot;, &quot;, referenced)}&quot;);
+}
+
+// After:
+[Test]
+public void MyMoneyBusiness_HasNoWpfAssemblyReference()
+{
+    var assembly = typeof(Walkabout.Data.MyMoney).Assembly;
+    var referenced = assembly.GetReferencedAssemblies().Select(a =&gt; a.Name).ToList();
+    CollectionAssert.IsEmpty(
+        referenced.Where(n =&gt; AllWpfAssemblyNames.Contains(n)).ToList(),
+        $&quot;MyMoney.Business referenced a WPF assembly: {string.Join(&quot;, &quot;, referenced)}&quot;);
+}
+</code></pre>
+<p>(Renaming the test from <code>..._HasNoUiRenderingAssemblyReference</code> to <code>..._HasNoWpfAssemblyReference</code> to accurately describe what it now checks, matching <code>MyMoneyData_HasNoWpfAssemblyReference</code>'s naming.) The now-unused <code>UiRenderingAssemblyNames</code> field can be removed since only <code>AllWpfAssemblyNames</code> is referenced anywhere in the file after this change — confirm with <code>grep -n "UiRenderingAssemblyNames" Source/WPF/UnitTests/LayerBoundaryTests.cs</code> before deleting it.</p>
+<ul>
+<li>[ ] <strong>Step 3: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: clean build.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run the full test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: full pass, 0 failed — this is the automated proof that issue #7's goal is achieved.</p>
+<ul>
+<li>[ ] <strong>Step 5: Full-solution regression</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code> (or the individual project commands this session has established as its baseline pattern — <code>MyMoney.TestSupport</code>, etc.)
+Expected: matches the established pre-existing baseline (no new failures; <code>ScenarioTest</code>'s own known flakiness, if it recurs, is pre-existing and unrelated to this change).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/LayerBoundaryTests.cs
+git commit -m &quot;Tighten LayerBoundaryTests: MyMoney.Business now has zero WPF-family references&quot;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Manual interactive smoke pass (human checkpoint — cannot be automated)</strong></li>
+</ul>
+<p>This step cannot be completed by an agent without a real interactive desktop session. Before this branch is merged, a human must:</p>
+<ol>
+<li>Run <code>MyMoney.exe</code> interactively.</li>
+<li>Exercise every migrated view/dialog and confirm UI updates still arrive correctly: Accounts, Transactions (including editing a transaction's status/amount/attachment to exercise the 5 <code>TransactionsView</code> nested-class migrations from Task 3), Securities, Currencies, Aliases, Categories, Payees, Rents, the rename-payee dialog, and the account dialog.</li>
+<li>Specifically watch for any missed UI update (a value that used to refresh automatically but now doesn't) — the concrete failure mode a missed or mismatched <code>UiThreadHandler</code> wrap would produce.</li>
+<li>Confirm the startup version-check/changelog notification path (exercises <code>ChangeListRequest.Completed</code>) still shows correctly without needing a second app restart.</li>
+<li>Confirm a stock-quote download still completes and updates the UI correctly (exercises <code>StockQuoteManager.DownloadComplete</code>).</li>
+</ol>
+<p>Do not consider this plan complete, and do not merge, until this manual pass has been done and confirmed.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-14-sql-server-dual-engine/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>SQL Server Dual-Engine Support Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "SQL Server Dual-Engine Support Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Known Limitation (by design)", url: "#known-limitation-by-design" },
+              {title: "Task 1: Data-engine JSON config model", url: "#task-1-data-engine-json-config-model" },
+              {title: "Task 2: Data-engine credential store", url: "#task-2-data-engine-credential-store" },
+              {title: "Task 3: Password generator", url: "#task-3-password-generator" },
+              {title: "Task 4: Retry/Cancel connection-attempt loop", url: "#task-4-retrycancel-connection-attempt-loop" },
+              {title: "Task 5: Bootstrap SQL script (master-db temp procedure)", url: "#task-5-bootstrap-sql-script-master-db-temp-procedure" },
+              {title: "Task 6: Payees schema, access, and test SQL scripts", url: "#task-6-payees-schema-access-and-test-sql-scripts" },
+              {title: "Task 7: SqlServerStoredProcDatabase", url: "#task-7-sqlserverstoredprocdatabase" },
+              {title: "Task 8: sa bootstrap connection", url: "#task-8-sa-bootstrap-connection" },
+              {title: "Task 9: BootstrapRunner and Program.cs", url: "#task-9-bootstraprunner-and-programcs" },
+              {title: "Task 10: WPF app startup integration", url: "#task-10-wpf-app-startup-integration" },
+              {title: "Plan Self-Review", url: "#plan-self-review" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="sql-server-dual-engine-support-implementation-plan">SQL Server Dual-Engine Support Implementation Plan<a class="headerlink" href="#sql-server-dual-engine-support-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Let a DEBUG build of the WPF app run against SQL Server (in addition to today's default SQLite), via a revived <code>MyMoneyAdmin</code> tool that bootstraps a tiered-trust SQL Server database (three logins, stored-procedure-only access) and a new JSON config file that selects the engine.</p>
+<p><strong>Architecture:</strong> A new console project (<code>MyMoneyAdmin</code>) performs one-time <code>sa</code>-driven bootstrap (create DB + three logins via a self-dropping <code>master</code>-db procedure, then deploy hand-authored schema/access/test stored procedures as the new <code>MyMoneyAdmin</code> login). The WPF app reads a new <code>dataengine.config.json</code> at startup (DEBUG builds only); when configured for SQL Server it auto-loads (invoking <code>MyMoneyAdmin</code> first if the database doesn't exist yet) using a new <code>SqlServerStoredProcDatabase</code> class that calls stored procedures instead of raw SQL. This plan implements the full mechanism end-to-end for one table (<code>Payees</code>) as a proving vertical slice — extending coverage to the rest of <code>Money.cs</code>'s tables is explicitly out of scope here (see Known Limitation below).
+<strong>Post-implementation correction (whole-branch review, see <code>final-review-fix-report.md</code>):</strong> as originally implemented, <code>SqlServerStoredProcDatabase</code> only overrode <code>ReadPayees</code>/<code>UpdatePayees</code> and inherited the base class's <code>Load()</code> unchanged, which tried to DDL/read every table via raw SQL that <code>MyMoneyUser</code> has no grants on — so the app's actual startup auto-load path could never succeed; only the Payees-only integration test (which calls <code>ReadPayees</code>/<code>UpdatePayees</code> directly, bypassing <code>Load()</code>) exercised the working path. <code>SqlServerStoredProcDatabase</code> now also overrides <code>Load()</code> to read only <code>Payees</code>, so the auto-load path this paragraph describes is now actually reachable through the app's normal startup — confirmed by build/unit-test verification, but still not confirmed against a real SQL Server (see the fix report's "needs live-server confirmation" list).</p>
+<p><strong>Tech Stack:</strong> C# / .NET 10.0, <code>Microsoft.Data.SqlClient</code> 7.0.2, <code>Newtonsoft.Json</code> 13.0.4, NUnit 4.6.1 (existing project dependencies — no new packages required).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-14-sql-server-dual-engine-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>SQL Server support (config parsing of <code>"SqlServer"</code>, the <code>MyMoneyAdmin</code>-invocation path, <code>SqlServerStoredProcDatabase</code>) is reachable only in DEBUG builds. A Release build that encounters <code>"engine": "SqlServer"</code> in config silently falls back to SQLite and logs it.</li>
+<li><code>sa</code> credentials <strong>(revised 2026-09-14, mid-implementation, at the developer's explicit request — see spec's "<code>sa</code> Handling" section)</strong>: stored in the same credentials file as the three app accounts, under the key <code>"sa"</code>. <code>MyMoneyAdmin</code> checks for a stored <code>"sa"</code> entry first and uses it without prompting; if absent, it prompts interactively and saves the result. This widens the credentials file's blast radius (it can now grant full SQL Server control, not just the three scoped accounts) — an accepted tradeoff for this dev-network prototype.</li>
+<li>The three account passwords (<code>MyMoneyAdmin</code>, <code>MyMoneyUser</code>, <code>MyMoneyTest</code>) are auto-generated, never typed by the developer, and stored only in <code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code> — outside the repo, gitignore is not relied upon.</li>
+<li><code>SqliteDatabase</code> and all its current behavior are untouched by this plan. No file under <code>Database/SqliteDatabase.cs</code> is modified.</li>
+<li>All schema/access/test SQL is hand-authored <code>.sql</code> content checked into the repo — never generated at runtime from <code>Mapping.cs</code> reflection.</li>
+<li><code>MyMoneyUser</code> gets <code>EXECUTE</code>-only grants on access procedures; it must never receive direct table grants.</li>
+</ul>
+<h2 id="known-limitation-by-design">Known Limitation (by design)<a class="headerlink" href="#known-limitation-by-design" title="Permanent link">#</a></h2>
+<p>This plan wires the mechanism through completely for the <code>Payees</code> table only. <code>SqlServerStoredProcDatabase</code> overrides <code>ReadPayees</code>/<code>UpdatePayees</code>; every other table (<code>Accounts</code>, <code>Transactions</code>, <code>Categories</code>, etc.) still falls back to the inherited <code>SqlServerDatabase</code> methods, which build raw SQL against tables <code>MyMoneyUser</code> has no grants on — those calls will fail with a permissions error if exercised. Extending coverage to the rest of <code>Money.cs</code> is explicit follow-on work, not part of this plan. The goal here is a fully working, provably correct bootstrap-through-CRUD path for one table, not a fully functional SQL-Server-backed app.</p>
+<hr />
+<h2 id="task-1-data-engine-json-config-model">Task 1: Data-engine JSON config model<a class="headerlink" href="#task-1-data-engine-json-config-model" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/DataEngineConfig.cs</code>
+- Test: <code>Source/WPF/UnitTests/DataEngineConfigTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>enum DataEngineType { Sqlite, SqlServer }</code>; <code>class DataEngineConfig { DataEngineType Engine; string Server; string Database; static DataEngineConfig Load(string path); }</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    public class DataEngineConfigTests
+    {
+        private string tempFile;
+
+        [SetUp]
+        public void Setup()
+        {
+            this.tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(&quot;N&quot;) + &quot;.json&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (File.Exists(this.tempFile))
+            {
+                File.Delete(this.tempFile);
+            }
+        }
+
+        [Test]
+        public void MissingFile_DefaultsToSqlite()
+        {
+            var config = DataEngineConfig.Load(this.tempFile);
+            Assert.That(config.Engine, Is.EqualTo(DataEngineType.Sqlite));
+        }
+
+        [Test]
+        public void SqlServerEngine_ParsesAllFields()
+        {
+            File.WriteAllText(this.tempFile, @&quot;{ &quot;&quot;engine&quot;&quot;: &quot;&quot;SqlServer&quot;&quot;, &quot;&quot;server&quot;&quot;: &quot;&quot;DEVSQL01&quot;&quot;, &quot;&quot;database&quot;&quot;: &quot;&quot;MyMoney&quot;&quot; }&quot;);
+            var config = DataEngineConfig.Load(this.tempFile);
+            Assert.That(config.Engine, Is.EqualTo(DataEngineType.SqlServer));
+            Assert.That(config.Server, Is.EqualTo(&quot;DEVSQL01&quot;));
+            Assert.That(config.Database, Is.EqualTo(&quot;MyMoney&quot;));
+        }
+
+        [Test]
+        public void UnrecognizedEngineValue_DefaultsToSqlite()
+        {
+            File.WriteAllText(this.tempFile, @&quot;{ &quot;&quot;engine&quot;&quot;: &quot;&quot;Postgres&quot;&quot; }&quot;);
+            var config = DataEngineConfig.Load(this.tempFile);
+            Assert.That(config.Engine, Is.EqualTo(DataEngineType.Sqlite));
+        }
+
+        [Test]
+        public void EngineKeyMissing_DefaultsToSqlite()
+        {
+            File.WriteAllText(this.tempFile, @&quot;{ &quot;&quot;server&quot;&quot;: &quot;&quot;DEVSQL01&quot;&quot; }&quot;);
+            var config = DataEngineConfig.Load(this.tempFile);
+            Assert.That(config.Engine, Is.EqualTo(DataEngineType.Sqlite));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEngineConfigTests"</code>
+Expected: FAIL (compile error — <code>DataEngineConfig</code> doesn't exist yet)</p>
+<ul>
+<li>[ ] <strong>Step 3: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using Newtonsoft.Json;
+
+namespace Walkabout.Data
+{
+    public enum DataEngineType
+    {
+        Sqlite,
+        SqlServer
+    }
+
+    public class DataEngineConfig
+    {
+        public DataEngineType Engine { get; set; } = DataEngineType.Sqlite;
+        public string Server { get; set; }
+        public string Database { get; set; }
+
+        public static DataEngineConfig Load(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return new DataEngineConfig();
+            }
+
+            string json = File.ReadAllText(path);
+            RawDataEngineConfig raw = JsonConvert.DeserializeObject&lt;RawDataEngineConfig&gt;(json);
+            if (raw == null)
+            {
+                return new DataEngineConfig();
+            }
+
+            var config = new DataEngineConfig
+            {
+                Server = raw.Server,
+                Database = raw.Database,
+                Engine = string.Equals(raw.Engine, &quot;SqlServer&quot;, StringComparison.OrdinalIgnoreCase)
+                    ? DataEngineType.SqlServer
+                    : DataEngineType.Sqlite
+            };
+
+            return config;
+        }
+
+        private class RawDataEngineConfig
+        {
+            public string Engine { get; set; }
+            public string Server { get; set; }
+            public string Database { get; set; }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEngineConfigTests"</code>
+Expected: PASS (4 tests)</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/DataEngineConfig.cs Source/WPF/UnitTests/DataEngineConfigTests.cs
+git commit -m &quot;Add DataEngineConfig for SQLite/SQL Server engine selection&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-data-engine-credential-store">Task 2: Data-engine credential store<a class="headerlink" href="#task-2-data-engine-credential-store" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/DataEngineCredentialStore.cs</code>
+- Test: <code>Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing from Task 1.
+- Produces: <code>class DataEngineCredential { string UserId; string Password; }</code>; <code>class DataEngineCredentialStore { DataEngineCredentialStore(string path); static string GetDefaultPath(); Dictionary&lt;string, DataEngineCredential&gt; Load(); void Save(Dictionary&lt;string, DataEngineCredential&gt; credentials); DataEngineCredential GetCredential(string accountName); }</code>. <code>GetDefaultPath()</code> and <code>GetCredential</code> are relied on by Task 9 (MyMoneyAdmin) and Task 10 (WPF integration).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using System.IO;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    public class DataEngineCredentialStoreTests
+    {
+        private string tempPath;
+
+        [SetUp]
+        public void Setup()
+        {
+            this.tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(&quot;N&quot;), &quot;dataengine.credentials.json&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            string dir = Path.GetDirectoryName(this.tempPath);
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Test]
+        public void Load_MissingFile_ReturnsEmptyDictionary()
+        {
+            var store = new DataEngineCredentialStore(this.tempPath);
+            var result = store.Load();
+            Assert.That(result, Is.Empty);
+        }
+
+        [Test]
+        public void SaveThenLoad_RoundTripsCredentials()
+        {
+            var store = new DataEngineCredentialStore(this.tempPath);
+            var credentials = new Dictionary&lt;string, DataEngineCredential&gt;
+            {
+                [&quot;MyMoneyUser&quot;] = new DataEngineCredential { UserId = &quot;MyMoneyUser&quot;, Password = &quot;Sw0rdfish!23&quot; }
+            };
+
+            store.Save(credentials);
+            var loaded = store.Load();
+
+            Assert.That(loaded.ContainsKey(&quot;MyMoneyUser&quot;), Is.True);
+            Assert.That(loaded[&quot;MyMoneyUser&quot;].Password, Is.EqualTo(&quot;Sw0rdfish!23&quot;));
+        }
+
+        [Test]
+        public void Save_CreatesParentDirectoryIfMissing()
+        {
+            var store = new DataEngineCredentialStore(this.tempPath);
+            store.Save(new Dictionary&lt;string, DataEngineCredential&gt;());
+            Assert.That(File.Exists(this.tempPath), Is.True);
+        }
+
+        [Test]
+        public void GetCredential_UnknownAccount_ThrowsWithGuidance()
+        {
+            var store = new DataEngineCredentialStore(this.tempPath);
+            store.Save(new Dictionary&lt;string, DataEngineCredential&gt;());
+            var ex = Assert.Throws&lt;InvalidOperationException&gt;(() =&gt; store.GetCredential(&quot;MyMoneyTest&quot;));
+            Assert.That(ex.Message, Does.Contain(&quot;MyMoneyTest&quot;));
+        }
+
+        [Test]
+        public void GetDefaultPath_EndsWithExpectedRelativeLayout()
+        {
+            string path = DataEngineCredentialStore.GetDefaultPath();
+            Assert.That(path, Does.EndWith(Path.Combine(&quot;.secrets&quot;, &quot;MyMoney&quot;, &quot;dataengine.credentials.json&quot;)));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEngineCredentialStoreTests"</code>
+Expected: FAIL (compile error)</p>
+<ul>
+<li>[ ] <strong>Step 3: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;
+
+namespace Walkabout.Data
+{
+    public class DataEngineCredential
+    {
+        public string UserId { get; set; }
+        public string Password { get; set; }
+    }
+
+    public class DataEngineCredentialStore
+    {
+        private readonly string path;
+
+        public DataEngineCredentialStore(string path)
+        {
+            this.path = path;
+        }
+
+        public static string GetDefaultPath()
+        {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.Combine(userProfile, &quot;.secrets&quot;, &quot;MyMoney&quot;, &quot;dataengine.credentials.json&quot;);
+        }
+
+        public Dictionary&lt;string, DataEngineCredential&gt; Load()
+        {
+            if (!File.Exists(this.path))
+            {
+                return new Dictionary&lt;string, DataEngineCredential&gt;();
+            }
+
+            string json = File.ReadAllText(this.path);
+            var result = JsonConvert.DeserializeObject&lt;Dictionary&lt;string, DataEngineCredential&gt;&gt;(json);
+            return result ?? new Dictionary&lt;string, DataEngineCredential&gt;();
+        }
+
+        public void Save(Dictionary&lt;string, DataEngineCredential&gt; credentials)
+        {
+            string dir = Path.GetDirectoryName(this.path);
+            if (!string.IsNullOrEmpty(dir) &amp;&amp; !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string json = JsonConvert.SerializeObject(credentials, Formatting.Indented);
+            File.WriteAllText(this.path, json);
+        }
+
+        public DataEngineCredential GetCredential(string accountName)
+        {
+            var all = this.Load();
+            if (all.TryGetValue(accountName, out DataEngineCredential credential))
+            {
+                return credential;
+            }
+
+            throw new InvalidOperationException(
+                $&quot;No credential found for account '{accountName}' in {this.path}. Run MyMoneyAdmin to bootstrap the SQL Server database first.&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEngineCredentialStoreTests"</code>
+Expected: PASS (5 tests)</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/DataEngineCredentialStore.cs Source/WPF/UnitTests/DataEngineCredentialStoreTests.cs
+git commit -m &quot;Add DataEngineCredentialStore for the out-of-repo SQL Server credential file&quot;
+</code></pre>
+<hr />
+<h2 id="task-3-password-generator">Task 3: Password generator<a class="headerlink" href="#task-3-password-generator" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/DataEnginePasswordGenerator.cs</code>
+- Test: <code>Source/WPF/UnitTests/DataEnginePasswordGeneratorTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>static class DataEnginePasswordGenerator { static string Generate(int length = 24); }</code> — relied on by Task 9 (MyMoneyAdmin bootstrap).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<pre><code class="language-csharp">using System.Linq;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    public class DataEnginePasswordGeneratorTests
+    {
+        [Test]
+        public void Generate_DefaultLength_Is24Characters()
+        {
+            string password = DataEnginePasswordGenerator.Generate();
+            Assert.That(password.Length, Is.EqualTo(24));
+        }
+
+        [Test]
+        public void Generate_ContainsAtLeastOneOfEachRequiredClass()
+        {
+            string password = DataEnginePasswordGenerator.Generate();
+            Assert.That(password.Any(char.IsUpper), Is.True);
+            Assert.That(password.Any(char.IsLower), Is.True);
+            Assert.That(password.Any(char.IsDigit), Is.True);
+            Assert.That(password.Any(c =&gt; &quot;!@#$%^&amp;*-_=+&quot;.Contains(c)), Is.True);
+        }
+
+        [Test]
+        public void Generate_TwoCallsProduceDifferentPasswords()
+        {
+            string a = DataEnginePasswordGenerator.Generate();
+            string b = DataEnginePasswordGenerator.Generate();
+            Assert.That(a, Is.Not.EqualTo(b));
+        }
+
+        [Test]
+        public void Generate_LengthBelowMinimum_Throws()
+        {
+            Assert.Throws&lt;System.ArgumentOutOfRangeException&gt;(() =&gt; DataEnginePasswordGenerator.Generate(4));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEnginePasswordGeneratorTests"</code>
+Expected: FAIL (compile error)</p>
+<ul>
+<li>[ ] <strong>Step 3: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.Security.Cryptography;
+
+namespace Walkabout.Data
+{
+    public static class DataEnginePasswordGenerator
+    {
+        private const string Uppercase = &quot;ABCDEFGHJKLMNPQRSTUVWXYZ&quot;;
+        private const string Lowercase = &quot;abcdefghijkmnpqrstuvwxyz&quot;;
+        private const string Digits = &quot;23456789&quot;;
+        private const string Symbols = &quot;!@#$%^&amp;*-_=+&quot;;
+
+        public static string Generate(int length = 24)
+        {
+            if (length &lt; 8)
+            {
+                throw new ArgumentOutOfRangeException(nameof(length), &quot;Password length must be at least 8 characters.&quot;);
+            }
+
+            string allChars = Uppercase + Lowercase + Digits + Symbols;
+            char[] result = new char[length];
+
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+            {
+                result[0] = PickRandomChar(rng, Uppercase);
+                result[1] = PickRandomChar(rng, Lowercase);
+                result[2] = PickRandomChar(rng, Digits);
+                result[3] = PickRandomChar(rng, Symbols);
+
+                for (int i = 4; i &lt; length; i++)
+                {
+                    result[i] = PickRandomChar(rng, allChars);
+                }
+
+                Shuffle(rng, result);
+            }
+
+            return new string(result);
+        }
+
+        private static char PickRandomChar(RandomNumberGenerator rng, string charset)
+        {
+            byte[] buffer = new byte[4];
+            rng.GetBytes(buffer);
+            uint value = BitConverter.ToUInt32(buffer, 0);
+            int index = (int)(value % (uint)charset.Length);
+            return charset[index];
+        }
+
+        private static void Shuffle(RandomNumberGenerator rng, char[] chars)
+        {
+            for (int i = chars.Length - 1; i &gt; 0; i--)
+            {
+                byte[] buffer = new byte[4];
+                rng.GetBytes(buffer);
+                uint value = BitConverter.ToUInt32(buffer, 0);
+                int j = (int)(value % (uint)(i + 1));
+                (chars[i], chars[j]) = (chars[j], chars[i]);
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DataEnginePasswordGeneratorTests"</code>
+Expected: PASS (4 tests)</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/DataEnginePasswordGenerator.cs Source/WPF/UnitTests/DataEnginePasswordGeneratorTests.cs
+git commit -m &quot;Add DataEnginePasswordGenerator for auto-generated SQL login passwords&quot;
+</code></pre>
+<hr />
+<h2 id="task-4-retrycancel-connection-attempt-loop">Task 4: Retry/Cancel connection-attempt loop<a class="headerlink" href="#task-4-retrycancel-connection-attempt-loop" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoneyAdmin/RetryLoop.cs</code>
+- Test: <code>Source/WPF/UnitTests/RetryLoopTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>static class RetryLoop { enum PromptResult { Retry, Cancel } static bool Run(Func&lt;bool&gt; tryAction, Func&lt;PromptResult&gt; promptOnFailure); }</code> — relied on by Task 8 (<code>SaBootstrapConnection</code>).</p>
+<p>This is the control-flow logic behind "on any <code>sa</code> connection failure, ask Retry/Cancel" (per the corrected design — no attempt to classify <em>why</em> the connection failed). It's decoupled from real SQL/console I/O via injected delegates so it's fully unit-testable.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    public class RetryLoopTests
+    {
+        [Test]
+        public void FirstAttemptSucceeds_ReturnsTrueWithoutPrompting()
+        {
+            bool prompted = false;
+            bool result = RetryLoop.Run(
+                tryAction: () =&gt; true,
+                promptOnFailure: () =&gt; { prompted = true; return RetryLoop.PromptResult.Cancel; });
+
+            Assert.That(result, Is.True);
+            Assert.That(prompted, Is.False);
+        }
+
+        [Test]
+        public void FailsThenRetrySucceeds_ReturnsTrue()
+        {
+            int attempts = 0;
+            bool result = RetryLoop.Run(
+                tryAction: () =&gt; { attempts++; return attempts &gt;= 2; },
+                promptOnFailure: () =&gt; RetryLoop.PromptResult.Retry);
+
+            Assert.That(result, Is.True);
+            Assert.That(attempts, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void FailsThenCancel_ReturnsFalseAndStopsRetrying()
+        {
+            int attempts = 0;
+            bool result = RetryLoop.Run(
+                tryAction: () =&gt; { attempts++; return false; },
+                promptOnFailure: () =&gt; RetryLoop.PromptResult.Cancel);
+
+            Assert.That(result, Is.False);
+            Assert.That(attempts, Is.EqualTo(1));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~RetryLoopTests"</code>
+Expected: FAIL (compile error — <code>RetryLoop</code> doesn't exist, and the <code>UnitTests</code> project doesn't yet reference <code>MyMoneyAdmin</code>)</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the MyMoneyAdmin project and add the UnitTests reference</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj</code>:</p>
+<pre><code class="language-xml">&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;
+
+  &lt;PropertyGroup&gt;
+    &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+    &lt;TargetFramework&gt;net10.0&lt;/TargetFramework&gt;
+    &lt;RootNamespace&gt;Walkabout.Data&lt;/RootNamespace&gt;
+    &lt;AssemblyName&gt;MyMoneyAdmin&lt;/AssemblyName&gt;
+    &lt;Nullable&gt;disable&lt;/Nullable&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;PackageReference Include=&quot;Microsoft.Data.SqlClient&quot; Version=&quot;7.0.2&quot; /&gt;
+    &lt;PackageReference Include=&quot;Newtonsoft.Json&quot; Version=&quot;13.0.4&quot; /&gt;
+  &lt;/ItemGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;ProjectReference Include=&quot;..\MyMoney\MyMoney.csproj&quot; /&gt;
+  &lt;/ItemGroup&gt;
+
+&lt;/Project&gt;
+</code></pre>
+<p>Add <code>MyMoneyAdmin</code> to the solution and reference it from <code>UnitTests.csproj</code>:</p>
+<pre><code class="language-bash">dotnet sln Source/WPF/MyMoney.sln add Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj
+dotnet add Source/WPF/UnitTests/UnitTests.csproj reference Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+
+namespace Walkabout.Data
+{
+    public static class RetryLoop
+    {
+        public enum PromptResult
+        {
+            Retry,
+            Cancel
+        }
+
+        public static bool Run(Func&lt;bool&gt; tryAction, Func&lt;PromptResult&gt; promptOnFailure)
+        {
+            while (true)
+            {
+                if (tryAction())
+                {
+                    return true;
+                }
+
+                if (promptOnFailure() == PromptResult.Cancel)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~RetryLoopTests"</code>
+Expected: PASS (3 tests)</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj Source/WPF/MyMoneyAdmin/RetryLoop.cs \
+  Source/WPF/UnitTests/RetryLoopTests.cs Source/WPF/UnitTests/UnitTests.csproj Source/WPF/MyMoney.sln
+git commit -m &quot;Add MyMoneyAdmin project and RetryLoop connection-retry control flow&quot;
+</code></pre>
+<hr />
+<h2 id="task-5-bootstrap-sql-script-master-db-temp-procedure">Task 5: Bootstrap SQL script (master-db temp procedure)<a class="headerlink" href="#task-5-bootstrap-sql-script-master-db-temp-procedure" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/SqlScripts/Bootstrap/CreateDatabaseAndLogins.sql</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: a <code>.sql</code> file with a single T-SQL batch, read as plain text and executed by Task 9's <code>BootstrapRunner</code>. No C# interface — this is data, not code.</p>
+<p>This script is run by <code>sa</code> against <code>master</code>. It creates a temporary stored procedure, executes it (creating the <code>MyMoney</code> database and the three logins with caller-supplied passwords), then drops the procedure. There is no automated test for this file — verifying it requires a real SQL Server instance (see Manual Verification below), which matches the spec's premise that these scripts are meant to be run and inspected directly, e.g. in SSMS.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the script</strong></li>
+</ul>
+<pre><code class="language-sql">-- CreateDatabaseAndLogins.sql
+-- Run as 'sa' against the 'master' database.
+-- Creates the MyMoney database and the three tiered SQL logins, then
+-- removes itself. Passwords are substituted by MyMoneyAdmin before this
+-- script is sent to the server (see BootstrapRunner.cs) -- the
+-- placeholders below are never executed literally.
+
+USE master;
+GO
+
+IF EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.MyMoney_Bootstrap') AND type = N'P')
+    DROP PROCEDURE dbo.MyMoney_Bootstrap;
+GO
+
+CREATE PROCEDURE dbo.MyMoney_Bootstrap
+    @AdminPassword NVARCHAR(128),
+    @UserPassword NVARCHAR(128),
+    @TestPassword NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = N'MyMoney')
+    BEGIN
+        -- Note: some SQL Server versions restrict CREATE DATABASE to being
+        -- the only statement in its batch. If this procedure fails on your
+        -- target server with that error, run this CREATE DATABASE statement
+        -- ad hoc first, then re-run the rest of this script with the
+        -- database-creation block commented out.
+        CREATE DATABASE MyMoney;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyAdmin')
+        CREATE LOGIN MyMoneyAdmin WITH PASSWORD = @AdminPassword, CHECK_POLICY = ON;
+    ELSE
+        ALTER LOGIN MyMoneyAdmin WITH PASSWORD = @AdminPassword;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyUser')
+        CREATE LOGIN MyMoneyUser WITH PASSWORD = @UserPassword, CHECK_POLICY = ON;
+    ELSE
+        ALTER LOGIN MyMoneyUser WITH PASSWORD = @UserPassword;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'MyMoneyTest')
+        CREATE LOGIN MyMoneyTest WITH PASSWORD = @TestPassword, CHECK_POLICY = ON;
+    ELSE
+        ALTER LOGIN MyMoneyTest WITH PASSWORD = @TestPassword;
+END
+GO
+
+EXEC dbo.MyMoney_Bootstrap
+    @AdminPassword = N'{{AdminPassword}}',
+    @UserPassword  = N'{{UserPassword}}',
+    @TestPassword  = N'{{TestPassword}}';
+GO
+
+DROP PROCEDURE dbo.MyMoney_Bootstrap;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Manual verification (no automated test — requires a real SQL Server)</strong></li>
+</ul>
+<p>Against a scratch/dev SQL Server instance where you've temporarily enabled <code>sa</code>:
+1. Replace the three <code>{{...Password}}</code> placeholders with real strong password literals.
+2. Run the script in SSMS connected as <code>sa</code>.
+3. Confirm: the <code>MyMoney</code> database exists (<code>SELECT name FROM sys.databases WHERE name = 'MyMoney'</code>), the three logins exist (<code>SELECT name FROM sys.server_principals WHERE name IN ('MyMoneyAdmin','MyMoneyUser','MyMoneyTest')</code>), and <code>dbo.MyMoney_Bootstrap</code> no longer exists in <code>master</code> (<code>SELECT * FROM sys.objects WHERE name = 'MyMoney_Bootstrap'</code> returns nothing).
+4. Re-run the whole script again to confirm it's idempotent (no errors on a second run).</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/SqlScripts/Bootstrap/CreateDatabaseAndLogins.sql
+git commit -m &quot;Add master-db bootstrap script (creates MyMoney database and three logins)&quot;
+</code></pre>
+<hr />
+<h2 id="task-6-payees-schema-access-and-test-sql-scripts">Task 6: Payees schema, access, and test SQL scripts<a class="headerlink" href="#task-6-payees-schema-access-and-test-sql-scripts" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/SqlScripts/Schema/001_CreatePayeesTable.sql</code>
+- Create: <code>Source/WPF/MyMoney/Database/SqlScripts/Access/Payees_AccessProcs.sql</code>
+- Create: <code>Source/WPF/MyMoney/Database/SqlScripts/Test/Payees_TestProcs.sql</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: three <code>.sql</code> files, run by Task 9's <code>BootstrapRunner</code> as the <code>MyMoneyAdmin</code> login against the <code>MyMoney</code> database. Column layout (<code>Id INT PRIMARY KEY</code>, <code>Name NVARCHAR(255) NOT NULL</code>) matches the existing <code>Payee</code> class's <code>[ColumnMapping]</code> attributes in <code>Database/Money.cs:5180-5188</code>, so this schema is identical to what SQLite already stores for this table.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the schema script</strong></li>
+</ul>
+<pre><code class="language-sql">-- 001_CreatePayeesTable.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+
+USE MyMoney;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Payees')
+BEGIN
+    CREATE TABLE dbo.Payees (
+        [Id]   INT           NOT NULL PRIMARY KEY,
+        [Name] NVARCHAR(255) NOT NULL
+    );
+END
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the access procedures (granted to <code>MyMoneyUser</code>)</strong></li>
+</ul>
+<pre><code class="language-sql">-- Payees_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser is permitted to perform
+-- on the Payees table -- it has no direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Name FROM dbo.Payees ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_Insert
+    @Id INT,
+    @Name NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Payees (Id, Name) VALUES (@Id, @Name);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_Update
+    @Id INT,
+    @Name NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Payees SET Name = @Name WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Payees WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Payees_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Payees_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Payees_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Payees_Delete TO MyMoneyUser;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Write the test-support procedure (granted to <code>MyMoneyTest</code> only)</strong></li>
+</ul>
+<pre><code class="language-sql">-- Payees_TestProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- Test-support operations too risky to grant MyMoneyUser: this proc
+-- wipes all Payees rows unconditionally for test setup/teardown.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_Test_Reset
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Payees;
+END
+GO
+
+GRANT EXECUTE ON dbo.Payees_Test_Reset TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Manual verification (no automated test — requires a real SQL Server)</strong></li>
+</ul>
+<p>Against the bootstrapped dev database, connected as <code>MyMoneyAdmin</code>:
+1. Run all three scripts in order.
+2. Connect as <code>MyMoneyUser</code> and confirm <code>EXEC dbo.Payees_Insert @Id=1, @Name=N'Test Payee'</code> succeeds, <code>EXEC dbo.Payees_SelectAll</code> returns it, and a direct <code>SELECT * FROM dbo.Payees</code> <strong>fails</strong> with a permissions error (proving no table-level grant leaked through).
+3. Connect as <code>MyMoneyUser</code> and confirm <code>EXEC dbo.Payees_Test_Reset</code> <strong>fails</strong> with a permissions error (proving the test-only proc isn't reachable by the normal app account).
+4. Connect as <code>MyMoneyTest</code> and confirm <code>EXEC dbo.Payees_Test_Reset</code> succeeds.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/SqlScripts/Schema/001_CreatePayeesTable.sql \
+  Source/WPF/MyMoney/Database/SqlScripts/Access/Payees_AccessProcs.sql \
+  Source/WPF/MyMoney/Database/SqlScripts/Test/Payees_TestProcs.sql
+git commit -m &quot;Add Payees schema, access, and test stored procedures&quot;
+</code></pre>
+<hr />
+<h2 id="task-7-sqlserverstoredprocdatabase">Task 7: <code>SqlServerStoredProcDatabase</code><a class="headerlink" href="#task-7-sqlserverstoredprocdatabase" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/Database/SqlDatabase.cs:1343</code> (<code>ReadPayees</code>) and <code>:1451</code> (<code>UpdatePayees</code>) — add <code>virtual</code>
+- Create: <code>Source/WPF/MyMoney/Database/SqlServerStoredProcDatabase.cs</code>
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DataEngineCredentialStore.GetCredential</code> (Task 2) is not used here directly — this class takes a plain connection string, matching <code>SqlServerDatabase</code>'s existing constructor-less/property-based pattern.
+- Produces: <code>class SqlServerStoredProcDatabase : SqlServerDatabase</code> overriding <code>ReadPayees(Payees, MyMoney)</code> and <code>UpdatePayees(Payees)</code>. Relied on by Task 10 (WPF integration).</p>
+<p><code>SqliteDatabase</code> also derives from <code>SqlServerDatabase</code> (<code>Database/SqliteDatabase.cs:14</code>) and does not override these two methods, so it is completely unaffected by making them <code>virtual</code> — a virtual method with no override behaves identically to a non-virtual one for existing callers.</p>
+<ul>
+<li>[ ] <strong>Step 1: Mark the base methods <code>virtual</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/Database/SqlDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        public void ReadPayees(Payees payees, MyMoney money)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public virtual void ReadPayees(Payees payees, MyMoney money)
+</code></pre>
+<p>and change:</p>
+<pre><code class="language-csharp">        public void UpdatePayees(Payees payees)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public virtual void UpdatePayees(Payees payees)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing test</strong></li>
+</ul>
+<p>This is an integration test — it requires a real, already-bootstrapped (Tasks 5 &amp; 6 run manually) dev SQL Server instance, since there is no mocking layer for <code>Microsoft.Data.SqlClient</code> in this codebase (introducing one is item #3's job, out of scope here). It's skipped automatically unless a connection string is supplied via environment variable, so it never breaks a normal <code>dotnet test</code> run.</p>
+<pre><code class="language-csharp">using System;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    public class SqlServerStoredProcDatabaseTests
+    {
+        private const string EnvVarName = &quot;MYMONEY_TEST_SQLSERVER_USER_CONNECTION&quot;;
+
+        private string GetConnectionStringOrSkip()
+        {
+            string connectionString = Environment.GetEnvironmentVariable(EnvVarName);
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                Assert.Ignore($&quot;Set {EnvVarName} to a MyMoneyUser connection string to run this test against a real SQL Server.&quot;);
+            }
+            return connectionString;
+        }
+
+        [Test]
+        public void InsertUpdateDeletePayee_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var payee = money.Payees.AddPayee(999001);
+            payee.Name = &quot;SqlServerStoredProcDatabaseTests Payee&quot;;
+            payee.OnInserted();
+
+            db.UpdatePayees(money.Payees);
+
+            var reloaded = new MyMoney();
+            db.ReadPayees(reloaded.Payees, reloaded);
+            var found = reloaded.Payees.FindPayee(&quot;SqlServerStoredProcDatabaseTests Payee&quot;, false);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Id, Is.EqualTo(999001));
+
+            found.OnDelete();
+            var toDelete = new Payees(reloaded);
+            toDelete.Add(found);
+            db.UpdatePayees(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadPayees(afterDelete.Payees, afterDelete);
+            Assert.That(afterDelete.Payees.FindPayee(&quot;SqlServerStoredProcDatabaseTests Payee&quot;, false), Is.Null);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Run test to verify it's skipped (no env var set) or fails (compile error)</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code>
+Expected: FAIL (compile error — <code>SqlServerStoredProcDatabase</code> and <code>ConnectionStringOverride</code> don't exist yet)</p>
+<ul>
+<li>[ ] <strong>Step 4: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System.Collections.Generic;
+using Microsoft.Data.SqlClient;
+
+namespace Walkabout.Data
+{
+    /// &lt;summary&gt;
+    /// A SqlServerDatabase variant that performs Payees CRUD exclusively
+    /// through stored procedures, matching the grants given to the
+    /// MyMoneyUser login (see Database/SqlScripts/Access/Payees_AccessProcs.sql).
+    /// Other tables are not yet overridden -- see the &quot;Known Limitation&quot;
+    /// section of the plan that introduced this class.
+    /// &lt;/summary&gt;
+    public class SqlServerStoredProcDatabase : SqlServerDatabase
+    {
+        /// &lt;summary&gt;
+        /// Sole reason this exists: tests need to point at an ad hoc dev
+        /// connection string without going through DataEngineConfig/
+        /// DataEngineCredentialStore. Production callers (Task 10) leave
+        /// this null and rely on the inherited Server/DatabasePath/UserId/
+        /// Password properties instead.
+        /// &lt;/summary&gt;
+        public string ConnectionStringOverride { get; set; }
+
+        protected override string GetConnectionString(bool includeDatabase)
+        {
+            if (!string.IsNullOrEmpty(this.ConnectionStringOverride))
+            {
+                return this.ConnectionStringOverride;
+            }
+            return base.GetConnectionString(includeDatabase);
+        }
+
+        public override void ReadPayees(Payees payees, MyMoney money)
+        {
+            payees.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Payees_SelectAll&quot;, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    payees.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Payee p = payees.AddPayee(id);
+                        p.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        p.OnUpdated();
+                    }
+                    payees.EndUpdate();
+                }
+            }
+            payees.FireChangeEvent(payees, payees, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdatePayees(Payees payees)
+        {
+            if (payees.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Payee p in payees)
+                {
+                    if (p.IsChanged)
+                    {
+                        ExecutePayeeProc(connection, &quot;dbo.Payees_Update&quot;, p);
+                    }
+                    else if (p.IsInserted)
+                    {
+                        ExecutePayeeProc(connection, &quot;dbo.Payees_Insert&quot;, p);
+                    }
+                    else if (p.IsDeleted)
+                    {
+                        using (var command = new SqlCommand(&quot;dbo.Payees_Delete&quot;, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+                        {
+                            command.Parameters.AddWithValue(&quot;@Id&quot;, p.Id);
+                            command.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+
+            List&lt;Payee&gt; toRemove = new List&lt;Payee&gt;();
+            foreach (Payee p in payees)
+            {
+                if (p.IsDeleted)
+                {
+                    toRemove.Add(p);
+                }
+                else
+                {
+                    p.OnUpdated();
+                }
+            }
+            foreach (Payee p in toRemove)
+            {
+                p.Parent.RemoveChild(p);
+            }
+        }
+
+        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        {
+            using (var command = new SqlCommand(procName, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+            {
+                command.Parameters.AddWithValue(&quot;@Id&quot;, p.Id);
+                command.Parameters.AddWithValue(&quot;@Name&quot;, (object)p.Name ?? System.DBNull.Value);
+                command.ExecuteNonQuery();
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Run test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code>
+Expected: PASS if <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code> is set to a real <code>MyMoneyUser</code> connection string against a bootstrapped dev database (Tasks 5 &amp; 6 completed manually first); otherwise SKIPPED, not FAILED.</p>
+<ul>
+<li>[ ] <strong>Step 6: Run the full existing unit test suite to confirm no regression</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: All previously-passing tests (including <code>SqlMappingTests</code>, which exercises <code>SqliteDatabase</code>) still PASS — confirms the <code>virtual</code> change didn't alter <code>SqliteDatabase</code>'s behavior.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/SqlDatabase.cs Source/WPF/MyMoney/Database/SqlServerStoredProcDatabase.cs \
+  Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add SqlServerStoredProcDatabase overriding Payees CRUD to call stored procedures&quot;
+</code></pre>
+<hr />
+<h2 id="task-8-sa-bootstrap-connection">Task 8: <code>sa</code> bootstrap connection<a class="headerlink" href="#task-8-sa-bootstrap-connection" title="Permanent link">#</a></h2>
+<p><strong>Revised 2026-09-14 (mid-implementation):</strong> originally <code>sa</code>'s password was
+never persisted. At the developer's explicit request (see the spec's <code>sa</code>
+Handling section for the accepted tradeoff), it's now checked in the
+credentials file first and saved there after a successful interactive
+prompt, the same as the three app accounts.</p>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoneyAdmin/SaBootstrapConnection.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>RetryLoop.Run</code> (Task 4); <code>DataEngineCredentialStore</code>, <code>DataEngineCredential</code> (Task 2) — reads/writes an entry keyed <code>"sa"</code> alongside the three app accounts.
+- Produces: <code>class SaBootstrapConnection { static bool TryConnect(string server, out string password); }</code> — relied on by Task 9's <code>BootstrapRunner</code>.</p>
+<p>This wraps the actual <code>sa</code> connection attempt (real ADO.NET, so not unit-tested — covered by Task 4's <code>RetryLoop</code> unit tests plus manual verification here) with credential-file reuse, the console-based password prompt, and the Retry/Cancel loop.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using Microsoft.Data.SqlClient;
+
+namespace Walkabout.Data
+{
+    public static class SaBootstrapConnection
+    {
+        private const string SaAccountName = &quot;sa&quot;;
+
+        /// &lt;summary&gt;
+        /// Connects as 'sa'. Checks the credentials file for a previously
+        /// saved 'sa' password first and uses it without prompting if it
+        /// still works; otherwise prompts interactively (Retry/Cancel on
+        /// failure per RetryLoop) and, on success, saves the password to
+        /// the credentials file so later runs on this machine don't
+        /// re-prompt. See the spec's &quot;sa Handling&quot; section for why this
+        /// account is persisted here, unlike the rest of this codebase's
+        /// general practice for admin credentials.
+        /// &lt;/summary&gt;
+        public static bool TryConnect(string server, out string password)
+        {
+            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            var stored = credentialStore.Load();
+
+            if (stored.TryGetValue(SaAccountName, out DataEngineCredential saved) &amp;&amp; TryOpenConnection(server, saved.Password))
+            {
+                password = saved.Password;
+                return true;
+            }
+
+            string capturedPassword = null;
+            bool result = RetryLoop.Run(
+                tryAction: () =&gt;
+                {
+                    Console.Write(&quot;Enter 'sa' password: &quot;);
+                    capturedPassword = ReadPasswordFromConsole();
+                    return TryOpenConnection(server, capturedPassword);
+                },
+                promptOnFailure: () =&gt;
+                {
+                    Console.Write(&quot;Retry connecting as 'sa'? [R]etry / [C]ancel: &quot;);
+                    string input = Console.ReadLine();
+                    return string.Equals(input?.Trim(), &quot;R&quot;, StringComparison.OrdinalIgnoreCase)
+                        ? RetryLoop.PromptResult.Retry
+                        : RetryLoop.PromptResult.Cancel;
+                });
+
+            if (result)
+            {
+                stored[SaAccountName] = new DataEngineCredential { UserId = SaAccountName, Password = capturedPassword };
+                credentialStore.Save(stored);
+            }
+
+            password = result ? capturedPassword : null;
+            return result;
+        }
+
+        private static bool TryOpenConnection(string server, string password)
+        {
+            var builder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = SaAccountName,
+                Password = password,
+                InitialCatalog = &quot;master&quot;,
+                ConnectTimeout = 10
+            };
+
+            try
+            {
+                using (var connection = new SqlConnection(builder.ConnectionString))
+                {
+                    connection.Open();
+                }
+                return true;
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine($&quot;Could not connect as 'sa': {ex.Message}&quot;);
+                Console.WriteLine(&quot;Verify the 'sa' account is enabled on the server and the password is correct.&quot;);
+                return false;
+            }
+        }
+
+        private static string ReadPasswordFromConsole()
+        {
+            var input = new System.Text.StringBuilder();
+            ConsoleKeyInfo key;
+            while ((key = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
+            {
+                if (key.Key == ConsoleKey.Backspace &amp;&amp; input.Length &gt; 0)
+                {
+                    input.Length--;
+                }
+                else if (!char.IsControl(key.KeyChar))
+                {
+                    input.Append(key.KeyChar);
+                }
+            }
+            Console.WriteLine();
+            return input.ToString();
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>
+<p>[ ] <strong>Step 2: Manual verification (no automated test — requires a real SQL Server and a real terminal)</strong></p>
+</li>
+<li>
+<p>With <code>sa</code> disabled on a dev instance and no <code>"sa"</code> entry in the credentials file, run a small throwaway program calling <code>SaBootstrapConnection.TryConnect("&lt;your-server&gt;", out _)</code>, enter any password, confirm it prints the failure message and prompts Retry/Cancel, and that typing <code>C</code> returns <code>false</code> without looping further.</p>
+</li>
+<li>Enable <code>sa</code>, set a known password, repeat: confirm entering that password returns <code>true</code>, and that the credentials file now has a <code>"sa"</code> entry with that password.</li>
+<li>Confirm the password you typed is masked (not echoed) in the console.</li>
+<li>Run it again without changing anything: confirm it connects successfully with <strong>no password prompt at all</strong> (reused from the credentials file).</li>
+<li>Change the actual <code>sa</code> password on the server (so the stored one is now stale) and run once more: confirm it falls through to the interactive prompt rather than looping forever on the stale stored password.</li>
+<li>
+<p>Disable <code>sa</code> again on the server (its normal resting state — see spec's <code>sa</code> Handling section) with the credentials file still holding a stored <code>sa</code> entry from a previous run: confirm the stored-password attempt fails (same as any other failure — disabled and wrong-password are indistinguishable to the client) and correctly falls through to the interactive Retry/Cancel prompt rather than getting stuck assuming the stored credential must still be valid.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoneyAdmin/SaBootstrapConnection.cs
+git commit -m &quot;Add SaBootstrapConnection: interactive sa connection with Retry/Cancel&quot;
+</code></pre>
+<hr />
+<h2 id="task-9-bootstraprunner-and-programcs">Task 9: <code>BootstrapRunner</code> and <code>Program.cs</code><a class="headerlink" href="#task-9-bootstraprunner-and-programcs" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoneyAdmin/BootstrapRunner.cs</code>
+- Create: <code>Source/WPF/MyMoneyAdmin/Program.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>SaBootstrapConnection.TryConnect</code> (Task 8), <code>DataEnginePasswordGenerator.Generate</code> (Task 3), <code>DataEngineCredentialStore</code> (Task 2), the three <code>.sql</code> files (Tasks 5 &amp; 6).
+- Produces: <code>class BootstrapRunner { bool Run(string server, string databaseName); }</code>, invoked by <code>Program.Main</code> and by Task 10's WPF integration (via <code>Process.Start</code>, not a direct C# call, so no cross-assembly dependency from <code>MyMoney.csproj</code> back to <code>MyMoneyAdmin.csproj</code>).</p>
+<p>This orchestrates the full sequence from the spec: connect as <code>sa</code> → run the bootstrap script (substituting generated passwords) → write the credentials file → reconnect as <code>MyMoneyAdmin</code> → run the schema/access/test scripts.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using System.Collections.Generic;
+using Microsoft.Data.SqlClient;
+
+namespace Walkabout.Data
+{
+    public class BootstrapRunner
+    {
+        private readonly string sqlScriptsRoot;
+
+        public BootstrapRunner(string sqlScriptsRoot)
+        {
+            this.sqlScriptsRoot = sqlScriptsRoot;
+        }
+
+        public bool Run(string server, string databaseName)
+        {
+            if (!SaBootstrapConnection.TryConnect(server, out string saPassword))
+            {
+                Console.WriteLine(&quot;Bootstrap cancelled.&quot;);
+                return false;
+            }
+
+            string adminPassword = DataEnginePasswordGenerator.Generate();
+            string userPassword = DataEnginePasswordGenerator.Generate();
+            string testPassword = DataEnginePasswordGenerator.Generate();
+
+            string bootstrapScript = File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Bootstrap&quot;, &quot;CreateDatabaseAndLogins.sql&quot;))
+                .Replace(&quot;{{AdminPassword}}&quot;, adminPassword.Replace(&quot;'&quot;, &quot;''&quot;))
+                .Replace(&quot;{{UserPassword}}&quot;, userPassword.Replace(&quot;'&quot;, &quot;''&quot;))
+                .Replace(&quot;{{TestPassword}}&quot;, testPassword.Replace(&quot;'&quot;, &quot;''&quot;));
+
+            var saBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = &quot;sa&quot;,
+                Password = saPassword,
+                InitialCatalog = &quot;master&quot;,
+                ConnectTimeout = 10
+            };
+
+            Console.WriteLine(&quot;Creating database and logins as 'sa'...&quot;);
+            ExecuteBatchScript(saBuilder.ConnectionString, bootstrapScript);
+
+            var credentials = new Dictionary&lt;string, DataEngineCredential&gt;
+            {
+                [&quot;MyMoneyAdmin&quot;] = new DataEngineCredential { UserId = &quot;MyMoneyAdmin&quot;, Password = adminPassword },
+                [&quot;MyMoneyUser&quot;] = new DataEngineCredential { UserId = &quot;MyMoneyUser&quot;, Password = userPassword },
+                [&quot;MyMoneyTest&quot;] = new DataEngineCredential { UserId = &quot;MyMoneyTest&quot;, Password = testPassword }
+            };
+            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            credentialStore.Save(credentials);
+            Console.WriteLine($&quot;Wrote generated credentials to {DataEngineCredentialStore.GetDefaultPath()}&quot;);
+
+            var adminBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = server,
+                UserID = &quot;MyMoneyAdmin&quot;,
+                Password = adminPassword,
+                InitialCatalog = databaseName,
+                ConnectTimeout = 10
+            };
+
+            Console.WriteLine(&quot;Deploying schema and stored procedures as 'MyMoneyAdmin'...&quot;);
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Schema&quot;, &quot;001_CreatePayeesTable.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Payees_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Test&quot;, &quot;Payees_TestProcs.sql&quot;)));
+
+            Console.WriteLine(&quot;Bootstrap complete.&quot;);
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Splits a script on GO batch separators (a plain-text convention,
+        /// not parsed T-SQL) and executes each batch in turn -- ADO.NET has
+        /// no native concept of GO, it's an SSMS/sqlcmd-only directive.
+        /// &lt;/summary&gt;
+        private static void ExecuteBatchScript(string connectionString, string script)
+        {
+            string[] batches = script.Split(new[] { &quot;\nGO&quot;, &quot;\r\nGO&quot; }, StringSplitOptions.RemoveEmptyEntries);
+            using (var connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+                foreach (string batch in batches)
+                {
+                    string trimmed = batch.Trim();
+                    if (trimmed.Length == 0)
+                    {
+                        continue;
+                    }
+                    using (var command = new SqlCommand(trimmed, connection) { CommandTimeout = 60 })
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+    }
+}
+</code></pre>
+<pre><code class="language-csharp">using System;
+using System.IO;
+
+namespace Walkabout.Data
+{
+    public class Program
+    {
+        private static int Main(string[] args)
+        {
+            string server = args.Length &gt; 0 ? args[0] : &quot;localhost&quot;;
+            string databaseName = args.Length &gt; 1 ? args[1] : &quot;MyMoney&quot;;
+
+            // SqlScripts ships alongside the MyMoney assembly it's committed
+            // under (Source/WPF/MyMoney/Database/SqlScripts); locate it
+            // relative to this executable's own build output.
+            string sqlScriptsRoot = Path.Combine(AppContext.BaseDirectory, &quot;SqlScripts&quot;);
+            if (!Directory.Exists(sqlScriptsRoot))
+            {
+                Console.WriteLine($&quot;Could not find SqlScripts folder at {sqlScriptsRoot}.&quot;);
+                return 1;
+            }
+
+            var runner = new BootstrapRunner(sqlScriptsRoot);
+            bool success = runner.Run(server, databaseName);
+            return success ? 0 : 1;
+        }
+    }
+}
+</code></pre>
+<p>Add a build step to <code>MyMoneyAdmin.csproj</code> so the <code>.sql</code> files end up next to the built executable at <code>AppContext.BaseDirectory</code> (append inside the existing <code>&lt;Project&gt;</code> element from Task 4):</p>
+<pre><code class="language-xml">  &lt;ItemGroup&gt;
+    &lt;None Include=&quot;..\MyMoney\Database\SqlScripts\**\*.sql&quot;&gt;
+      &lt;Link&gt;SqlScripts\%(RecursiveDir)%(Filename)%(Extension)&lt;/Link&gt;
+      &lt;CopyToOutputDirectory&gt;PreserveNewest&lt;/CopyToOutputDirectory&gt;
+    &lt;/None&gt;
+  &lt;/ItemGroup&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj</code>
+Expected: builds with 0 errors; <code>bin/Debug/net10.0/SqlScripts/{Bootstrap,Schema,Access,Test}/*.sql</code> present in the output.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 3: Manual end-to-end verification (requires a real SQL Server)</strong></p>
+</li>
+<li>
+<p>Delete any existing <code>MyMoney</code> database and the three logins on your dev SQL Server (or use a fresh instance).</p>
+</li>
+<li>Delete <code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code> if present.</li>
+<li>Enable <code>sa</code> on the dev server.</li>
+<li>Run: <code>dotnet run --project Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj -- &lt;your-server&gt; MyMoney</code></li>
+<li>Enter the <code>sa</code> password when prompted.</li>
+<li>Confirm it prints "Bootstrap complete.", the credentials file now exists and contains all three accounts, and (in SSMS) the <code>MyMoney</code> database has a <code>Payees</code> table and the four <code>Payees_*</code> procedures with the grants from Task 6.</li>
+<li>
+<p>Disable <code>sa</code> again on the server.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoneyAdmin/BootstrapRunner.cs Source/WPF/MyMoneyAdmin/Program.cs Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj
+git commit -m &quot;Add BootstrapRunner and Program entry point for MyMoneyAdmin&quot;
+</code></pre>
+<hr />
+<h2 id="task-10-wpf-app-startup-integration">Task 10: WPF app startup integration<a class="headerlink" href="#task-10-wpf-app-startup-integration" title="Permanent link">#</a></h2>
+<p><strong>Revision note (post-implementation, multiple rounds):</strong> the code blocks
+below are the task's original design and no longer match the shipped
+files exactly — both diverged during implementation and two further
+rounds of whole-branch review and live-server verification. Treat this
+section as historical context, not a literal reference; the actual
+source files are authoritative:
+- <code>Source/WPF/MyMoney/Database/DataEngineStartup.cs</code>
+- <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code>
+- <code>Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj</code></p>
+<p>Three concrete divergences worth calling out explicitly (see Step 1 and
+Step 3 below for what actually happened and why):
+1. The MSBuild wiring described in Step 1 (a <code>ProjectReference</code> from
+   <code>MyMoney.csproj</code> to <code>MyMoneyAdmin.csproj</code>) was never implemented —
+   it would have created a real circular project reference. The copy
+   target lives in <code>MyMoneyAdmin.csproj</code> instead; <code>MyMoney.csproj</code> is
+   never modified by this task.
+2. The auto-load block in Step 3 does not sit right after
+   <code>InitializeComponent()</code> — it moved to the end of the constructor,
+   after <code>DataContextChanged</code> is subscribed, to fix a bug where the
+   loaded model was being silently discarded.
+3. <code>DataEngineStartup.TryAutoLoad</code> gained a synthetic <code>DatabasePath</code>
+   assignment, config/credential-file error handling, and database-name
+   validation beyond what Step 2's code block shows below, following
+   two further review rounds and live-server testing.</p>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Database/DataEngineStartup.cs</code>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> (constructor — see revision note above for the actual insertion point)
+- Modify: <code>Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj</code> (add a post-build copy target so <code>MyMoneyAdmin.exe</code> ends up next to <code>MyMoney.exe</code> — see revision note above for why this landed here instead of <code>MyMoney.csproj</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DataEngineConfig.Load</code> (Task 1), <code>DataEngineCredentialStore</code> (Task 2), <code>SqlServerStoredProcDatabase</code> (Task 7).
+- Produces: <code>class DataEngineStartup { static bool TryAutoLoad(string configPath, out IDatabase database, out MyMoney money); }</code>, called from <code>MainWindow</code>'s constructor.</p>
+<p><code>TryAutoLoad</code> returns <code>false</code> (with <code>database</code>/<code>money</code> both <code>null</code>) whenever the config says SQLite, is missing, or the file doesn't exist and can't be bootstrapped — in every such case <code>MainWindow</code> falls through to its existing, completely unmodified empty-launch / File-menu-driven behavior.</p>
+<ul>
+<li>[ ] <strong>Step 1: Wire MyMoneyAdmin's build output into MyMoney's output directory</strong></li>
+</ul>
+<p><code>MyMoneyAdmin.csproj</code> (Task 4) builds to its own separate output folder
+(<code>Source/WPF/MyMoneyAdmin/bin/...</code>) — nothing so far puts <code>MyMoneyAdmin.exe</code>
+next to <code>MyMoney.exe</code>, which Step 2 below needs.</p>
+<p><strong>As actually implemented:</strong> <code>MyMoneyAdmin.csproj</code> already has a
+<code>ProjectReference</code> to <code>MyMoney.csproj</code> (from Task 9, needed for
+<code>DataEngineCredentialStore</code>/<code>DataEnginePasswordGenerator</code>). Adding the
+reverse reference this step originally called for — from <code>MyMoney.csproj</code>
+to <code>MyMoneyAdmin.csproj</code> — would create a real circular project reference
+(<code>MyMoney → MyMoneyAdmin → MyMoney</code>) and fails at restore. Since
+<code>MyMoneyAdmin</code> already depends on (and therefore always builds after)
+<code>MyMoney</code>, no new reference is needed in either direction — the copy
+target just needs to live in <code>MyMoneyAdmin.csproj</code> instead, copying its
+own output into <code>MyMoney</code>'s output directory after it builds.
+<code>MyMoney.csproj</code> is never modified by this task. Add this to
+<code>Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj</code>, inside the existing
+<code>&lt;Project&gt;</code> element:</p>
+<pre><code class="language-xml">  &lt;Target Name=&quot;CopyMyMoneyAdminOutputToMyMoney&quot; AfterTargets=&quot;Build&quot; Condition=&quot;'$(Configuration)' == 'Debug'&quot;&gt;
+    &lt;ItemGroup&gt;
+      &lt;MyMoneyAdminOutput Include=&quot;$(OutDir)**\*.*&quot; /&gt;
+    &lt;/ItemGroup&gt;
+    &lt;Copy SourceFiles=&quot;@(MyMoneyAdminOutput)&quot;
+          DestinationFolder=&quot;$(MSBuildThisFileDirectory)..\MyMoney\bin\$(Configuration)\net10.0-windows7.0\win-x64\%(RecursiveDir)&quot;
+          SkipUnchangedFiles=&quot;true&quot;
+          Condition=&quot;Exists('$(MSBuildThisFileDirectory)..\MyMoney\bin\$(Configuration)\net10.0-windows7.0\win-x64')&quot; /&gt;
+  &lt;/Target&gt;
+</code></pre>
+<p>The <code>Condition="'$(Configuration)' == 'Debug'"</code> on the target itself is
+required, not optional — without it, Release builds copy <code>MyMoneyAdmin.exe</code>
+next to <code>MyMoney.exe</code> too, contradicting "Release builds completely
+unaffected." (This condition was missing in an earlier round and caught
+by review before merge.)</p>
+<p>Run <code>dotnet build Source/WPF/MyMoney.sln</code> and confirm <code>MyMoneyAdmin.exe</code> (and
+its dependency DLLs) now appear alongside <code>MyMoney.exe</code> in
+<code>Source/WPF/MyMoney/bin/Debug/net10.0-windows7.0/win-x64/</code>. If they don't
+show up, check that <code>$(Configuration)</code> matches what you built (Debug vs
+Release) and that Task 4/9 already produced a <code>MyMoneyAdmin/bin/Debug/net10.0-windows7.0/</code>
+folder to copy from. Also confirm with a <code>-c Release</code> build that they're
+absent there.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the DataEngineStartup implementation</strong></li>
+</ul>
+<pre><code class="language-csharp">using System;
+using System.Diagnostics;
+using System.IO;
+using Microsoft.Data.SqlClient;
+
+namespace Walkabout.Data
+{
+#if DEBUG
+    public static class DataEngineStartup
+    {
+        public static bool TryAutoLoad(string configPath, out IDatabase database, out MyMoney money)
+        {
+            database = null;
+            money = null;
+
+            DataEngineConfig config = DataEngineConfig.Load(configPath);
+            if (config.Engine != DataEngineType.SqlServer || string.IsNullOrEmpty(config.Server) || string.IsNullOrEmpty(config.Database))
+            {
+                return false;
+            }
+
+            if (!DatabaseExists(config.Server, config.Database))
+            {
+                if (!RunMyMoneyAdmin(config.Server, config.Database))
+                {
+                    return false;
+                }
+            }
+
+            var credentialStore = new DataEngineCredentialStore(DataEngineCredentialStore.GetDefaultPath());
+            DataEngineCredential userCredential;
+            try
+            {
+                userCredential = credentialStore.GetCredential(&quot;MyMoneyUser&quot;);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($&quot;DataEngineStartup: {ex.Message}&quot;);
+                return false;
+            }
+
+            var builder = new SqlConnectionStringBuilder
+            {
+                DataSource = config.Server,
+                InitialCatalog = config.Database,
+                UserID = userCredential.UserId,
+                Password = userCredential.Password,
+                // Required against real dev SQL Server instances with a
+                // self-signed/untrusted cert -- omitting this was found,
+                // via live-server testing, to block every connection
+                // attempt in this feature (all four connection-string
+                // builders across the codebase need it, not just this one).
+                TrustServerCertificate = true
+            };
+
+            var sqlServerDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = builder.ConnectionString };
+            money = sqlServerDatabase.Load(null);
+            database = sqlServerDatabase;
+            return true;
+        }
+
+        private static bool DatabaseExists(string server, string databaseName)
+        {
+            // We don't have MyMoneyUser's password until bootstrap has run
+            // once, so &quot;does the database exist&quot; is answered by &quot;does the
+            // credential file bootstrap wrote already exist&quot; -- there's no
+            // way to check the server itself without a login to check with.
+            return File.Exists(DataEngineCredentialStore.GetDefaultPath());
+        }
+
+        private static bool RunMyMoneyAdmin(string server, string databaseName)
+        {
+            string exePath = Path.Combine(AppContext.BaseDirectory, &quot;MyMoneyAdmin.exe&quot;);
+            if (!File.Exists(exePath))
+            {
+                Debug.WriteLine($&quot;DataEngineStartup: MyMoneyAdmin.exe not found at {exePath}. Build Source/WPF/MyMoneyAdmin first.&quot;);
+                return false;
+            }
+
+            var startInfo = new ProcessStartInfo(exePath, $&quot;\&quot;{server}\&quot; \&quot;{databaseName}\&quot;&quot;)
+            {
+                UseShellExecute = true
+            };
+
+            using (Process process = Process.Start(startInfo))
+            {
+                process.WaitForExit();
+                return process.ExitCode == 0;
+            }
+        }
+    }
+#endif
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Wire into <code>MainWindow</code>'s constructor</strong></li>
+</ul>
+<p><strong>As actually implemented:</strong> this does <em>not</em> sit right after
+<code>InitializeComponent()</code>. The original placement set <code>this.DataContext</code>
+before <code>DataContextChanged</code> was subscribed (that subscription happens
+later in the constructor), so the auto-loaded model was silently
+discarded — the handler that does the real wiring (<code>this.myMoney =
+money</code>, and populating <code>accountsControl</code>/<code>categoriesControl</code>/etc.) never
+ran. Fixed by moving this block to the end of the constructor, after
+<code>DataContextChanged += ...</code> is subscribed and after the account/category/
+payee/securities controls and <code>ofxController</code> are constructed — mirroring
+the same sequence a normal file-based load already uses elsewhere in this
+file (database, <code>DataContext</code>, <code>canSave</code>, <code>emptyWindow</code>), rather than a
+minimal hand-picked subset of it. See
+<code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> for the current, authoritative
+placement and body — it now also sets <code>this.emptyWindow = true</code> (so
+<code>OnMainWindowLoaded</code> doesn't separately try to reopen the last-used file)
+and threads a logger callback into <code>TryAutoLoad</code> for visible diagnostics.</p>
+<ul>
+<li>[ ] <strong>Step 4: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Manual verification — SQLite path unaffected</strong></p>
+</li>
+<li>
+<p>Ensure <code>%LOCALAPPDATA%\MyMoney\dataengine.config.json</code> does not exist.</p>
+</li>
+<li>Launch <code>MyMoney.exe</code> (DEBUG build).</li>
+<li>
+<p>Confirm the app launches exactly as before — empty main window, no auto-loaded database, File menu drives everything as it always has.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Manual verification — SQL Server auto-load</strong></p>
+</li>
+<li>
+<p>Complete Task 9's bootstrap against a dev SQL Server.</p>
+</li>
+<li>Create <code>%LOCALAPPDATA%\MyMoney\dataengine.config.json</code>: <code>{ "engine": "SqlServer", "server": "&lt;your-server&gt;", "database": "MyMoney" }</code>.</li>
+<li>Launch <code>MyMoney.exe</code> (DEBUG build).</li>
+<li>
+<p>Confirm the app auto-loads without any File-menu interaction, and that adding/editing/deleting a payee through the UI persists (verify with a direct <code>SELECT * FROM dbo.Payees</code> in SSMS as <code>MyMoneyAdmin</code>, or <code>EXEC dbo.Payees_SelectAll</code> as <code>MyMoneyUser</code>).</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Database/DataEngineStartup.cs Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj
+git commit -m &quot;Wire DEBUG-only SQL Server auto-load into MainWindow startup&quot;
+</code></pre>
+<hr />
+<h2 id="plan-self-review">Plan Self-Review<a class="headerlink" href="#plan-self-review" title="Permanent link">#</a></h2>
+<p><strong>Spec coverage:</strong>
+- Config-driven engine selection (<code>dataengine.config.json</code>) → Task 1, Task 10.
+- Credential store outside repo (<code>%USERPROFILE%\.secrets\MyMoney\...</code>) → Task 2.
+- Auto-generated passwords → Task 3.
+- <code>sa</code> credentials persisted in the same credentials file as the three
+  app accounts (revised 2026-09-14, mid-implementation, from the
+  original "never persisted" design -- see the spec's <code>sa</code> Handling
+  section for the accepted tradeoff), Retry/Cancel on any connection
+  failure → Task 4, Task 8.
+- Master-db self-dropping bootstrap procedure → Task 5.
+- Three tiered SQL logins → Task 5.
+- Hand-authored stored procedures for schema/access/test → Task 6.
+- <code>MyMoneyUser</code> restricted to <code>EXECUTE</code>-only, no table grants → Task 6 (manual verification step explicitly proves this negative case).
+- <code>MyMoneyTest</code> seam for future item #3 → Task 6's <code>Payees_Test_Reset</code>.
+- Runtime CRUD via stored procedures, <code>SqliteDatabase</code> untouched → Task 7.
+- DEBUG-only reachability → Task 10 (<code>#if DEBUG</code> at both the class and call-site level).
+- Idempotent bootstrap → Task 5 script's <code>IF NOT EXISTS</code> guards, verified by its "re-run" manual step.</p>
+<p><strong>Placeholder scan:</strong> No TBD/TODO markers; every step has complete, real code or a fully-specified manual procedure. The <code>{{AdminPassword}}</code> etc. tokens in Task 5's <code>.sql</code> file are intentional runtime substitution markers (explained in-line and consumed by Task 9's <code>Replace()</code> calls), not unresolved plan placeholders.</p>
+<p><strong>Type consistency:</strong> <code>DataEngineCredential</code>/<code>DataEngineCredentialStore</code> (Task 2) are used identically in Task 9 (<code>BootstrapRunner</code>) and Task 10 (<code>DataEngineStartup</code>) — same <code>GetCredential</code>/<code>Save</code> signatures throughout. <code>SqlServerStoredProcDatabase.ConnectionStringOverride</code> (Task 7) is set the same way in its own test (Task 7) and in <code>DataEngineStartup</code> (Task 10). <code>RetryLoop.Run</code>'s delegate signatures (Task 4) match exactly how <code>SaBootstrapConnection</code> (Task 8) calls it.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

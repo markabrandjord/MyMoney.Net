@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-15-test-support-library-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Business-Layer Test-Support Library: Shared IDatabase Contract Suite (Design Spec) - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Business-Layer Test-Support Library: Shared IDatabase Contract Suite (Design Spec)", url: "#_top", children: [
+              {title: "Status", url: "#status" },
+              {title: "Goal", url: "#goal" },
+              {title: "Non-Goals", url: "#non-goals" },
+              {title: "Design", url: "#design" },
+              {title: "Data Flow", url: "#data-flow" },
+              {title: "Error Handling", url: "#error-handling" },
+              {title: "Testing (verifying this spec\u0027s own work)", url: "#testing-verifying-this-specs-own-work" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="business-layer-test-support-library-shared-idatabase-contract-suite-design-spec">Business-Layer Test-Support Library: Shared <code>IDatabase</code> Contract Suite (Design Spec)<a class="headerlink" href="#business-layer-test-support-library-shared-idatabase-contract-suite-design-spec" title="Permanent link">#</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">#</a></h2>
+<p>Design phase. This is slice 1 of epic #1's item #3 (three-slice initiative — see
+GitHub issue #20 for the full breakdown and links to slice 2 (#19, dual-engine
+sample-data parity) and slice 3 (#7, threading/concurrency test support, which
+this slice's mock is expected to serve as the fast deterministic backdrop for).</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">#</a></h2>
+<p>Today, exactly one test (<code>Source/WPF/UnitTests/SqlMappingTests.cs</code>) exercises a
+real save/load round-trip, and it does so against a real on-disk SQLite file.
+Every other business-logic test (<code>CostBasisTests.cs</code>, <code>TaxTests.cs</code>, etc.)
+constructs a <code>MyMoney</code> object directly and never touches <code>IDatabase</code> at all —
+which is fine for pure business-rule logic, but means nothing currently tests
+the <code>IDatabase</code> <em>contract</em> itself (save, reload, and the <code>PersistentObject</code>
+dirty-tracking lifecycle — <code>ChangeType</code> Inserted/Changed/Deleted transitions,
+<code>OnUpdated()</code>, <code>RemoveDeleted()</code>) in an engine-independent way, and nothing
+gives fast, zero-I/O coverage of that contract for tight dev-loop iteration.</p>
+<p>Build one shared test suite, expressed purely in terms of <code>IDatabase</code>, that
+runs against multiple backing-store implementations:</p>
+<ul>
+<li><strong>This slice</strong>: an in-memory <code>MockDatabase</code> (fast, zero I/O) and
+  <code>SqliteDatabase</code> (already exists) as the two flavors.</li>
+<li><strong>Slice 2 (#19)</strong>: adds <code>SqlServerStoredProcDatabase</code> as a third flavor, plus
+  a headless <code>SampleDataGenerator</code> entry point and a FlaUI end-to-end scenario
+  — no new <em>contract</em> test logic, just more flavors and a richer generated
+  dataset.</li>
+</ul>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Slice 2 (#19) and slice 3 (#7) themselves — tracked separately, not built here.</li>
+<li>Any change to the <code>IDatabase</code> interface's shape.</li>
+<li>Any change to <code>XmlStore</code>'s file-coupled implementation (it stays as-is; this
+  spec reuses one existing internal helper from it — see Design — but does not
+  refactor it to be stream-agnostic, which would be its own separate,
+  higher-risk piece of work).</li>
+<li>Migrating <code>SqlMappingTests.cs</code>'s SQLite <em>schema-migration</em> coverage
+  (<code>CreateOrUpdateTable</code>, <code>LoadTableMetadata</code> — adding/resizing/removing a
+  column at runtime). That's SQLite-specific behavior with no equivalent
+  contract on other engines, not part of the generic <code>IDatabase</code> suite. It
+  stays in <code>SqlMappingTests.cs</code> unchanged.</li>
+<li>SQL Server as a flavor in this slice (that's #19's job, once the headless
+  <code>SampleDataGenerator</code> entry point and bootstrap wiring it needs exist).</li>
+</ul>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">#</a></h2>
+<h3 id="1-shared-contract-test-suite-abstract-base-class-one-concrete-subclass-per-engine">1. Shared contract test suite: abstract base class + one concrete subclass per engine<a class="headerlink" href="#1-shared-contract-test-suite-abstract-base-class-one-concrete-subclass-per-engine" title="Permanent link">#</a></h3>
+<pre><code class="language-csharp">public abstract class DatabaseContractTests
+{
+    protected IDatabase Database { get; private set; }
+
+    [SetUp]
+    public virtual void SetUp() =&gt; this.Database = this.CreateDatabase();
+
+    [TearDown]
+    public virtual void TearDown() =&gt; this.Database?.Disconnect();
+
+    protected abstract IDatabase CreateDatabase();
+
+    [Test]
+    public void SaveAndReload_PreservesAccountAndTransactionData() { /* ... */ }
+
+    [Test]
+    public void Insert_ThenReload_ItemAppearsWithCleanState() { /* ... */ }
+
+    [Test]
+    public void Update_ThenReload_ChangePersisted() { /* ... */ }
+
+    [Test]
+    public void Delete_ThenReload_ItemIsGone() { /* ... */ }
+}
+
+[TestFixture]
+public class MockDatabaseContractTests : DatabaseContractTests
+{
+    protected override IDatabase CreateDatabase() =&gt; new MockDatabase();
+}
+
+[TestFixture]
+public class SqliteDatabaseContractTests : DatabaseContractTests
+{
+    private string path;
+
+    protected override IDatabase CreateDatabase()
+    {
+        this.path = Path.Combine(Path.GetTempPath(), $&quot;ContractTest_{Guid.NewGuid():N}.mmdb&quot;);
+        var db = new SqliteDatabase { DatabasePath = this.path };
+        db.Create();
+        return db;
+    }
+
+    public override void TearDown()
+    {
+        base.TearDown();
+        if (File.Exists(this.path)) File.Delete(this.path);
+    }
+}
+</code></pre>
+<p>Rejected alternatives (from brainstorming): NUnit generic <code>[TestFixture(typeof(...))]</code>
+(less idiomatic given engines need meaningfully different setup — SQL Server's
+future flavor needs a live-connection skip-guard, SQLite needs a temp file, the
+mock needs neither) and a single class with <code>[TestCaseSource]</code> factory
+parameters (messier per-engine setup/teardown, worse test-explorer output).
+The abstract-base approach also matches an existing precedent in this
+codebase: <code>SqlServerStoredProcDatabaseTests.cs</code> already self-skips when no SQL
+Server connection string is available via environment variable — each
+concrete subclass here can carry that same kind of per-engine skip-guard
+independently (relevant once slice 2 adds the SQL Server flavor), without
+polluting the shared test bodies.</p>
+<p>Assertions are scoped to <strong>post-reload state</strong>, not "did the original
+in-memory object's flags mutate in place after <code>Save()</code>." That in-place
+behavior is engine-specific, not part of the <code>IDatabase</code> contract:
+<code>SqlServerDatabase</code>'s SQL-based <code>UpdateXxx</code> methods call <code>.OnUpdated()</code> per
+item during <code>Save()</code>, clearing dirty flags on the original objects, but
+<code>XmlStore.Save()</code> does not (confirmed by reading its source — it calls
+<code>PrepareSave()</code> for <code>RemoveDeleted()</code> bookkeeping only, never <code>OnUpdated()</code>).
+Testing "save, then reload, then verify the <em>reloaded</em> graph has clean state
+and correct data" is true and comparable across every engine; testing
+"the original object's flags changed after Save() without a reload" is not,
+and the suite must not assert it.</p>
+<h4 id="ruling-xmlstoresave-is-not-being-changed-to-call-onupdated">Ruling: <code>XmlStore.Save()</code> is not being changed to call <code>OnUpdated()</code><a class="headerlink" href="#ruling-xmlstoresave-is-not-being-changed-to-call-onupdated" title="Permanent link">#</a></h4>
+<p>Raised and investigated during design review: could this asymmetry just be
+fixed at the source, so every <code>IDatabase</code> implementation left the graph in
+the same "clean" state after a successful save, removing the need for the
+post-reload-only carve-out above?</p>
+<p><strong>Root cause of the asymmetry.</strong> <code>SqlServerDatabase</code>'s <code>UpdateXxx</code> methods are
+<em>incremental</em> — each row's SQL statement is decided by inspecting that item's
+<code>IsChanged</code>/<code>IsInserted</code>/<code>IsDeleted</code> flags, so clearing them via <code>OnUpdated()</code>
+afterward is load-bearing: without it, an already-saved, unchanged row would
+look "changed" forever and get re-sent on every subsequent save. <code>XmlStore.Save()</code>
+is not incremental — it serializes the entire graph unconditionally every
+time and never consults those flags for its own logic (only <code>RemoveDeleted()</code>,
+which is <code>IsDeleted</code>-specific). <code>OnUpdated()</code> is necessary for one family and
+genuinely inert for the other; that's why only one calls it today.</p>
+<p><strong>What was checked before deciding.</strong>
+- No override of <code>PersistentObject.OnUpdated()</code> exists anywhere in the domain
+  model, and the base implementation only flips the <code>change</code> enum — it never
+  calls <code>FireChangeEvent(...)</code> the way <code>OnInserted()</code>/<code>OnDelete()</code> do. So
+  adding the call would not have triggered any change-notification side
+  effects.
+- The app's actual "unsaved changes" indicator (title bar, exit-save-prompt
+  via <code>MainWindow.SaveIfDirty()</code>) is driven by <code>MainWindow</code>'s own independent
+  <code>dirty</code> bool, explicitly cleared by <code>SetDirty(false)</code> right after <code>Save()</code>
+  succeeds — it does not read individual <code>PersistentObject.IsChanged</code> flags
+  at all. The asymmetry has no effect on that behavior either way.
+- No test or UI code was found asserting <code>IsChanged</code>/<code>IsInserted</code> state
+  specifically after an <code>XmlStore.Save()</code> call.</p>
+<p><strong>Decision: leave <code>XmlStore</code> unchanged.</strong> Even though the change looked
+low-risk by the checks above, three things argue against making it as part of
+this work:
+1. <strong>Real, uncompensated perf cost.</strong> Walking every container (Accounts,
+   Categories, Payees, Transactions + nested Splits, Securities, StockSplits,
+   LoanPayments, OnlineAccounts, Aliases, AccountAliases, TransactionExtras,
+   ...) to call <code>OnUpdated()</code> is an O(n) pass over the whole graph that
+   <code>XmlStore.Save()</code> does not currently pay, on a path that already tracks and
+   logs its own elapsed time (<code>Debug.WriteLine("Saved XML store in ...")</code>),
+   suggesting save latency here is an existing, live concern, not a
+   hypothetical one.
+2. <strong>A second list to keep in sync.</strong> That container walk would duplicate,
+   in a second file, the same enumeration <code>SqlServerDatabase</code>'s save logic
+   already walks in <code>SqlDatabase.cs</code> — two independent lists that can
+   silently drift as new container types are added, the same class of risk
+   issue #11's self-testing MSBuild guard was written to catch elsewhere.
+3. <strong>Scope discipline.</strong> <code>XmlStore</code> is a real, shipping production
+   <code>IDatabase</code> implementation (the legacy <code>.xml</code> money-file format), not
+   test-only code. Changing its behavior — even a change that checks out as
+   safe today — is a different risk class than anything else in this spec,
+   and doesn't belong bundled into a test-support-library change.</p>
+<p>The inconsistency is real but currently inert (nothing depends on it). Fixing
+it buys conceptual tidiness, not correctness. If ever wanted, it's a small,
+well-bounded, separately-tracked follow-up — not part of this work.</p>
+<h3 id="2-mockdatabase-real-serialization-round-trip-against-memory-not-object-identity-passthrough">2. <code>MockDatabase</code>: real serialization round-trip against memory, not object-identity passthrough<a class="headerlink" href="#2-mockdatabase-real-serialization-round-trip-against-memory-not-object-identity-passthrough" title="Permanent link">#</a></h3>
+<p>If <code>MockDatabase.Save()</code> just remembered the <code>MyMoney</code> reference it was given
+and <code>Load()</code> handed the same reference back, tests could pass on object-identity
+coincidence in ways that would fail against every real engine (which always
+constructs a fresh object graph from rows on <code>Load()</code>). To avoid that, <code>MockDatabase</code>
+performs a genuine serialize/deserialize round-trip in memory:</p>
+<pre><code class="language-csharp">public class MockDatabase : IDatabase
+{
+    private byte[] snapshot;
+
+    public void Create() { this.snapshot = null; }
+
+    public bool Exists =&gt; this.snapshot != null;
+
+    public void Save(MyMoney money)
+    {
+        XmlStore.PrepareSave(money); // reuse: RemoveDeleted() across every container
+        var serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
+        using var stream = new MemoryStream();
+        using (var writer = XmlWriter.Create(stream))
+        {
+            serializer.WriteObject(writer, money);
+        }
+        this.snapshot = stream.ToArray();
+    }
+
+    public MyMoney Load(IStatusService status)
+    {
+        if (this.snapshot == null) return new MyMoney();
+        var serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
+        using var stream = new MemoryStream(this.snapshot);
+        using var reader = XmlReader.Create(stream);
+        return (MyMoney)serializer.ReadObject(reader);
+    }
+
+    public DbFlavor DbFlavor =&gt; DbFlavor.Mock; // new enum value, see below
+
+    // Server/DatabasePath/UserId/Password/BackupPath/SupportsUserLogin/
+    // UpgradeRequired/Upgrade()/Delete()/GetLog()/QueryDataSet()/Disconnect():
+    // trivial in-memory fields or no-ops, matching how SqliteDatabase treats
+    // the members it doesn't meaningfully use.
+}
+</code></pre>
+<p>This reuses <code>XmlStore.PrepareSave(MyMoney)</code> — an existing, already-correct,
+already-tested helper (it's what <code>XmlStore.Save()</code> itself calls) — rather than
+hand-rolling a second copy of the dirty-tracking cleanup sequence that could
+drift out of sync with the real one. <code>PrepareSave</code> is currently <code>internal</code> to
+<code>MyMoney.Data</code>; this spec promotes it to <code>public</code> (pure visibility change, no
+behavior change) so <code>MockDatabase</code> — living in a separate assembly, see
+Placement below — can call it. <code>DataContractSerializer</code> and <code>MyMoney.GetKnownTypes()</code>
+are already used by <code>XmlStore</code> for exactly this purpose, so the domain model's
+serializability is proven, not a new assumption.</p>
+<p>New <code>DbFlavor.Mock</code> enum value (in <code>MyMoney.Business/IDatabase.cs</code>) rather than
+reusing <code>DbFlavor.None</code> — <code>DbFlavor</code> is documented as "identifies which storage
+engine an <code>IDatabase</code> implementation talks to," and the mock is a genuine
+distinct engine for this purpose, not the absence of one.</p>
+<h3 id="3-placement-new-mymoneytestsupport-project">3. Placement: new <code>MyMoney.TestSupport</code> project<a class="headerlink" href="#3-placement-new-mymoneytestsupport-project" title="Permanent link">#</a></h3>
+<p>A new class library, <code>Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj</code>,
+holding <code>MockDatabase</code>, <code>DatabaseContractTests</code> (the abstract base), and the
+<code>MockDatabaseContractTests</code>/<code>SqliteDatabaseContractTests</code> concrete fixtures.
+References <code>MyMoney.Business</code> and <code>MyMoney.Data</code> (for <code>XmlStore.PrepareSave</code>
+and <code>SqliteDatabase</code>), plus NUnit (for the <code>[TestFixture]</code>/<code>[Test]</code> attributes
+on the shared classes themselves — the abstract base and its concrete
+subclasses are real, runnable test fixtures, not merely helpers referenced
+<em>by</em> test projects).</p>
+<p><code>Source/WPF/UnitTests/UnitTests.csproj</code> gets a <code>ProjectReference</code> to this new
+project so <code>dotnet test UnitTests.csproj</code> picks up and runs
+<code>MockDatabaseContractTests</code>/<code>SqliteDatabaseContractTests</code> alongside its
+existing tests. This also makes <code>MockDatabase</code> available to <code>UITests.csproj</code>
+or any future test project without duplicating it, matching item #3's framing
+as "a library," not just more files inside <code>UnitTests</code>.</p>
+<h2 id="data-flow">Data Flow<a class="headerlink" href="#data-flow" title="Permanent link">#</a></h2>
+<pre><code>DatabaseContractTests.SaveAndReload_PreservesAccountAndTransactionData()
+  -&gt; this.CreateDatabase()                (subclass-specific: MockDatabase, or
+                                            SqliteDatabase pointed at a temp file)
+  -&gt; build a small MyMoney graph in memory (account, category, payee, transaction)
+  -&gt; this.Database.Save(money)
+  -&gt; reloaded = this.Database.Load(null)
+  -&gt; assert reloaded's data matches what was saved, via independent lookups
+     (FindAccount, GetTransactionsFrom, etc.) - never via reference equality
+     to the original `money` object
+</code></pre>
+<h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">#</a></h2>
+<ul>
+<li><code>MockDatabase.Load()</code> on a <code>Create()</code>-only, never-<code>Save()</code>d instance returns
+  a fresh empty <code>MyMoney</code> (matching every real engine's "new database" behavior).</li>
+<li><code>SqliteDatabaseContractTests.TearDown()</code> deletes its temp file even if a test
+  fails (<code>[TearDown]</code> always runs); the temp file uses a <code>Guid</code>-based name so
+  parallel/repeated runs never collide.</li>
+<li>No engine-unavailability skip-guard needed in this slice — both flavors
+  (mock, SQLite-via-temp-file) are always available in any environment. That
+  concern only arrives with slice 2's SQL Server flavor.</li>
+</ul>
+<h2 id="testing-verifying-this-specs-own-work">Testing (verifying this spec's own work)<a class="headerlink" href="#testing-verifying-this-specs-own-work" title="Permanent link">#</a></h2>
+<ul>
+<li>The 4 shared contract tests must pass identically against both flavors.</li>
+<li>A one-time sanity check (mirroring the layer-extraction plan's own "prove
+  the tripwire is real" discipline): temporarily make <code>MockDatabase.Load()</code>
+  return the same object reference <code>Save()</code> was given (the naive, rejected
+  design), confirm at least one contract test now passes for the <em>wrong</em>
+  reason or a subsequent independent-lookup assertion would fail to catch a
+  bug it should — then revert. This proves the suite is actually exercising a
+  real round-trip, not coincidentally passing either way.</li>
+<li>Full existing suite (<code>dotnet test UnitTests.csproj</code>) must keep passing
+  unchanged alongside the new fixtures.</li>
+<li><code>SqlMappingTests.cs</code> is left untouched (its schema-migration-specific
+  coverage is out of scope, per Non-Goals) but should still pass.
+EOF</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

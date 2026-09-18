@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-16-persistence-concurrency-phase2a/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Persistence Concurrency — Phase 2a (SaveOne/SaveTransfer/SaveBatch Contract + MockDatabase) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Persistence Concurrency \u2014 Phase 2a (SaveOne/SaveTransfer/SaveBatch Contract + MockDatabase) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "What\u0027s next", url: "#whats-next" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="persistence-concurrency-phase-2a-saveonesavetransfersavebatch-contract-mockdatabase-implementation-plan">Persistence Concurrency — Phase 2a (SaveOne/SaveTransfer/SaveBatch Contract + MockDatabase) Implementation Plan<a class="headerlink" href="#persistence-concurrency-phase-2a-saveonesavetransfersavebatch-contract-mockdatabase-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add the new <code>IDatabase.SaveOne&lt;T&gt;</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> write primitives (R2) to the
+<code>IDatabase</code> contract, additively, and give them a real, fully-tested implementation for
+<code>MockDatabase</code> — including genuine <code>RowVersion</code> optimistic-concurrency conflict detection (R4) — so
+the contract itself is proven correct before the two real storage engines implement it for real.</p>
+<p><strong>Architecture:</strong> This is Phase 2 split into three parts, not one giant plan, because
+<code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> need to land for three genuinely different engines
+(<code>MockDatabase</code>, <code>SqliteDatabase</code>, <code>SqlServerStoredProcDatabase</code>), each a large, mostly-mechanical
+but high-stakes retrofit in its own right (real transactions, per-row <code>RowVersion</code> WHERE clauses,
+WAL/<code>busy_timeout</code> tuning). Splitting lets each land as its own reviewable, independently-testable
+PR:</p>
+<ul>
+<li><strong>Phase 2a (this plan):</strong> the <code>IDatabase</code> contract itself, plus a real <code>MockDatabase</code>
+  implementation. Every other existing <code>IDatabase</code> implementation (<code>SqlServerDatabase</code> — the base
+  class <code>SqliteDatabase</code>/<code>SqlCeDatabase</code>/<code>SqlServerStoredProcDatabase</code> all inherit from — plus
+  <code>XmlStore</code>/<code>CsvStore</code>) gets a compiling stub that throws <code>NotImplementedException</code>, so the
+  solution builds and nothing regresses. Nothing here touches <code>Save(MyMoney)</code> or any existing
+  call site — purely additive, matching R1's phasing (retiring <code>Save(MyMoney)</code> is Phase 3).</li>
+<li><strong>Phase 2b (follow-on plan, not written yet):</strong> real <code>SqliteDatabase</code> implementation — WAL mode,
+  <code>busy_timeout</code>, per-row <code>RowVersion</code> WHERE clauses for all 13 tables <code>Save(MyMoney)</code> already
+  writes.</li>
+<li><strong>Phase 2c (follow-on plan, not written yet):</strong> real <code>SqlServerStoredProcDatabase</code>
+  implementation — actual <code>BEGIN/END TRAN</code> spanning each primitive's stored-proc calls (closes
+  issue #27), same per-row <code>RowVersion</code> WHERE clause via <code>ROWVERSION</code>/<code>@ExpectedRowVersion</code>.</li>
+</ul>
+<p><strong>Key design fact this plan discovered and depends on:</strong> every aggregate-root <code>PersistentObject</code>
+sits inside a <code>PersistentContainer</code> whose own <code>.Parent</code> is the owning <code>MyMoney</code> (e.g.
+<code>Account.Parent</code> is the <code>Accounts</code> container; <code>Accounts.Parent</code> is the <code>MyMoney</code> that owns it — see
+<code>Money.cs:789</code>, <code>this.Accounts = new Accounts(this)</code>). So <code>root.Parent?.Parent as MyMoney</code> finds a
+root's owning graph <em>generically</em>, for any aggregate-root type, with no per-type code — this is
+what lets <code>MockDatabase</code>'s <code>SaveBatch</code> stay a single, type-agnostic method instead of a 13-way
+dispatch. <code>Transaction.MyMoney</code> (<code>Money.cs:11450</code>) already does exactly this walk today, just with
+a friendlier name on one type.</p>
+<p><strong>Tech Stack:</strong> .NET 10 (<code>net10.0-windows7.0</code>), NUnit 4.6.1. No new external dependencies.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md</code> (R2's three
+primitives, R3's atomicity framing, R4's <code>RowVersion</code>/<code>ConcurrencyConflictException</code> contract —
+Phase 2a implements R4's <em>detection</em> mechanism for one engine; R3's <em>real</em> per-engine atomicity is
+Phase 2b/2c). Builds on <code>docs/superpowers/plans/2026-09-16-persistence-concurrency-phase1.md</code>
+(already merged — added <code>PersistentObject.RowVersion</code>, the per-flavor <code>RowVersion</code>/<code>Version</code> schema
+column, and FK/index auto-derivation).</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Additive only: <code>IDatabase.Save(MyMoney money)</code> and every existing <code>UpdateXxx</code>/<code>ReadXxx</code> override
+  are untouched. No UI/business call site is rewired in this plan — that is Phase 3 (R1).</li>
+<li>Every <code>IDatabase</code> implementation must still compile after Task 1: <code>SqlServerDatabase</code> (and its
+  subclasses <code>SqliteDatabase</code>/<code>SqlCeDatabase</code>/<code>SqlServerStoredProcDatabase</code>, via inheritance),
+  <code>XmlStore</code>, <code>CsvStore</code>, and <code>MockDatabase</code> each need a body for the three new interface members,
+  even if that body is just <code>throw new NotImplementedException(...)</code> for now.</li>
+<li><code>Split</code>/<code>Investment</code> (owned by <code>Transaction</code>) and <code>RentUnit</code> (owned by <code>RentBuilding</code>, following
+  exactly the same owned-child shape as <code>Split</code>/<code>Transaction</code> — confirmed via
+  <code>Save(MyMoney)</code>'s <code>UpdateBuildings</code> calling <code>UpdateRentUnits</code>+<code>UpdateRentBuildings</code> as one unit,
+  the same pattern <code>UpdateTransactions</code> uses for <code>Split</code>) never implement <code>IAggregateRoot</code>. They
+  only ever commit as part of their owning aggregate's <code>SaveOne</code>/<code>SaveBatch</code> call.</li>
+<li><code>AccountAlias</code>/<code>TransactionExtra</code> are deliberately <strong>excluded</strong> from <code>IAggregateRoot</code> in this
+  plan even though <code>Save(MyMoney)</code> also calls <code>UpdateAccountAliases</code>/<code>UpdateTransactionExtras</code> for
+  them — the design spec's Group-1 aggregate-root list (Background section) never names them.
+  Adding <code>IAggregateRoot</code> to a type later costs nothing (it's a zero-behavior marker), so this is a
+  safe deferral, not a real gap; revisit only if Phase 3's call-site wiring needs them.</li>
+<li>Every task must leave <code>dotnet build Source/WPF/MyMoney.sln</code> at 0 errors and
+  <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> green.</li>
+</ul>
+<hr />
+<h3 id="task-1-add-the-saveonesavetransfersavebatch-contract-to-idatabase">Task 1: Add the <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> contract to <code>IDatabase</code><a class="headerlink" href="#task-1-add-the-saveonesavetransfersavebatch-contract-to-idatabase" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/IDatabase.cs</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Money.cs</code> (10 aggregate-root class declarations, plus a new
+  <code>ConcurrencyConflictException</code> near the existing <code>MoneyException</code>/<code>TransactionException</code>)
+- Modify: <code>Source/WPF/MyMoney.Business/Money_Loans.cs</code> (<code>LoanPayment</code> class declaration)
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (<code>SqlServerDatabase</code> — stub only)
+- Modify: <code>Source/WPF/MyMoney.Data/XmlStore.cs</code> (stub only)
+- Modify: <code>Source/WPF/MyMoney.Data/CsvStore.cs</code> (stub only)
+- Modify: <code>Source/WPF/MyMoney.TestSupport/MockDatabase.cs</code> (stub only — <code>MockDatabase</code> implements
+  <code>IDatabase</code> directly, not via <code>SqlServerDatabase</code>, so it needs its own stub or the solution
+  won't build after this task; Task 2 replaces these three stub bodies with the real
+  implementation)
+- Test: <code>Source/WPF/UnitTests/DataTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>PersistentObject</code>/<code>PersistentObject.RowVersion</code> (Phase 1, <code>Money.cs:389</code>/<code>:468</code>).
+- Produces: <code>IAggregateRoot</code> (<code>Money.cs</code>... actually declared in <code>IDatabase.cs</code> — a marker
+  interface with one member, <code>long Id { get; }</code>), <code>IDatabase.SaveOne&lt;T&gt;(T root) where T :
+  PersistentObject, IAggregateRoot</code>, <code>IDatabase.SaveTransfer(Transaction from, Transaction to)</code>,
+  <code>IDatabase.SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)</code>, <code>ConcurrencyConflictException(
+  PersistentObject root, long expectedRowVersion, long actualRowVersion)</code> — Task 2 (<code>MockDatabase</code>)
+  and the not-yet-written Phase 2b/2c plans all implement against these exact signatures.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/UnitTests/DataTests.cs</code>, right after the existing
+<code>PersistentObject_RowVersion_DefaultsToZeroAndIsSettable</code> test (around line 182), and add
+<code>using System;</code> to the file's existing using block (needed for <code>Type</code>):</p>
+<pre><code class="language-csharp">        [Test]
+        public void AggregateRootTypes_ImplementIAggregateRoot()
+        {
+            Type[] expectedRoots =
+            {
+                typeof(Account), typeof(Category), typeof(Payee), typeof(Currency),
+                typeof(Security), typeof(Alias), typeof(OnlineAccount), typeof(StockSplit),
+                typeof(RentBuilding), typeof(LoanPayment), typeof(Transaction)
+            };
+
+            foreach (Type t in expectedRoots)
+            {
+                Assert.That(typeof(IAggregateRoot).IsAssignableFrom(t), Is.True,
+                    t.Name + &quot; should implement IAggregateRoot&quot;);
+            }
+
+            // Owned children never get their own commit boundary - only their owning
+            // aggregate's SaveOne/SaveBatch call commits them.
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(Split)), Is.False);
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(Investment)), Is.False);
+            Assert.That(typeof(IAggregateRoot).IsAssignableFrom(typeof(RentUnit)), Is.False);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~AggregateRootTypes_ImplementIAggregateRoot"</code>
+Expected: FAIL with a compile error — <code>IAggregateRoot</code> doesn't exist yet.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add <code>IAggregateRoot</code> and the three new <code>IDatabase</code> members</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/IDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">using System.Data;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">using System.Collections.Generic;
+using System.Data;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+</code></pre>
+<p>Then insert the new marker interface right after the <code>DbFlavor</code> enum's closing brace (before the
+<code>/// &lt;summary&gt;\n    /// Interface for talking to different types of money storage.</code> comment):</p>
+<pre><code class="language-csharp">    /// &lt;summary&gt;
+    /// Marker for PersistentObject types that own their own commit boundary - a whole database
+    /// row of their own - and are therefore valid targets of IDatabase.SaveOne/SaveTransfer/
+    /// SaveBatch. Owned children (Split/Investment owned by Transaction; RentUnit owned by
+    /// RentBuilding) never implement this - they only ever commit as part of their owning
+    /// aggregate's SaveOne/SaveBatch call. See
+    /// docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2.
+    /// &lt;/summary&gt;
+    public interface IAggregateRoot
+    {
+        long Id { get; }
+    }
+
+</code></pre>
+<p>Then change:</p>
+<pre><code class="language-csharp">        bool Exists { get; }
+        void Create();
+        MyMoney Load(IStatusService status);
+        void Save(MyMoney money);
+        void Backup(string path);
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        bool Exists { get; }
+        void Create();
+        MyMoney Load(IStatusService status);
+        void Save(MyMoney money);
+
+        /// &lt;summary&gt;
+        /// Atomically commit a single aggregate root (e.g. Account, Category, Transaction with
+        /// its owned Splits/Investment). Implementations throw ConcurrencyConflictException if
+        /// root.RowVersion no longer matches what's actually committed. See the design spec's
+        /// R2/R3/R4.
+        /// &lt;/summary&gt;
+        void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot;
+
+        /// &lt;summary&gt;
+        /// Atomically commit exactly two peer Transactions that must co-commit together (the
+        /// TransformTwoTransactionIntoTransfer shape). See the design spec's R2.
+        /// &lt;/summary&gt;
+        void SaveTransfer(Transaction from, Transaction to);
+
+        /// &lt;summary&gt;
+        /// Atomically commit a heterogeneous batch of aggregate roots together (reconciliation,
+        /// merges, recategorize, and first-time population of a brand-new database). See the
+        /// design spec's R2.
+        /// &lt;/summary&gt;
+        void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots);
+
+        void Backup(string path);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Tag the 11 aggregate-root classes with <code>IAggregateRoot</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/Money.cs</code>, make these 10 exact one-line changes (each class
+already has a public <code>int Id { get; ... }</code> property today, so no new members are needed — this
+is purely a marker):</p>
+<table>
+<thead>
+<tr>
+<th>Line</th>
+<th>From</th>
+<th>To</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2640</td>
+<td><code>public class Account : PersistentObject</code></td>
+<td><code>public class Account : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>3476</td>
+<td><code>public class OnlineAccount : PersistentObject</code></td>
+<td><code>public class OnlineAccount : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>4376</td>
+<td><code>public class Currency : PersistentObject</code></td>
+<td><code>public class Currency : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>5172</td>
+<td><code>public class Payee : PersistentObject</code></td>
+<td><code>public class Payee : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>5290</td>
+<td><code>public class Alias : PersistentObject</code></td>
+<td><code>public class Alias : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>6031</td>
+<td><code>public class RentBuilding : PersistentObject</code></td>
+<td><code>public class RentBuilding : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>7648</td>
+<td><code>public class Category : PersistentObject</code></td>
+<td><code>public class Category : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>8720</td>
+<td><code>public class Security : PersistentObject</code></td>
+<td><code>public class Security : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>10788</td>
+<td><code>public class Transaction : PersistentObject</code></td>
+<td><code>public class Transaction : PersistentObject, IAggregateRoot</code></td>
+</tr>
+<tr>
+<td>15027</td>
+<td><code>public class StockSplit : PersistentObject</code></td>
+<td><code>public class StockSplit : PersistentObject, IAggregateRoot</code></td>
+</tr>
+</tbody>
+</table>
+<p>In <code>Source/WPF/MyMoney.Business/Money_Loans.cs:464</code>, change:</p>
+<pre><code class="language-csharp">    public class LoanPayment : PersistentObject
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">    public class LoanPayment : PersistentObject, IAggregateRoot
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Add <code>ConcurrencyConflictException</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/Money.cs</code>, change:</p>
+<pre><code class="language-csharp">    public class MoneyException : Exception
+    {
+        public MoneyException(string message)
+            : base(message)
+        {
+        }
+
+    }
+
+}
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">    public class MoneyException : Exception
+    {
+        public MoneyException(string message)
+            : base(message)
+        {
+        }
+
+    }
+
+    /// &lt;summary&gt;
+    /// Thrown by IDatabase.SaveOne/SaveTransfer/SaveBatch when a root's RowVersion no longer
+    /// matches what's actually committed - i.e. someone else wrote this row since it was loaded.
+    /// See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+    /// &lt;/summary&gt;
+    public class ConcurrencyConflictException : Exception
+    {
+        public PersistentObject Root { get; }
+        public long ExpectedRowVersion { get; }
+        public long ActualRowVersion { get; }
+
+        public ConcurrencyConflictException(PersistentObject root, long expectedRowVersion, long actualRowVersion)
+            : base(string.Format(
+                &quot;Concurrency conflict saving {0} (Id={1}): expected RowVersion {2} but the caller had {3}.&quot;,
+                root.GetType().Name, ((IAggregateRoot)root).Id, expectedRowVersion, actualRowVersion))
+        {
+            this.Root = root;
+            this.ExpectedRowVersion = expectedRowVersion;
+            this.ActualRowVersion = actualRowVersion;
+        }
+    }
+
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Stub the three methods on every other <code>IDatabase</code> implementation</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, change (around line 736-741):</p>
+<pre><code class="language-csharp">        #endregion
+
+
+        public void UpdateBuildings(RentBuildings buildings)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        #endregion
+
+        public virtual void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(string.Format(
+                &quot;SaveOne is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;, this.DbFlavor));
+        }
+
+        public virtual void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(string.Format(
+                &quot;SaveTransfer is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;, this.DbFlavor));
+        }
+
+        public virtual void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            throw new NotImplementedException(string.Format(
+                &quot;SaveBatch is not yet implemented for {0} - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;, this.DbFlavor));
+        }
+
+        public void UpdateBuildings(RentBuildings buildings)
+</code></pre>
+<p>(<code>System.Collections.Generic</code> and <code>System</code> are already imported at the top of this file — no
+using changes needed here.) <code>SqliteDatabase</code>, <code>SqlCeDatabase</code>, and <code>SqlServerStoredProcDatabase</code>
+all inherit this stub automatically since none of them currently override <code>Save</code>/define their own
+<code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code>.</p>
+<p>In <code>Source/WPF/MyMoney.Data/XmlStore.cs</code>, change (around line 120-128):</p>
+<pre><code class="language-csharp">        public virtual DataSet QueryDataSet(string cmd)
+        {
+            DataSet result = new DataSet();
+            result.ReadXml(this.filename);
+            return result;
+        }
+
+
+        public virtual void Save(MyMoney money)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public virtual DataSet QueryDataSet(string cmd)
+        {
+            DataSet result = new DataSet();
+            result.ReadXml(this.filename);
+            return result;
+        }
+
+        public virtual void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(&quot;XmlStore does not support SaveOne - see the design spec's Non-goals.&quot;);
+        }
+
+        public virtual void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(&quot;XmlStore does not support SaveTransfer - see the design spec's Non-goals.&quot;);
+        }
+
+        public virtual void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            throw new NotImplementedException(&quot;XmlStore does not support SaveBatch - see the design spec's Non-goals.&quot;);
+        }
+
+
+        public virtual void Save(MyMoney money)
+</code></pre>
+<p><code>XmlStore.cs</code> already imports <code>System</code>/<code>System.Collections.Generic</code> — no using changes needed.</p>
+<p>In <code>Source/WPF/MyMoney.TestSupport/MockDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        public void Save(MyMoney money)
+        {
+            this.snapshot = Serialize(money);
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public void Save(MyMoney money)
+        {
+            this.snapshot = Serialize(money);
+        }
+
+        public void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(&quot;SaveOne is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(&quot;SaveTransfer is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+
+        public void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            throw new NotImplementedException(&quot;SaveBatch is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+</code></pre>
+<p>Add <code>using System;</code> and <code>using System.Collections.Generic;</code> to <code>MockDatabase.cs</code>'s existing using
+block (it currently only has <code>System.Data</code>/<code>System.IO</code>/<code>System.Runtime.Serialization</code>/<code>System.Xml</code>/
+<code>Walkabout.Utilities</code>) — Task 2 needs both anyway, so add them here.</p>
+<p>In <code>Source/WPF/MyMoney.Data/CsvStore.cs</code>, change:</p>
+<pre><code class="language-csharp">using System;
+using System.Collections;
+using System.Data;
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data;
+</code></pre>
+<p>and change:</p>
+<pre><code class="language-csharp">        public MyMoney Load(IStatusService status)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void Save(MyMoney money)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public MyMoney Load(IStatusService status)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(&quot;CsvStore does not support SaveOne - it is a write-only export format.&quot;);
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(&quot;CsvStore does not support SaveTransfer - it is a write-only export format.&quot;);
+        }
+
+        public void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            throw new NotImplementedException(&quot;CsvStore does not support SaveBatch - it is a write-only export format.&quot;);
+        }
+
+        public void Save(MyMoney money)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~AggregateRootTypes_ImplementIAggregateRoot"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 8: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors (this is the real proof every
+<code>IDatabase</code> implementation still compiles with the three new members).
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green. Nothing calls the new methods yet,
+so no behavior anywhere should change.</p>
+<ul>
+<li>[ ] <strong>Step 9: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/IDatabase.cs Source/WPF/MyMoney.Business/Money.cs Source/WPF/MyMoney.Business/Money_Loans.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/XmlStore.cs Source/WPF/MyMoney.Data/CsvStore.cs Source/WPF/UnitTests/DataTests.cs
+git commit -m &quot;Add SaveOne/SaveTransfer/SaveBatch to the IDatabase contract (additive, R2)&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-implement-real-saveonesavetransfersavebatch-for-mockdatabase">Task 2: Implement real <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> for <code>MockDatabase</code><a class="headerlink" href="#task-2-implement-real-saveonesavetransfersavebatch-for-mockdatabase" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.TestSupport/MockDatabase.cs</code>
+- Test: <code>Source/WPF/MyMoney.TestSupport/MockDatabaseContractTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IAggregateRoot</code>, <code>ConcurrencyConflictException</code>, <code>IDatabase.SaveOne&lt;T&gt;</code>/
+  <code>SaveTransfer</code>/<code>SaveBatch</code> (Task 1); <code>PersistentObject.Parent</code>/<code>PersistentContainer.Parent</code>
+  (existing, <code>Money.cs:458</code>/<code>:170</code>) for the generic owning-graph walk.
+- Produces: a working reference implementation of the three primitives against which Phase 2b/2c
+  can be judged for behavioral parity (same conflict-detection semantics, same atomicity-on-error
+  guarantee) even though their mechanism (real SQL transactions vs. one in-memory dictionary) is
+  completely different.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/MyMoney.TestSupport/MockDatabaseContractTests.cs</code> (it's already a concrete,
+non-abstract <code>[TestFixture]</code>, so new <code>[Test]</code> methods can go directly on it):</p>
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.TestSupport
+{
+    [TestFixture]
+    public class MockDatabaseContractTests : DatabaseContractTests
+    {
+        protected override IDatabase CreateDatabase()
+        {
+            return new MockDatabase();
+        }
+
+        private static MyMoney BuildOneAccountMoney(out Account account)
+        {
+            MyMoney money = new MyMoney();
+            account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewAccount_PersistsAndSetsRowVersionToOne()
+        {
+            MyMoney money = BuildOneAccountMoney(out Account account);
+
+            this.Database.SaveOne(account);
+
+            Assert.That(account.RowVersion, Is.EqualTo(1));
+            Assert.That(account.IsInserted, Is.False);
+            Assert.That(account.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account found = reloaded.Accounts.FindAccount(&quot;Checking&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateAfterReload_IncrementsRowVersion()
+        {
+            MyMoney money = BuildOneAccountMoney(out Account account);
+            this.Database.SaveOne(account);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Account found = reloaded.Accounts.FindAccount(&quot;Checking&quot;);
+            found.Description = &quot;Updated&quot;;
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Account foundAgain = reloadedAgain.Accounts.FindAccount(&quot;Checking&quot;);
+            Assert.That(foundAgain.Description, Is.EqualTo(&quot;Updated&quot;));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleRowVersion_ThrowsConcurrencyConflictException()
+        {
+            MyMoney money = BuildOneAccountMoney(out Account account);
+            this.Database.SaveOne(account);
+
+            // Two independent readers both load the same committed row.
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Account accountA = readerA.Accounts.FindAccount(&quot;Checking&quot;);
+            accountA.Description = &quot;From A&quot;;
+            this.Database.SaveOne(accountA);
+
+            Account accountB = readerB.Accounts.FindAccount(&quot;Checking&quot;);
+            accountB.Description = &quot;From B&quot;;
+            Assert.Throws&lt;ConcurrencyConflictException&gt;(() =&gt; this.Database.SaveOne(accountB));
+
+            // A's write must still be the one that stuck.
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Accounts.FindAccount(&quot;Checking&quot;).Description, Is.EqualTo(&quot;From A&quot;));
+        }
+
+        [Test]
+        public void SaveTransfer_CommitsBothTransactionsTogether()
+        {
+            MyMoney money = new MyMoney();
+            Account checking = money.Accounts.AddAccount(&quot;Checking&quot;);
+            Account savings = money.Accounts.AddAccount(&quot;Savings&quot;);
+            Transaction from = money.Transactions.NewTransaction(checking);
+            from.Amount = -100m;
+            money.Transactions.AddTransaction(from);
+            Transaction to = money.Transactions.NewTransaction(savings);
+            to.Amount = 100m;
+            money.Transactions.AddTransaction(to);
+
+            this.Database.SaveTransfer(from, to);
+
+            Assert.That(from.RowVersion, Is.EqualTo(1));
+            Assert.That(to.RowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Transactions.GetTransactionsFrom(reloaded.Accounts.FindAccount(&quot;Checking&quot;)).Count, Is.EqualTo(1));
+            Assert.That(reloaded.Transactions.GetTransactionsFrom(reloaded.Accounts.FindAccount(&quot;Savings&quot;)).Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveBatch_OneStaleRootAmongMany_CommitsNoneOfThem()
+        {
+            MyMoney money = new MyMoney();
+            Account a = money.Accounts.AddAccount(&quot;A&quot;);
+            Account b = money.Accounts.AddAccount(&quot;B&quot;);
+            this.Database.SaveBatch(new PersistentObject[] { a, b });
+
+            MyMoney reader = this.Database.Load(null);
+            Account staleA = reader.Accounts.FindAccount(&quot;A&quot;);
+            Account staleB = reader.Accounts.FindAccount(&quot;B&quot;);
+
+            // Someone else updates A first, so staleA's RowVersion (1) is now behind.
+            MyMoney otherWriter = this.Database.Load(null);
+            Account freshA = otherWriter.Accounts.FindAccount(&quot;A&quot;);
+            freshA.Description = &quot;Changed elsewhere&quot;;
+            this.Database.SaveOne(freshA);
+
+            staleA.Description = &quot;Attempted A&quot;;
+            staleB.Description = &quot;Attempted B&quot;;
+            Assert.Throws&lt;ConcurrencyConflictException&gt;(
+                () =&gt; this.Database.SaveBatch(new PersistentObject[] { staleA, staleB }));
+
+            MyMoney reloaded = this.Database.Load(null);
+            // B must NOT have been committed even though only A conflicted.
+            Assert.That(reloaded.Accounts.FindAccount(&quot;B&quot;).Description, Is.Not.EqualTo(&quot;Attempted B&quot;));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~MockDatabaseContractTests"</code>
+Expected: FAIL — Task 1 left <code>MockDatabase.SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> throwing
+<code>NotImplementedException</code>, so all 5 new tests fail with that exception (the pre-existing
+<code>DatabaseContractTests</code> tests in this same fixture still pass, since they only exercise
+<code>Save</code>/<code>Load</code>, untouched so far).</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> and fix <code>Load</code>/<code>Delete</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.TestSupport/MockDatabase.cs</code>, first add the version-tracking field. Change:</p>
+<pre><code class="language-csharp">    public class MockDatabase : IDatabase
+    {
+        private byte[] snapshot;
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">    public class MockDatabase : IDatabase
+    {
+        private byte[] snapshot;
+
+        // RowVersion is [XmlIgnore] (persistence-concurrency Phase 1), so it never round-trips
+        // through the DataContractSerializer snapshot below. This is MockDatabase's own
+        // last-committed-version bookkeeping, restored onto each object by Load() (see
+        // RestoreRowVersions) so a later SaveOne/SaveBatch call has something real to compare
+        // against. Key is (root's concrete type, its Id) since Id alone isn't unique across
+        // tables (an Account and a Category can share Id=1).
+        private readonly Dictionary&lt;(Type RootType, long Id), long&gt; committedVersions = new Dictionary&lt;(Type RootType, long Id), long&gt;();
+</code></pre>
+<p>Change (replacing the three stub bodies Task 1 added, right after <code>Save(MyMoney)</code>):</p>
+<pre><code class="language-csharp">        public void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            throw new NotImplementedException(&quot;SaveOne is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            throw new NotImplementedException(&quot;SaveTransfer is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+
+        public void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            throw new NotImplementedException(&quot;SaveBatch is not yet implemented for MockDatabase - see docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md.&quot;);
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public void SaveOne&lt;T&gt;(T root) where T : PersistentObject, IAggregateRoot
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
+        public void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            List&lt;PersistentObject&gt; list = new List&lt;PersistentObject&gt;(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Validate every root against its last-committed version before mutating anything,
+            // so a conflict on root N of N leaves nothing committed (R3's atomicity requirement).
+            foreach (PersistentObject root in list)
+            {
+                if (!(root is IAggregateRoot identity))
+                {
+                    throw new ArgumentException(string.Format(
+                        &quot;{0} is not a valid SaveBatch root - it must implement IAggregateRoot.&quot;, root.GetType().Name));
+                }
+
+                long committed = this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long v) ? v : 0;
+                if (committed != root.RowVersion)
+                {
+                    throw new ConcurrencyConflictException(root, committed, root.RowVersion);
+                }
+            }
+
+            // MockDatabase has no per-row storage, so it re-serializes the whole owning graph on
+            // every call - unlike SqliteDatabase/SqlServerStoredProcDatabase (Phase 2b/2c), which
+            // only ever touch the given root(s)' own rows. This is a deliberate simplification
+            // for a test double (see
+            // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R2's exemption
+            // of MockDatabase from real transaction semantics): MockDatabase alone cannot catch a
+            // caller relying on unrelated dirty state getting flushed along with it - that check
+            // belongs to the real-engine contract tests landing in Phase 2b/2c, not here.
+            MyMoney owner = list[0].Parent?.Parent as MyMoney;
+            if (owner == null)
+            {
+                throw new InvalidOperationException(&quot;SaveBatch root is not attached to a loaded MyMoney graph.&quot;);
+            }
+            this.Save(owner);
+
+            foreach (PersistentObject root in list)
+            {
+                IAggregateRoot identity = (IAggregateRoot)root;
+                (Type, long) key = (root.GetType(), identity.Id);
+                if (root.IsDeleted)
+                {
+                    this.committedVersions.Remove(key);
+                }
+                else
+                {
+                    long newVersion = root.RowVersion + 1;
+                    this.committedVersions[key] = newVersion;
+                    root.RowVersion = newVersion;
+                    root.OnUpdated();
+                }
+            }
+        }
+</code></pre>
+<p>Change:</p>
+<pre><code class="language-csharp">        public MyMoney Load(IStatusService status)
+        {
+            if (this.snapshot == null)
+            {
+                return new MyMoney();
+            }
+            DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
+            using (MemoryStream stream = new MemoryStream(this.snapshot))
+            using (XmlReader reader = XmlReader.Create(stream))
+            {
+                MyMoney money = (MyMoney)serializer.ReadObject(reader);
+                money.PostDeserializeFixup();
+                money.OnLoaded();
+                return money;
+            }
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public MyMoney Load(IStatusService status)
+        {
+            if (this.snapshot == null)
+            {
+                return new MyMoney();
+            }
+            DataContractSerializer serializer = new DataContractSerializer(typeof(MyMoney), MyMoney.GetKnownTypes());
+            using (MemoryStream stream = new MemoryStream(this.snapshot))
+            using (XmlReader reader = XmlReader.Create(stream))
+            {
+                MyMoney money = (MyMoney)serializer.ReadObject(reader);
+                money.PostDeserializeFixup();
+                money.OnLoaded();
+                this.RestoreRowVersions(money);
+                return money;
+            }
+        }
+
+        private void RestoreRowVersions(MyMoney money)
+        {
+            this.ApplyVersions(money.Accounts);
+            this.ApplyVersions(money.Categories);
+            this.ApplyVersions(money.Payees);
+            this.ApplyVersions(money.Currencies);
+            this.ApplyVersions(money.Securities);
+            this.ApplyVersions(money.Aliases);
+            this.ApplyVersions(money.OnlineAccounts);
+            this.ApplyVersions(money.StockSplits);
+            this.ApplyVersions(money.Buildings);
+            this.ApplyVersions(money.LoanPayments);
+            this.ApplyVersions(money.Transactions);
+        }
+
+        private void ApplyVersions(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            foreach (PersistentObject root in roots)
+            {
+                if (root is IAggregateRoot identity &amp;&amp;
+                    this.committedVersions.TryGetValue((root.GetType(), identity.Id), out long version))
+                {
+                    root.RowVersion = version;
+                }
+            }
+        }
+</code></pre>
+<p>Change:</p>
+<pre><code class="language-csharp">        public void Delete()
+        {
+            this.snapshot = null;
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public void Delete()
+        {
+            this.snapshot = null;
+            this.committedVersions.Clear();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~MockDatabaseContractTests"</code>
+Expected: PASS — all 5 new tests plus every pre-existing <code>DatabaseContractTests</code> test (still
+exercising the untouched <code>Save(MyMoney)</code>/<code>Load</code> path).</p>
+<ul>
+<li>[ ] <strong>Step 5: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green, including
+<code>MockDatabaseSmokeTests</code> and every other consumer of <code>MockDatabase</code> (none of them call the new
+methods, so <code>Load</code>'s added <code>RestoreRowVersions</code> call — a no-op when <code>committedVersions</code> is empty —
+is the only path that touches existing behavior; confirm nothing regresses).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.TestSupport/MockDatabase.cs Source/WPF/MyMoney.TestSupport/MockDatabaseContractTests.cs
+git commit -m &quot;Implement SaveOne/SaveTransfer/SaveBatch with real RowVersion conflict detection for MockDatabase&quot;
+</code></pre>
+<hr />
+<h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">#</a></h2>
+<p>Phase 2a stops at <code>MockDatabase</code> deliberately — it proves the <code>IDatabase</code> contract (shapes,
+exception semantics, atomicity-on-conflict behavior) is right before committing two real storage
+engines to it. <strong>Phase 2b</strong> (not yet planned) gives <code>SqliteDatabase</code> a real implementation: WAL
+mode + <code>busy_timeout</code> (neither set today — confirmed via <code>SqliteDatabase.Connect()</code>, which only
+sets <code>PRAGMA foreign_keys = ON</code>), and per-row <code>RowVersion</code> WHERE clauses added to all 13 tables'
+insert/update/delete SQL (<code>SqlServerDatabase.UpdateAccounts</code> et al., inherited by <code>SqliteDatabase</code>
+today with no version check at all). Once Phase 2b lands, the five new tests in
+<code>MockDatabaseContractTests</code> should be promoted into the shared <code>DatabaseContractTests</code> base class
+so <code>SqliteDatabaseContractTests</code> inherits and re-runs them for real. <strong>Phase 2c</strong> (not yet planned)
+does the same for <code>SqlServerStoredProcDatabase</code>, additionally wrapping each primitive's
+stored-proc calls in one real <code>SqlTransaction</code> (closing issue #27 — today's <code>UpdateAccounts</code>
+override there opens a brand-new <code>SqlConnection</code> per call with no transaction at all). Phase 3
+(already scoped in the Phase 1 plan) wires the ~20 real UI/business call sites to whichever of
+these three engines they're pointed at, and only then retires <code>IDatabase.Save(MyMoney)</code>.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

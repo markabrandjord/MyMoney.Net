@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-16-persistence-concurrency-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Transactional, Concurrency-Safe Persistence for MyMoney - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Transactional, Concurrency-Safe Persistence for MyMoney", url: "#_top", children: [
+              {title: "Background", url: "#background" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-goals", url: "#non-goals" },
+              {title: "Current-state findings", url: "#current-state-findings" },
+              {title: "Requirements", url: "#requirements" },
+              {title: "Testing / verification strategy", url: "#testing-verification-strategy" },
+              {title: "Decisions made while drafting (flag if you disagree)", url: "#decisions-made-while-drafting-flag-if-you-disagree" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="transactional-concurrency-safe-persistence-for-mymoney">Transactional, Concurrency-Safe Persistence for MyMoney<a class="headerlink" href="#transactional-concurrency-safe-persistence-for-mymoney" title="Permanent link">#</a></h1>
+<h2 id="background">Background<a class="headerlink" href="#background" title="Permanent link">#</a></h2>
+<p>Issue #27 (found during #22's final review) discovered that <code>SqlServerStoredProcDatabase</code>'s
+<code>Save()</code> path is not atomic: every <code>UpdateXxx</code> override opens its own <code>SqlConnection</code> and never
+enlists in the ambient transaction <code>SqlDatabase.Save(MyMoney)</code> begins, so a partial failure mid-save
+leaves whatever succeeded committed, with no rollback, and in-memory dirty-tracking state diverging
+from the database. Investigating further surfaced that <code>SqliteDatabase</code> has the same root problem in
+a different guise: <code>Save()</code>'s <code>this.transaction = tran as SqlTransaction</code> cast always fails for a
+<code>SQLiteTransaction</code>, so the private transaction field is silently <code>null</code>; Sqlite's CRUD only "works"
+today because <code>System.Data.SQLite</code> auto-enlists commands into whichever transaction is active on
+their connection when the command's own <code>Transaction</code> property is unset — an undocumented reliance
+on one ADO provider's leniency, not a guarantee this codebase asserts anywhere.</p>
+<p>Pulling on that thread reframed the problem twice:</p>
+<ol>
+<li><strong>Atomicity alone is not the goal.</strong> The actual goal is letting more than one writer — a second
+   household member on another laptop, or an increasingly autonomous AI agent (e.g. downloading and
+   reconciling bank transactions) — safely read and write the same backing data at the same time as
+   an interactive user, without silent data loss. Atomicity of a single <code>Save()</code> call is a
+   prerequisite for that, not a substitute for it.</li>
+<li><strong>The existing "load everything once, hold it, flush whatever's dirty on demand" architecture is
+   the actual obstacle</strong>, independent of which database engine is underneath. Every write path in the
+   app — manual register entry, QIF/OFX/CSV import, reconciliation, category/payee/security merge,
+   recategorize — funnels through exactly one production entry point
+   (<code>Money.Save(IDatabase)</code> → <code>database.Save(this)</code>), triggered only by a handful of UI actions
+   (explicit Save, file switch, a "pending changes" flyout the user has to notice and click). There
+   is no autosave timer anywhere in the codebase. This means an arbitrary, unbounded amount of unrelated
+   dirty state can accumulate before ever reaching the database, which is both a durability risk and
+   the reason two writers' changes are likely to collide: the longer an edit sits dirty in memory, the
+   larger the window for someone else to have touched the same row.</li>
+</ol>
+<p>This document specs the redesign that follows from both reframings.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<p>Three layers, all in scope for this effort:</p>
+<ul>
+<li><strong>Layer 0 — Atomicity.</strong> Every write to the database, regardless of how large or small, is
+  all-or-nothing on every supported flavor.</li>
+<li><strong>Layer 1 — Conflict detection.</strong> Two writers touching the same row is <em>detected</em>, not silently
+  resolved by last-write-wins.</li>
+<li><strong>Layer 2 — Staleness/refresh.</strong> A long-lived session has a way to learn that data changed
+  underneath it, instead of only finding out on restart.</li>
+</ul>
+<p>Two supported backends going forward:</p>
+<ul>
+<li><strong>SQLite</strong> — in-process, single machine. May reasonably extend to "this machine's interactive
+  session + a locally-running agent process," but is explicitly <strong>not</strong> a supported path for two
+  separate machines (SQLite's locking model assumes a local filesystem with correctly-implemented
+  lock primitives; network filesystems/cloud-sync folders are documented as unreliable for this,
+  independent of any application-level fix).</li>
+<li><strong>SQL Server</strong> — the only supported backend for anything crossing a machine boundary (a second
+  laptop, or a remote/cloud-hosted agent).</li>
+</ul>
+<h2 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Live, real-time collaborative UI sync (e.g., seeing a second user's cursor, or changes appearing
+  without any user action). Layer 2 is a refresh mechanism, not a live-sync one — see Approach below.</li>
+<li>Reviving <code>XmlStore</code> or <code>SqlCeDatabase</code> as supported live backing stores. Both are explicitly
+  <strong>out of scope, revisit later</strong>: <code>XmlStore</code> is architecturally incompatible with frequent small
+  commits (no way to update one row without rewriting the whole file) and <code>SqlCeDatabase</code> shares
+  <code>SqliteDatabase</code>'s broken transaction-cast pattern with no plan reviewed here to fix it.
+  <code>CsvStore</code> is unaffected by any of this — it's a write-only, one-way export
+  (<code>CsvStore.Load()</code> throws <code>NotImplementedException</code>), never a live backing store, and needs no
+  changes.</li>
+<li>Enabling nullable reference types (issue #18). Unrelated to this effort; empirically checked
+  during scoping (<code>&lt;Nullable&gt;enable&lt;/Nullable&gt;</code> on <code>MyMoney.Business</code> alone produced 1,586 warnings)
+  and confirmed to be its own multi-week effort, not something to fold in here.</li>
+<li>Designing the UI/UX for a surfaced conflict (a reload prompt, a merge dialog, etc.). This spec's
+  job is to make conflicts detectable and throw a typed exception; what the UI does with that is
+  future work.</li>
+<li><code>Source/Uno</code>/<code>Source/Xamarin</code> thin clients (issue #21) — separate initiative, unaffected.</li>
+</ul>
+<h2 id="current-state-findings">Current-state findings<a class="headerlink" href="#current-state-findings" title="Permanent link">#</a></h2>
+<p>Full detail lives in this session's history; the load-bearing facts:</p>
+<ul>
+<li><strong>Single write entry point.</strong> No business or UI code calls per-entity methods
+  (<code>UpdateAccounts</code>, <code>UpdateTransactions</code>, etc.) directly — confirmed by grep across
+  <code>Source/WPF</code> outside test projects. Every write goes through
+  <code>Money.Save(IDatabase)</code> (<code>MyMoney.Business/Money.cs:1050</code>) → <code>database.Save(this)</code>.</li>
+<li><strong><code>SqlServerDatabase.Save(MyMoney)</code></strong> (<code>MyMoney.Data/SqlDatabase.cs:595</code>) is not <code>virtual</code>,
+  opens one ambient transaction, and calls all 13 <code>UpdateXxx</code> methods. Its own <code>UpdateXxx</code>
+  implementations correctly enlist via <code>ConnectSqlServer()</code> + <code>this.transaction</code>.</li>
+<li><strong><code>SqlServerStoredProcDatabase</code></strong> overrides effectively every <code>UpdateXxx</code>/<code>ReadXxx</code> to call
+  stored procedures, but each override opens a brand-new <code>SqlConnection</code> and never touches
+  <code>this.transaction</code> (issue #27). Stored procs themselves are single-statement, no <code>BEGIN TRAN</code>.
+  A loop over many rows within one <code>UpdateXxx</code> call auto-commits each row independently — not
+  atomic even within one entity type's batch.</li>
+<li><strong><code>SqliteDatabase</code></strong> overrides <code>Connect()</code> only, inherits the non-virtual <code>Save()</code>, and its
+  <code>this.transaction = tran as SqlTransaction</code> cast always fails silently. No <code>journal_mode</code> or
+  <code>busy_timeout</code> pragma is set anywhere — default rollback-journal mode, not tuned for any
+  contention at all.</li>
+<li><strong>No workflow saves incrementally today.</strong> Grepped every importer under <code>Importers/</code> for calls
+  to <code>Save</code> — none exist. A <code>ChangeTracker.IsDirty</code> flag drives a "pending changes" UI flyout the
+  user must click; there is no autosave timer.</li>
+<li><strong>Commit-boundary mapping</strong> (from mapping every dialog/view/importer that mutates persistent
+  entities):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Shape</th>
+<th>Examples</th>
+<th>Natural commit boundary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>One aggregate root</td>
+<td>Account/Category/Payee/Security/Currency/Alias/Loan dialogs; register grid row edit; Transaction+its Splits/Investment</td>
+<td>Dialog OK / <code>DataGrid.RowEditEnding</code> — already fires today, just does no persistence</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Two peer roots, must co-commit</td>
+<td>Transfer creation (<code>TransactionsView.xaml.cs:4292 TransformTwoTransactionIntoTransfer</code>)</td>
+<td>The method that links both <code>Transaction.Transfer</code> fields</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Independent, unbounded stream</td>
+<td>QIF/OFX/CSV import — each importer creates one <code>Transaction</code> per external record, decided independently</td>
+<td>Once per imported record, not once for the whole file</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Bounded batch, one logical operation</td>
+<td>Reconciliation (<code>BalanceControl.xaml.cs:608 Done_Click</code>, UI's own words: "commit this set of reconciled transactions"); <code>Payee.Merge</code>/<code>Security.Merge</code>/category merge; Recategorize (<code>TransactionsView.xaml.cs:4024</code>, already wrapped in <code>BeginUpdate</code>/<code>EndUpdate</code> — an in-memory-only boundary today)</td>
+<td>The method/click that already exists as the "this is one unit" moment</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Not a SQL-transaction problem</td>
+<td>Attachments (<code>AttachmentManager.cs</code> — filesystem writes, <code>File.Copy</code>/<code>File.Move</code>); credential dialogs</td>
+<td>Out of scope for this spec</td>
+</tr>
+</tbody>
+</table>
+<h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">#</a></h2>
+<h3 id="r1-retire-idatabasesavemymoney">R1 — Retire <code>IDatabase.Save(MyMoney)</code><a class="headerlink" href="#r1-retire-idatabasesavemymoney" title="Permanent link">#</a></h3>
+<p>No implementation of <code>IDatabase</code> keeps a whole-graph <code>Save(MyMoney money)</code> method. Every current
+caller is replaced:</p>
+<ul>
+<li>Ongoing editing (manual entry, transfers, imports, reconciliation, merges, recategorize) moves to
+  R2's new primitives, called at the commit boundaries already identified above — not accumulated
+  and flushed later.</li>
+<li><strong>Database duplication</strong> ("Save As", or any future "save a copy") is a storage-engine-native
+  operation, entirely outside <code>IDatabase</code>'s write API:</li>
+<li>SQLite: close the connection, <code>File.Copy()</code> the <code>.db</code> file to the new path, open the copy as a
+    fresh <code>SqliteDatabase</code>. Valid because SQLite fully supports file-copy duplication once the
+    source connection is closed (no mid-write state to corrupt).</li>
+<li>SQL Server: <code>BACKUP DATABASE ... TO DISK</code> + <code>RESTORE DATABASE &lt;newname&gt; FROM DISK ...</code> via
+    T-SQL (issued from the admin-tier connection, matching the existing <code>MyMoneyAdmin</code> bootstrap
+    pattern), then connect to the restored database.</li>
+<li><code>this.myMoney.MarkAllNew()</code> (currently used to force a full rewrite in <code>SaveNewDatabase</code>) is
+    deleted along with the code path that needed it.</li>
+<li><strong>First-time population of a brand-new, empty database</strong> (<code>SampleDataGenerator.Create()</code>, or any
+  future "generate then persist" flow) has no existing file/database to duplicate from, so it makes
+  exactly one call to <code>SaveBatch</code> (R2) with every generated object, immediately after generation
+  completes. This is the one legitimate remaining "big batch" call in the system, and it's fine
+  specifically because the target has no other writers by construction (nothing else could be
+  connected to a database that didn't exist a moment ago).</li>
+<li><code>OpenDatabase()</code>'s <code>SaveIfDirty()</code> call is deleted. Once every edit commits at its own boundary,
+  <code>myMoney</code>'s dirty state is always empty by the time the user chooses to open a different database
+  — switching files becomes close-old-connection, open-new-connection, reload, with no bulk write at
+  all.</li>
+</ul>
+<h3 id="r2-new-idatabase-write-primitives">R2 — New <code>IDatabase</code> write primitives<a class="headerlink" href="#r2-new-idatabase-write-primitives" title="Permanent link">#</a></h3>
+<p>Three methods, replacing the retired <code>Save(MyMoney)</code>, framed around aggregate roots rather than one
+method per entity type:</p>
+<pre><code class="language-csharp">void SaveOne&lt;T&gt;(T root) where T : PersistentObject;
+void SaveTransfer(Transaction from, Transaction to);
+void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots);
+</code></pre>
+<ul>
+<li><strong><code>SaveOne&lt;T&gt;</code></strong> — Group 1's shape. Covers every single-entity dialog/grid-row
+  (<code>Account</code>, <code>Category</code>, <code>Payee</code>, <code>Security</code>, <code>Currency</code>, <code>Alias</code>, <code>Loan</code>, <code>RentBuilding</code>,
+  <code>RentUnit</code>, <code>StockSplit</code>, <code>OnlineAccount</code>) and <code>Transaction</code> together with its owned <code>Splits</code>/
+  <code>Investment</code> — a <code>Transaction</code>'s splits are part of its aggregate, not peers, so <code>SaveOne&lt;Transaction&gt;</code>
+  is responsible for committing both the transaction row and its splits/investment as one unit.
+  Group 3 (QIF/OFX/CSV import) needs no new method: each importer calls <code>SaveOne&lt;Transaction&gt;</code> once
+  per record inside its existing read loop, instead of accumulating and never saving at all.
+  <code>Split</code>/<code>Investment</code> are not valid <code>T</code> for <code>SaveOne</code> on their own — they have no independent
+  commit boundary, only their owning <code>Transaction</code> does — so <code>SaveOne&lt;T&gt;</code>'s generic constraint is
+  narrowed to aggregate-root types specifically (a small marker interface or explicit type list,
+  decided at implementation time), not merely <code>PersistentObject</code>, to make this a compile-time error
+  rather than a runtime one.</li>
+<li><strong><code>SaveTransfer</code></strong> — Group 2's shape, kept as its own named method rather than folded into
+  <code>SaveBatch</code>, because it's a real, distinct shape (exactly two peer aggregates that must co-commit,
+  not an arbitrary N). Maps directly onto <code>TransformTwoTransactionIntoTransfer</code>'s existing logic.</li>
+<li><strong><code>SaveBatch</code></strong> — Group 4's shape (reconciliation's <code>Done_Click</code>, the <code>Merge</code> methods,
+  <code>Recategorize</code>'s <code>BeginUpdate</code>/<code>EndUpdate</code> loop) and the one legitimate bulk case from R1
+  (first-time population of a brand-new database). Heterogeneous <code>PersistentObject</code> roots, all
+  committed together or not at all.</li>
+</ul>
+<p>All three live directly on <code>IDatabase</code> (not a separate capability interface), so every
+implementation has one uniform contract:</p>
+<ul>
+<li><code>SqliteDatabase</code> and <code>SqlServerDatabase</code>/<code>SqlServerStoredProcDatabase</code> implement real,
+  minimal-duration atomic transactions per call (R3).</li>
+<li><code>MockDatabase</code> implements them as straightforward in-memory mutations (no transaction semantics
+  needed for a test double).</li>
+</ul>
+<h3 id="r3-atomicity-per-flavor">R3 — Atomicity, per flavor<a class="headerlink" href="#r3-atomicity-per-flavor" title="Permanent link">#</a></h3>
+<p>Each of the three primitives above must be genuinely atomic on both supported flavors: everything
+the call touches commits together, or none of it does, and a failure leaves in-memory dirty-tracking
+state (<code>IsChanged</code>/<code>IsInserted</code>/<code>IsDeleted</code>, cleared today via <code>OnUpdated()</code>/<code>RemoveDeleted()</code>) exactly
+matching what's actually in the database — never cleared for anything that didn't actually commit.</p>
+<ul>
+<li><strong>SQL Server</strong>: one <code>SqlConnection</code>, one <code>SqlTransaction</code>, spanning every stored-proc call the
+  primitive needs (e.g. <code>SaveOne&lt;Transaction&gt;</code> wraps the transaction row's own insert/update/delete
+  plus every split row's, in one transaction). This directly closes issue #27 — no more
+  connection-per-<code>UpdateXxx</code>-call, no more an ambient transaction wrapping nothing.</li>
+<li><strong>SQLite</strong>: <code>PRAGMA journal_mode=WAL</code> (readers never block writers, writers never block readers)
+  and a configured <code>busy_timeout</code> (so a second writer retries instead of failing immediately on
+  <code>SQLITE_BUSY</code>) — neither is set anywhere today. One writer at a time is still enforced by SQLite
+  itself; short, well-scoped transactions (which R2's per-aggregate/per-batch primitives naturally
+  produce, versus today's unbounded whole-graph flush) minimize how long that lock is held, which
+  matters more here than under SQL Server since it directly determines how long a second writer
+  (e.g., a same-machine local agent) is blocked.</li>
+<li>Because each primitive's scope is now small and enumerable (one aggregate, two transactions, or
+  an explicit batch — never "whatever happens to be dirty"), the atomic unit each transaction must
+  cover is well-defined at the call site, not an open-ended "everything in the schema."</li>
+</ul>
+<h3 id="r4-conflict-detection-layer-1">R4 — Conflict detection (Layer 1)<a class="headerlink" href="#r4-conflict-detection-layer-1" title="Permanent link">#</a></h3>
+<p><em>(Proposed design — this specific mechanism was not walked through turn-by-turn in the design
+conversation; confirm or adjust in review.)</em></p>
+<p>Add a version column to every table <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> can write, and check it on
+every update/delete:</p>
+<ul>
+<li><strong>SQL Server</strong>: native <code>ROWVERSION</code> (<code>TIMESTAMP</code>) column — engine-maintained, auto-incrementing
+  <code>binary(8)</code>, no application logic needed to bump it. Every <code>_Update</code>/<code>_Delete</code> stored proc gains a
+  <code>WHERE Id = @Id AND RowVersion = @ExpectedRowVersion</code> clause (add this in the same pass as #24's
+  missing FKs/indexes, since both touch schema generation and stored-proc definitions together).</li>
+<li><strong>SQLite</strong>: no native rowversion type; an application-maintained <code>INTEGER Version</code> column,
+  incremented by the application (<code>UPDATE ... SET Version = Version + 1 ... WHERE Id = @Id AND
+  Version = @ExpectedVersion</code>), same zero-rows-affected-means-conflict pattern.</li>
+<li><code>PersistentObject</code> gains a <code>Version</code>/<code>RowVersion</code> property, populated on load, checked on save.</li>
+<li>When an update/delete affects zero rows where one was expected, the primitive throws a new,
+  specific <code>ConcurrencyConflictException</code> rather than silently proceeding or swallowing the
+  mismatch. Deciding what a caller <em>does</em> with that exception (reload, merge UI, retry) is
+  explicitly deferred (see Non-goals) — this requirement is only that the conflict is detectable and
+  surfaced.</li>
+<li>This item folds in issue #24 (missing FKs/secondary indexes): the version-column work already
+  touches every table's schema generation and every <code>_Update</code>/<code>_Delete</code> proc, so adding the missing
+  FKs and indexes (needed for correctness and for the indexed lookups this check relies on) rides
+  along in the same pass rather than a separate one.</li>
+</ul>
+<h3 id="r5-staleness-refresh-layer-2">R5 — Staleness / refresh (Layer 2)<a class="headerlink" href="#r5-staleness-refresh-layer-2" title="Permanent link">#</a></h3>
+<p><em>(Proposed design — pull-based, not push-based; this specific choice was not discussed turn-by-turn
+in the design conversation; confirm or adjust in review.)</em></p>
+<p>A long-lived session needs a way to learn that rows changed underneath it. Given the actual target
+scenarios (a spouse on another laptop via SQL Server; a locally-running agent on the same machine via
+SQLite or SQL Server) don't require live, sub-second sync, and given the infrastructure cost of a true
+push mechanism (SignalR, <code>SqlDependency</code> with its broker-configuration fragility, file-system
+watchers) is disproportionate to that need:</p>
+<ul>
+<li><strong>Pull-based refresh</strong>, triggered by the UI (on window focus, an explicit "Refresh" command, or a
+  periodic timer at a deliberately coarse interval — not sub-second) rather than a live push
+  notification.</li>
+<li>Reuses R4's version column as the change-marker: a cheap <code>SELECT MAX(Version)</code>/<code>MAX(RowVersion)</code>
+  per table (or one watermark table) answers "has anything changed at all" before doing any real
+  work; only tables whose watermark advanced get a real <code>WHERE Version &gt; @LastSeenVersion</code> pull.</li>
+<li>New rows/changes pulled this way get merged into the live <code>MyMoney</code> graph without disturbing the
+  session's own in-flight, uncommitted edits (an edit in progress in the register grid is not yet
+  dirty-tracked as "committed" until its own <code>SaveOne</code> fires, so a concurrent refresh pulling in
+  someone else's rows doesn't collide with it at the object-model level — collision at the <em>row</em>
+  level, if the same row was independently edited by both sides, is R4's job to catch, not R5's).</li>
+<li>This is the layer issue #7 (<code>UiDispatcher</code>'s live <code>System.Windows.Threading.Dispatcher</code> dependency
+  in <code>PersistentObject</code>/<code>PersistentContainer</code>'s change-notification plumbing) becomes directly
+  relevant: a background-thread-originated refresh pushing changes into a live UI-bound graph is
+  exactly the scenario that plumbing has never been stress-tested for. This spec's implementation
+  must explicitly decide — not defer again — whether to rewrite <code>UiDispatcher</code> onto
+  <code>SynchronizationContext</code> first (architecturally cleaner, <code>WindowsBase</code>-free) or proceed on the
+  existing <code>Dispatcher</code>-based plumbing with the risk named in writing. Recommendation: rewrite first,
+  given R5 is the first real stress test this plumbing will face and a wrong assumption here risks
+  silent UI staleness or a threading deadlock in the code that tracks every change to the user's
+  real financial data.</li>
+</ul>
+<h3 id="r6-test-infrastructure-prerequisites">R6 — Test infrastructure prerequisites<a class="headerlink" href="#r6-test-infrastructure-prerequisites" title="Permanent link">#</a></h3>
+<p>Not part of this design, but must land first so this effort's own verification is trustworthy:</p>
+<ul>
+<li><strong>#28</strong> — tag <code>SqlServerDatabaseContractTests</code> with an NUnit category so it's actually discoverable
+  via CI/the documented <code>dotnet test</code> command, instead of silently never running.</li>
+<li><strong>#25</strong> — serialize (or otherwise stop racing) <code>SqlServerStoredProcDatabaseTests</code> and
+  <code>SqlServerDatabaseContractTests</code> against the shared live SQL Server, so this effort's new
+  atomicity/conflict-detection tests aren't flaky from day one.</li>
+</ul>
+<h3 id="r7-folds-into-issue-1">R7 — Folds into issue #1<a class="headerlink" href="#r7-folds-into-issue-1" title="Permanent link">#</a></h3>
+<p>Closes out issue #1's remaining item #3 slices:</p>
+<ul>
+<li><strong>#19</strong> (narrowed to "SQL Server as third <code>IDatabase</code> contract-test flavor") rides along with this
+  effort's own SQL Server contract-test extensions (needed here anyway to verify R3/R4).</li>
+<li><strong>#7</strong> is resolved by R5's explicit decision (rewrite <code>UiDispatcher</code>, or document the risk),
+  not deferred again.</li>
+<li>Issue #1 can close once this plan lands.</li>
+<li><strong>#31</strong> (the larger self-verifying-test-data/seed-derived-canary/end-to-end FlaUI parity scope,
+  split out of #19) remains independently scoped and does <strong>not</strong> block this effort or issue #1.</li>
+</ul>
+<h2 id="testing-verification-strategy">Testing / verification strategy<a class="headerlink" href="#testing-verification-strategy" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Atomicity (R3)</strong>: inject a failure partway through a multi-row <code>SaveBatch</code>/multi-table
+  <code>SaveOne&lt;Transaction&gt;</code> call (e.g., a bad row N of M) and assert (a) nothing committed, (b) in-memory
+  dirty flags are unchanged so the same call can be safely retried. Run against both flavors.</li>
+<li><strong>Conflict detection (R4)</strong>: two <code>IDatabase</code> handles pointed at the same row, one updates it, the
+  other's write attempt on the stale version must throw <code>ConcurrencyConflictException</code>, not silently
+  succeed.</li>
+<li><strong>Concurrency under load (SQLite specifically)</strong>: two writers issuing overlapping <code>SaveOne</code>/
+  <code>SaveBatch</code> calls against one WAL-mode file, asserting both eventually succeed (no unbounded
+  <code>SQLITE_BUSY</code> failures) and no corruption.</li>
+<li><strong>Contract-test extension</strong>: the shared <code>IDatabase</code> contract suite (<code>MockDatabase</code>/
+  <code>SqliteDatabase</code> today) gains the new <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> methods, run against all
+  three flavors including SQL Server (R7/#19).</li>
+<li>Full solution build + <code>dotnet test Source/WPF/MyMoney.sln</code> green (accounting for the pre-existing,
+  unrelated <code>ScenarioTest</code>/FlaUI flakes already tracked in #26) before and after, per this repo's
+  usual verification bar.</li>
+</ul>
+<h2 id="decisions-made-while-drafting-flag-if-you-disagree">Decisions made while drafting (flag if you disagree)<a class="headerlink" href="#decisions-made-while-drafting-flag-if-you-disagree" title="Permanent link">#</a></h2>
+<ul>
+<li>R4/R5's concrete mechanisms (rowversion-style optimistic concurrency; pull-based rather than
+  push-based refresh) are reasonable, well-justified defaults consistent with everything else agreed
+  in the design conversation, but were not walked through explicitly turn-by-turn the way R1–R3 were.</li>
+<li>R5 recommends rewriting <code>UiDispatcher</code> onto <code>SynchronizationContext</code> (resolving #7) rather than
+  proceeding on the existing <code>Dispatcher</code> plumbing with documented risk — the conversation identified
+  #7 as relevant and in-scope but didn't settle which of its two options to take.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

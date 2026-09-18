@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-18-business-layer-subsystem-migration-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Business-layer subsystem migration: phase 1 (Taxes, StockQuotes, Importers, Ofx-parsing) - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Business-layer subsystem migration: phase 1 (Taxes, StockQuotes, Importers, Ofx-parsing)", url: "#_top", children: [
+              {title: "Context", url: "#context" },
+              {title: "Goal", url: "#goal" },
+              {title: "Non-goals (this phase)", url: "#non-goals-this-phase" },
+              {title: "Migration pattern (applied per subsystem)", url: "#migration-pattern-applied-per-subsystem" },
+              {title: "Test subsystem shape", url: "#test-subsystem-shape" },
+              {title: "Regression safety net (from #4)", url: "#regression-safety-net-from-4" },
+              {title: "Roadmap (sketch only \u2014 future phases get their own spec)", url: "#roadmap-sketch-only-future-phases-get-their-own-spec" },
+              {title: "Testing", url: "#testing" },
+              {title: "Open questions carried forward (not blocking phase 1)", url: "#open-questions-carried-forward-not-blocking-phase-1" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="business-layer-subsystem-migration-phase-1-taxes-stockquotes-importers-ofx-parsing">Business-layer subsystem migration: phase 1 (Taxes, StockQuotes, Importers, Ofx-parsing)<a class="headerlink" href="#business-layer-subsystem-migration-phase-1-taxes-stockquotes-importers-ofx-parsing" title="Permanent link">#</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p>Issue #1 (3-tier architecture epic) is functionally done: <code>MyMoney.Business</code>/<code>MyMoney.Data</code>
+exist as separate class libraries, <code>LayerBoundaryTests</code> enforce the WPF-free boundary, and
+item #3's two remaining sub-slices (SQL Server contract-test flavor, old #19; UiDispatcher
+portability, old #7) are both closed. What's left is formal closure, not open work.</p>
+<p>Issue #5 is the follow-on: the WPF UI project (<code>Source/WPF/MyMoney</code>, 180 files) is still
+~3x the size of <code>MyMoney.Business</code> and ~6x <code>MyMoney.Data</code>, and several logic-heavy folders —
+<code>Importers/</code>, <code>Ofx/</code>, <code>Reports/</code>, <code>Taxes/</code>, <code>Charts/</code>, <code>StockQuotes/</code> — sit inside the UI
+project rather than the business layer. #5's own survey (re-verified against the current
+tree while writing this spec) found:</p>
+<table>
+<thead>
+<tr>
+<th>Folder</th>
+<th>Files</th>
+<th>Lines</th>
+<th>WPF-coupled files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Taxes</td>
+<td>5</td>
+<td>1,189</td>
+<td>0</td>
+</tr>
+<tr>
+<td>StockQuotes</td>
+<td>9</td>
+<td>4,108</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Importers</td>
+<td>7</td>
+<td>2,217</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Ofx</td>
+<td>8</td>
+<td>10,313</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<p>Taxes/StockQuotes/Importers/Ofx-parsing are relocations, not redesigns — WPF coupling is
+either zero or already sits behind a clean seam (<code>IOnlineService</code> for StockQuotes providers,
+<code>Importer.Import(string file)</code> for Importers, the Ofx parsing/download split). Reports needs
+a genuinely new data-layer query/aggregation API (<code>IDatabase</code> currently only does whole-graph
+<code>Load()</code>, not filtered/subtotaled queries) and is explicitly <strong>out of scope for this phase</strong> —
+tracked as its own future effort.</p>
+<p><code>MainWindow.xaml.cs</code> (5,317 lines) was surveyed separately: most of it is legitimate UI
+(command <code>CanExecute</code>/<code>Executed</code> plumbing, navigation, dialog-opening menu handlers, panel
+show/hide) but a real subset is decision logic wearing a UI costume — file/database lifecycle
+(<code>LoadDatabase</code>, <code>CreateNewDatabase</code>, <code>Save</code>/<code>SaveIfDirty</code>, <code>SaveAsSqlCe</code>/<code>SaveAsSqlite</code>/
+<code>SaveAsXml</code>/<code>SaveAsBinaryXml</code>, <code>ExportCsv</code>) and import dispatch (<code>ImportQif</code>, <code>ImportOfx</code>,
+<code>ImportXml</code>, <code>ImportMoneyFile</code>, <code>ImportCsv</code>). The import-dispatch half is the same seam as
+the Importers migration, so it's folded into this phase rather than deferred.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">#</a></h2>
+<p>Move Taxes, StockQuotes, Importers, Ofx-parsing, and MainWindow's file/database-lifecycle +
+import-dispatch logic into <code>MyMoney.Business</code>, each with real business-layer tests, so that
+this logic can be exercised in the fast business-layer TDD loop instead of requiring the full
+WPF app and an interactive desktop.</p>
+<h2 id="non-goals-this-phase">Non-goals (this phase)<a class="headerlink" href="#non-goals-this-phase" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Reports.</strong> Needs a new business-layer query/aggregation API; its own future spec.</li>
+<li><strong>The rest of MainWindow's orchestration</strong> (navigation, command plumbing, dialog-opening
+  handlers, panel show/hide). Legitimately UI; not touched here.</li>
+<li><strong>Charts.</strong> Mostly genuine UI controls; <code>ChartData</code>/<code>CategoryData</code>/<code>RentalData</code> are
+  candidates for a future pass but aren't part of this one.</li>
+<li><strong>#4's dual-engine parity test and FlaUI UI-level parity test.</strong> Different concern (storage-
+  engine correctness, not business-logic-relocation correctness) and dual-engine is SQL-
+  Server-flavored, which isn't an upstream concern. Only #4's headless-generator/canary/
+  invariant pieces are pulled into this phase, as the regression safety net (see below).</li>
+<li><strong>Formal closure of #1.</strong> Should happen alongside this work (it's genuinely done), but
+  isn't itself a design question.</li>
+</ul>
+<h2 id="migration-pattern-applied-per-subsystem">Migration pattern (applied per subsystem)<a class="headerlink" href="#migration-pattern-applied-per-subsystem" title="Permanent link">#</a></h2>
+<p>One subsystem per branch/PR, same shape each time — this is the pattern that already worked
+for the original layer extraction and the SaveOne/SaveBatch entity-by-entity persistence
+work: small, independently reviewable, bisectable if something regresses.</p>
+<ol>
+<li>Move the subsystem's files from <code>Source/WPF/MyMoney/&lt;Folder&gt;</code> into
+   <code>Source/WPF/MyMoney.Business/&lt;Folder&gt;</code>.</li>
+<li>For WPF-coupled files in that subsystem, cut the seam: extract the WPF-touching piece
+   behind an interface (see "Test subsystem shape" below), leave the interface's real
+   implementation wherever it needs to live (business layer if it's just data shaping,
+   WPF project if it's genuinely UI), and have the business-layer code depend only on the
+   interface.</li>
+<li>Add <code>LayerBoundaryTests</code> coverage confirming the moved files carry zero
+   <code>System.Windows</code>/<code>PresentationFramework</code>/<code>PresentationCore</code> references.</li>
+<li>Add real business-layer tests for the moved logic (see below).</li>
+<li>Update the WPF project's call sites to reference the new namespace; confirm
+   <code>dotnet build</code>/<code>dotnet test</code> are green.</li>
+<li>Run the phase-1 regression safety net (canary + invariants) against the moved subsystem
+   before merging.</li>
+</ol>
+<h3 id="order">Order<a class="headerlink" href="#order" title="Permanent link">#</a></h3>
+<ol>
+<li><strong>Taxes</strong> — zero WPF coupling, smallest, proves the pattern end-to-end cheapest.</li>
+<li><strong>StockQuotes</strong> — <code>IOnlineService</code> seam already exists; migration is mostly moving files
+   and mocking that one interface for the 3 WPF-coupled files.</li>
+<li><strong>Importers + MainWindow's import dispatch</strong> — same subsystem, same PR: moving
+   <code>Importers/</code> without also moving the <code>MainWindow.xaml.cs</code> methods that call it would leave
+   the seam half-migrated.</li>
+<li><strong>MainWindow's file/database lifecycle</strong> (<code>LoadDatabase</code>/<code>Save*</code>/<code>ExportCsv</code>) — folded
+   into the same PR as #3 (adjacent, small, and reviewing MainWindow's changes once instead
+   of twice is worth more than splitting it), as its own commit within that PR so it's still
+   independently bisectable.</li>
+<li><strong>Ofx-parsing</strong> — last, since at 10,313 lines it's the largest and (per the survey) the
+   parsing half is clean but sits alongside the download half (<code>OfxDownloadController.cs</code>),
+   which needs the same mock-the-network-boundary treatment as StockQuotes. Doing it last
+   means the mocking pattern is already proven twice by the time this one needs it.</li>
+</ol>
+<h2 id="test-subsystem-shape">Test subsystem shape<a class="headerlink" href="#test-subsystem-shape" title="Permanent link">#</a></h2>
+<p>The four subsystems (plus the MainWindow slice) need to serve two distinct testing shapes,
+not three — Reports' "computation entangled with rendering" shape is out of scope here:</p>
+<ul>
+<li><strong>Pure computation</strong> (Taxes, Ofx parsing, the CSV/QIF/XML importers' core <code>Import(string
+  file)</code> methods): file/bytes in, mutations to a <code>MyMoney</code> object graph or a computed value
+  out. Test directly against a <code>MockDatabase</code>-backed <code>MyMoney</code> instance — no mocking needed
+  beyond what <code>MyMoney.TestSupport</code> already provides from the #1 test-support-library work.</li>
+<li><strong>External I/O behind an interface</strong> (StockQuotes providers behind <code>IOnlineService</code>, Ofx's
+  download half behind <code>OfxDownloadController</code>, MainWindow's file-lifecycle methods that
+  talk to <code>IDatabase</code>): test by substituting a fake/mock implementation of the existing
+  interface. No new mocking infrastructure needed — <code>IOnlineService</code> and <code>IDatabase</code> are
+  already interfaces; this phase adds test doubles for them where none exist yet, following
+  the same shape as the existing <code>MockDatabase</code>.</li>
+</ul>
+<p>No new "test subsystem" framework is being built in this phase — the shared <code>IDatabase</code>
+contract-test pattern from #1 (<code>MyMoney.TestSupport/DatabaseContractTests*.cs</code>,
+<code>MockDatabase.cs</code>) already covers the data-layer half, and the two shapes above reuse that
+pattern rather than inventing a new one. If a third genuinely different testing shape shows
+up during Reports' future phase, that's the point to reconsider whether a more formal test
+subsystem is warranted — not before, per YAGNI.</p>
+<h2 id="regression-safety-net-from-4">Regression safety net (from #4)<a class="headerlink" href="#regression-safety-net-from-4" title="Permanent link">#</a></h2>
+<p>Before/after each subsystem's migration, run:</p>
+<ul>
+<li><strong>Headless <code>SampleDataGenerator</code> entry point.</strong> <code>SampleDataGenerator</code> already lives in
+  <code>MyMoney.Business</code> (from the #1 layer extraction) and takes no WPF <code>Application</code> context —
+  but it's currently only invoked from the WPF-hosted <code>SampleDatabase.Create()</code> wizard, which
+  extracts the embedded <code>SampleStockQuotes.zip</code>/<code>Database/SampleData.xml</code> resources first.
+  Add a headless entry point that does that extraction without the dialog, so the safety net
+  can run in a plain unit test.</li>
+<li><strong>Seed the generator's <code>Random</code>.</strong> <code>SampleDataGenerator</code> currently uses an unseeded
+  <code>Random</code>. Add a seeded-constructor overload so a fixed seed produces a deterministic
+  object graph.</li>
+<li><strong>Seed-derived canary.</strong> One account/report total that's deterministically derivable from
+  the fixed seed, checked into the test.</li>
+<li><strong>Property-based invariants.</strong> Splits sum to transaction amount, transfers balance,
+  category totals reconcile — checked after each subsystem's migration to confirm the moved
+  code didn't change behavior, independent of the canary.</li>
+</ul>
+<p>This is deliberately the minimum slice of #4 needed to validate phase 1, not the full issue.</p>
+<h2 id="roadmap-sketch-only-future-phases-get-their-own-spec">Roadmap (sketch only — future phases get their own spec)<a class="headerlink" href="#roadmap-sketch-only-future-phases-get-their-own-spec" title="Permanent link">#</a></h2>
+<ol>
+<li><strong>Phase 1 (this spec):</strong> Taxes → StockQuotes → Importers + MainWindow import/lifecycle →
+   Ofx-parsing, each with real business-layer tests, validated by the canary + invariants.
+   Formally close #1 alongside this work.</li>
+<li><strong>Phase 2 (future):</strong> Reports redesign — new business-layer query/aggregation API
+   (filter by account/date-range/reconciliation-status, subtotal by account/month/year/
+   payee), separating computation from <code>IReportWriter</code> rendering. Needs its own spec; the
+   <code>IDatabase</code> query surface this requires doesn't exist yet.</li>
+<li><strong>Phase 3 (future, maybe):</strong> Remaining MainWindow orchestration, if it ever becomes a
+   real blocker rather than a UI concern. Not committed to.</li>
+<li><strong>Deferred from #4:</strong> dual-engine parity test, end-to-end FlaUI UI-level parity test —
+   pick up independently if/when they're actually needed.</li>
+</ol>
+<h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">#</a></h2>
+<ul>
+<li>Each subsystem's migration: <code>dotnet build Source/WPF/MyMoney.sln</code>,
+  <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>,
+  <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj</code>, plus the new
+  business-layer tests for that subsystem.</li>
+<li><code>LayerBoundaryTests</code> after each move, confirming zero WPF-family references in the moved
+  files.</li>
+<li>Canary + property-based invariants run against the full moved set at the end of phase 1
+  (not just per-subsystem), to catch any cross-subsystem interaction the per-subsystem tests
+  missed.</li>
+<li>FlaUI smoke test (<code>PayeeSelectionTests</code> or equivalent) re-run interactively at the end of
+  phase 1, same verification step used at the end of the original #1 layer extraction.</li>
+</ul>
+<h2 id="open-questions-carried-forward-not-blocking-phase-1">Open questions carried forward (not blocking phase 1)<a class="headerlink" href="#open-questions-carried-forward-not-blocking-phase-1" title="Permanent link">#</a></h2>
+<ul>
+<li>Reports' new query/aggregation API shape, and whether it should be reusable by Importers/
+  Charts' data-prep classes too — phase 2's question, noted in #5, not re-litigated here.</li>
+<li>Whether MainWindow's remaining orchestration is ever worth untangling — explicitly
+  deferred, not scheduled.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

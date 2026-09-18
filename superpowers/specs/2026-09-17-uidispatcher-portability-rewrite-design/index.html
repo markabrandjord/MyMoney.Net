@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>UiDispatcher Portability Rewrite (Issue #7) — Design - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "UiDispatcher Portability Rewrite (Issue #7) \u2014 Design", url: "#_top", children: [
+              {title: "Context", url: "#context" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-goals", url: "#non-goals" },
+              {title: "Design: UiDispatcher (Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs)", url: "#design-uidispatcher-sourcewpfmymoneybusinessutilitiesdispatchercs" },
+              {title: "Design: EventHandlerCollection\u0026lt;T,Q\u0026gt; (Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs)", url: "#design-eventhandlercollectiontq-sourcewpfmymoneybusinessutilitieseventhandlercollectioncs" },
+              {title: "Design: UiThreadHandler and UiThreadPropertyChangedHandler (new files, Source/WPF/MyMoney.Business/Utilities/)", url: "#design-uithreadhandler-and-uithreadpropertychangedhandler-new-files-sourcewpfmymoneybusinessutilities" },
+              {title: "Migration: WPF call sites", url: "#migration-wpf-call-sites" },
+              {title: "Design: System.Windows.Point \u2192 (double X, double Y) migration", url: "#design-systemwindowspoint-double-x-double-y-migration" },
+              {title: "Design: removing the MyMoney.Business.csproj WPF FrameworkReference", url: "#design-removing-the-mymoneybusinesscsproj-wpf-frameworkreference" },
+              {title: "Characterization tests for MathHelpers", url: "#characterization-tests-for-mathhelpers" },
+              {title: "Test changes", url: "#test-changes" },
+              {title: "LayerBoundaryTests (Source/WPF/UnitTests/LayerBoundaryTests.cs)", url: "#layerboundarytests-sourcewpfunittestslayerboundarytestscs" },
+              {title: "Verification", url: "#verification" },
+              {title: "Known deferred items", url: "#known-deferred-items" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="uidispatcher-portability-rewrite-issue-7-design">UiDispatcher Portability Rewrite (Issue #7) — Design<a class="headerlink" href="#uidispatcher-portability-rewrite-issue-7-design" title="Permanent link">#</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p><code>MyMoney.Business</code>'s change-notification backbone (<code>PersistentObject</code>/<code>PersistentContainer</code>,
+<code>EventHandlerCollection&lt;T,Q&gt;</code>, <code>UiDispatcher</code>) has a load-bearing dependency on
+<code>System.Windows.Threading.Dispatcher</code>/<code>System.Windows.DependencyObject</code> (<code>WindowsBase</code>). This was a
+deliberate, documented stopgap made during item #1's layer-extraction work (<code>LayerBoundaryTests</code>
+allows <code>MyMoney.Business</code> to reference <code>WindowsBase</code> but forbids <code>PresentationFramework</code>/
+<code>PresentationCore</code>), explicitly meant to be revisited once testing improved enough to validate a
+rewrite safely (issue #7). It is the last real blocker to <code>MyMoney.Business</code> running on the
+Uno/Xamarin thin clients (item #5) planned in <code>Source/Uno</code>/<code>Source/Xamarin</code>.</p>
+<p>Issue #20's three slices closed that precondition: a shared <code>IDatabase</code> test suite + <code>MockDatabase</code>,
+dual-engine parity (#19), and — most directly relevant here — real cross-thread event-marshaling test
+coverage (<code>Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs</code>, merged via PR #48).</p>
+<h3 id="the-deadlock-found-while-building-that-precondition">The deadlock found while building that precondition<a class="headerlink" href="#the-deadlock-found-while-building-that-precondition" title="Permanent link">#</a></h3>
+<p>While designing PR #48's third test (a regression guard for the documented reason <code>UiDispatcher</code>
+uses <code>BeginInvoke</code>, not <code>Invoke</code>: "if this is a background thread with a lock() on a money data
+object ... then UI thread might be blocked on trying to get that lock and this dispatcher invoke
+would therefore create a deadlock"), a <strong>real, unrecoverable process deadlock was reproduced</strong>, not
+just hypothesized. The first draft used a raw <code>lock</code> for a competing "UI thread" action simulating
+that exact scenario. Manually reverting <code>UiDispatcher.BeginInvoke</code> to call <code>dispatcher.Invoke</code>
+instead produced a genuine deadlock between the test's two threads — <code>testhost.exe</code> hung
+indefinitely and had to be killed externally (<code>Stop-Process -Force</code>, process found via
+<code>Get-CimInstance Win32_Process</code>); it never would have recovered on its own, because a real OS-level
+deadlock via <code>lock</code> cannot be safely interrupted from managed code (no <code>Thread.Abort</code> in modern
+.NET, and marking the thread <code>IsBackground = true</code> only stops it from blocking <em>process exit</em> — it
+does not unstick the thread).</p>
+<p>Fix: the competing action was rewritten to use a bounded <code>Monitor.TryEnter(gate, contentionTimeout)</code>
+instead of a raw <code>lock</code>, and the test asserts on <strong>timing</strong> (the call must return in well under the
+contention timeout) rather than eventual completion — this distinguishes fire-and-forget
+<code>BeginInvoke</code> from a blocking <code>Invoke</code> regression without ever risking an unbounded hang. Re-running
+the same mutation afterward failed cleanly in ~2 seconds with a precise message instead of hanging.</p>
+<p>This matters directly for this rewrite: any regression that reintroduces blocking dispatch semantics
+in the new <code>SynchronizationContext</code>-backed implementation is a <strong>real deadlock risk in code that
+manages the user's live financial data</strong>, not an abstract concern. The three landed tests (rewritten
+per this spec, see below) remain the acceptance test for this property.</p>
+<h3 id="the-open-design-question-and-how-it-was-settled">The open design question, and how it was settled<a class="headerlink" href="#the-open-design-question-and-how-it-was-settled" title="Permanent link">#</a></h3>
+<p>Issue #7's own text names the one real unresolved question: once <code>UiDispatcher</code> no longer wraps a
+WPF <code>Dispatcher</code>, what replaces <code>EventHandlerCollection&lt;T,Q&gt;.RaiseEvent</code>'s
+<code>d.Target is DependencyObject</code> check — the signal that decides whether a listener needs UI-thread
+marshaling, or can run synchronously? ("No drop-in replacement was identified at design time.")</p>
+<p>Three options were identified and reviewed by four independent panelists (concurrency/correctness,
+cross-platform portability, API design/maintainability, migration risk), each evaluating all three
+options through one lens with no visibility into the others' conclusions — full writeup posted to
+issue #7. Summary:</p>
+<ul>
+<li><strong>Option A</strong> — always marshal via <code>SynchronizationContext.Post</code>, deleting the type-check entirely.
+  Rejected: breaks the <em>existing</em> synchronous-delivery contract for real non-UI subscribers
+  (<code>StockQuoteManager</code>, <code>AttachmentManager</code>, <code>StatementManager</code>, <code>ChangeTracker</code> — confirmed via grep
+  to be plain, non-<code>DependencyObject</code> classes), and independently causes <code>PersistentContainer</code>'s
+  already-unconditional <code>RaisePropertyChangeEvents</code> marshaling to fan out into ordering-free bursts
+  on batched <code>Save()</code>/<code>EndUpdate</code> paths.</li>
+<li><strong>Option B</strong> — explicit opt-in wrapper at the subscription site. 3 of 4 panelists recommended this:
+  it's the only option making <code>MyMoney.Business</code> truly zero-opinion about UI threading (best fit for
+  Uno/Xamarin, whose idiomatic dispatch mechanisms differ from WPF's), has the best per-call-site
+  locality, and rolls out incrementally.</li>
+<li><strong>Option C</strong> — a marker interface (<code>IRequiresUiThreadDispatch</code>) checked by type instead of
+  <code>DependencyObject</code>. The concurrency panelist recommended this instead, having found a real,
+  concrete defect in a <em>bare</em> Option B: a plain wrapping <strong>function</strong> (<code>UiDispatcher.Marshal(handler)</code>)
+  allocates a new closure on every call, so <code>EventHandlerCollection.RemoveHandler</code>'s
+  reference/equality-based <code>list.Remove(h)</code> can never find a match — <code>Changed -= this.OnChanged</code> (or
+  even <code>Changed -= UiDispatcher.Marshal(this.OnChanged)</code> again) silently fails to unsubscribe. Not
+  theoretical: <code>AccountDialog</code>/<code>RenamePayeeDialog</code> are transient, opened and closed repeatedly, so
+  this would leak object graphs and produce phantom callbacks against closed windows.</li>
+</ul>
+<p><strong>Decision: Option B, refined</strong> — not a bare wrapping function. A follow-up experiment (throwaway
+test file, since deleted; results posted to issue #7) confirmed both halves of this empirically
+against the real <code>Categories.Changed</code> event machinery:</p>
+<ol>
+<li>The concurrency panelist's concern is real: a naive <code>NaiveMarshal(handler)</code> function fails to
+   unsubscribe via either the plain original handler or a re-wrapped call, in both cases the listener
+   kept firing after "unsubscribing."</li>
+<li>Wrapping the handler <strong>exactly once, at construction</strong>, in a small object that exposes a <em>fixed</em>
+   delegate reference via a property closes the gap completely: <code>Changed -= wrapper.Handler</code> reliably
+   removes it (same object reference both times), while a companion test confirmed the wrapped
+   handler still delivers correctly while subscribed (ruling out a trivial "never delivers anything"
+   implementation passing by accident). Stable across 4 consecutive full runs, no flakiness.</li>
+</ol>
+<p>This design — <code>UiThreadHandler</code>/<code>UiThreadPropertyChangedHandler</code>, see below — is what this spec
+implements. It keeps every one of Option B's real wins (zero portability assumptions in
+<code>MyMoney.Business</code>, per-call-site locality, incremental rollout) while structurally closing the
+concurrency panelist's defect, rather than relying on developer discipline to avoid it.</p>
+<p>The ergonomics panelist's proposed Roslyn analyzer (compile-time detection of a forgotten wrap) is
+<strong>explicitly out of scope for this work</strong> — deferred as a separate, self-contained follow-up. A
+missed wrap fails loudly via WPF's own cross-thread exception during ordinary interactive use, which
+is an acceptable interim safety net for this solo-maintainer codebase.</p>
+<h3 id="a-second-unrelated-windowsbase-dependency-found-during-implementation">A second, unrelated <code>WindowsBase</code> dependency found during implementation<a class="headerlink" href="#a-second-unrelated-windowsbase-dependency-found-during-implementation" title="Permanent link">#</a></h3>
+<p>While implementing the final task (tightening <code>LayerBoundaryTests</code> to assert the actual goal below),
+<code>MyMoney.Business</code> was found to still reference <code>WindowsBase</code> after the <code>UiDispatcher</code>/
+<code>EventHandlerCollection</code> rewrite landed — for a reason entirely unrelated to event marshaling:
+<code>System.Windows.Point</code> is used in two files' public API surface.</p>
+<p><code>Point</code> is just two numbers glued together (an X and a Y). WPF has its own <code>Point</code> type for tracking
+screen positions, and this codebase borrows that same type in three places, only two of which are
+actually about the screen:</p>
+<ul>
+<li><code>Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs</code> (drawing a trend line on a chart) and
+  <code>Source/WPF/MyMoney/Utilities/DragAndDrop.cs</code> (the mouse pointer's position for drag-and-drop) are
+  genuine screen-coordinate uses.</li>
+<li><code>Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs</code> (<code>Covariance</code>, <code>LinearRegression</code>), consumed
+  by <code>Payments.cs</code>'s loan/bill amortization outlier-detection logic, uses <code>Point</code> purely as a
+  convenient "two numbers together" shape — "X" is "which payment number," "Y" is "how much it
+  cost." This has nothing to do with a screen; <code>Point</code> was just already there.</li>
+</ul>
+<p>Because <code>MyMoney.Business</code> is meant to be the portable "brain" of the app (accounts, transactions,
+the math around them) with no assumption that a screen-drawing toolkit is even present — the entire
+reason this issue exists, to unblock the Uno/Xamarin thin clients (item #5) — borrowing WPF's <code>Point</code>
+type here for convenience secretly requires that whole toolkit (<code>WindowsBase.dll</code>) just to compile,
+even though this specific code never draws anything.</p>
+<p><strong>Decision</strong>: replace <code>System.Windows.Point</code> with a <code>(double X, double Y)</code> value tuple throughout
+<code>MathHelpers.cs</code> and <code>NativeMethods.cs</code> — a core, fully portable .NET type requiring no new type
+definition, with named-tuple <code>.X</code>/<code>.Y</code> access reading almost identically to <code>Point.X</code>/<code>.Y</code> at call
+sites. Once this is the only reason <code>MyMoney.Business</code> needed <code>WindowsBase</code>, the
+<code>&lt;FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" /&gt;</code> in <code>MyMoney.Business.csproj</code> —
+along with the two MSBuild targets that strip <code>PresentationCore</code>/<code>PresentationFramework</code>/
+<code>PresentationUI</code> back out while deliberately keeping <code>WindowsBase</code> — become dead configuration and
+are removed entirely (see "Design: removing the <code>MyMoney.Business.csproj</code> WPF <code>FrameworkReference</code>"
+below). <code>MyMoney.Business</code> ends up structurally identical to <code>MyMoney.Data</code>: no WPF-related MSBuild
+machinery at all, just <code>LayerBoundaryTests</code> as the ongoing automated check.</p>
+<p>No existing test coverage exists anywhere for <code>MathHelpers.Covariance</code>/<code>LinearRegression</code>/
+<code>DistancesToLine</code> or for <code>Payments.cs</code>'s bill-detection/outlier logic — real financial-logic-adjacent
+code with zero characterization today. See "Characterization tests for <code>MathHelpers</code>" below for how
+this migration proves it doesn't change that behavior.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<ul>
+<li><code>MyMoney.Business</code> has zero references to any WPF-family assembly (<code>PresentationFramework</code>,
+  <code>PresentationCore</code>, <code>WindowsBase</code>) — matching <code>MyMoney.Data</code>'s existing constraint exactly.</li>
+<li><code>EventHandlerCollection&lt;T,Q&gt;.RaiseEvent</code> becomes a pure, UI-agnostic synchronous multicast: no
+  type-sniffing, no marshaling decision of any kind inside <code>MyMoney.Business</code>.</li>
+<li>Every WPF call site that today relies on <code>EventHandlerCollection</code>'s automatic <code>DependencyObject</code>
+  marshaling continues to receive UI-thread delivery, unchanged in observable behavior, via an
+  explicit <code>UiThreadHandler</code>/<code>UiThreadPropertyChangedHandler</code> wrapper it owns.</li>
+<li>The three landed cross-thread tests (PR #48) continue to prove the same properties they prove
+  today (UI-thread marshaling, synchronous non-marshaled delivery, deadlock-avoidance) against the
+  new mechanism, plus new coverage for the wrapper's unsubscribe correctness (promoted directly from
+  the validation experiment).</li>
+<li><code>MathHelpers.cs</code>/<code>NativeMethods.cs</code> no longer reference <code>System.Windows.Point</code> (the second,
+  unrelated <code>WindowsBase</code> dependency found during implementation — see above), and
+  <code>MyMoney.Business.csproj</code> no longer carries any WPF-related <code>FrameworkReference</code> or MSBuild target
+  at all. This is what actually makes the first bullet true — the dispatcher rewrite alone wasn't
+  sufficient.</li>
+<li><code>MathHelpers.LinearRegression</code>/<code>Covariance</code>'s numeric behavior — real logic <code>Payments.cs</code>
+  depends on for bill/loan amortization outlier detection, with zero prior test coverage — is
+  proven unchanged by this migration via characterization tests written against the current
+  behavior before the type changes.</li>
+</ul>
+<h2 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>The Roslyn analyzer (deferred, see above).</li>
+<li>Any change to <code>Source/Uno</code>/<code>Source/Xamarin</code> themselves — this spec only removes the blocker in
+  <code>MyMoney.Business</code>; actually wiring up a thin client is separate, future work.</li>
+<li>Any change to <code>PersistentContainer.RaisePropertyChangeEvents</code>'s existing unconditional-marshal
+  behavior — it doesn't use <code>EventHandlerCollection</code>'s per-listener check today and isn't part of
+  this design question; it keeps calling <code>UiDispatcher.BeginInvoke</code> exactly as today, just backed by
+  <code>SynchronizationContext</code> instead of <code>Dispatcher</code> underneath (see below).</li>
+</ul>
+<h2 id="design-uidispatcher-sourcewpfmymoneybusinessutilitiesdispatchercs">Design: <code>UiDispatcher</code> (<code>Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs</code>)<a class="headerlink" href="#design-uidispatcher-sourcewpfmymoneybusinessutilitiesdispatchercs" title="Permanent link">#</a></h2>
+<p>Replace the stored <code>Dispatcher</code> with a <code>SynchronizationContext</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.Threading;
+
+namespace Walkabout.Utilities
+{
+    public static class UiDispatcher
+    {
+        private static SynchronizationContext context;
+        private static int uiThreadId;
+
+        public static SynchronizationContext CurrentContext
+        {
+            get =&gt; context;
+            set
+            {
+                uiThreadId = Thread.CurrentThread.ManagedThreadId;
+                context = value;
+            }
+        }
+
+        public static object BeginInvoke(Delegate d, params object[] args)
+        {
+            if (context != null &amp;&amp; Thread.CurrentThread.ManagedThreadId != uiThreadId)
+            {
+                // Post, not Send: fire-and-forget avoids the same deadlock class documented
+                // above and proven via PR #48's regression test.
+                context.Post(_ =&gt; d.DynamicInvoke(args), null);
+                return null;
+            }
+            else
+            {
+                return d.DynamicInvoke(args);
+            }
+        }
+
+        public static object Invoke(Delegate d, params object[] args)
+        {
+            if (context != null &amp;&amp; Thread.CurrentThread.ManagedThreadId != uiThreadId)
+            {
+                object result = null;
+                context.Send(_ =&gt; result = d.DynamicInvoke(args), null);
+                return result;
+            }
+            else
+            {
+                return d.DynamicInvoke(args);
+            }
+        }
+    }
+}
+</code></pre>
+<p>The same-thread-bypass logic (capture <code>uiThreadId</code> at set-time, compare
+<code>Thread.CurrentThread.ManagedThreadId</code>) is unchanged — only the marshaled payload changes from
+<code>Dispatcher.BeginInvoke</code>/<code>Invoke</code> to <code>SynchronizationContext.Post</code>/<code>Send</code>. <code>System.Windows.Threading</code>
+is no longer referenced anywhere in this file.</p>
+<p><strong>Callers of the setter</strong> (all in WPF-family projects, never <code>MyMoney.Business</code> itself, so
+referencing WPF types here is fine): <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> (3 call sites, in the
+<code>MainWindow()</code> and <code>MainWindow(Settings)</code> constructors), <code>Source/WPF/PerformanceViewer/MainWindow.xaml.cs</code>
+(1 call site, its constructor), <code>Source/WPF/UIControlsTest/MainWindow.xaml.cs</code> (1 call site, its
+constructor) — each currently <code>UiDispatcher.CurrentDispatcher = this.Dispatcher;</code>. Update to:</p>
+<pre><code class="language-csharp">UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(this.Dispatcher);
+</code></pre>
+<p>Construct the <code>DispatcherSynchronizationContext</code> explicitly rather than reading
+<code>SynchronizationContext.Current</code> — at these call sites (inside a <code>Window</code> constructor, before
+<code>Application.Run()</code>'s message loop is necessarily pumping), WPF is not guaranteed to have already
+installed one as ambient <code>SynchronizationContext.Current</code>. Explicit construction has no such timing
+dependency and is unambiguous.</p>
+<h2 id="design-eventhandlercollectiontq-sourcewpfmymoneybusinessutilitieseventhandlercollectioncs">Design: <code>EventHandlerCollection&lt;T,Q&gt;</code> (<code>Source/WPF/MyMoney.Business/Utilities/EventHandlerCollection.cs</code>)<a class="headerlink" href="#design-eventhandlercollectiontq-sourcewpfmymoneybusinessutilitieseventhandlercollectioncs" title="Permanent link">#</a></h2>
+<p>Remove <code>using System.Windows;</code> and the <code>DependencyObject</code> branch entirely. <code>RaiseEvent</code> becomes:</p>
+<pre><code class="language-csharp">// This collection has no concept of UI threads or marshaling - every handler is invoked
+// synchronously, directly, on whichever thread raises the event. A listener that needs UI-thread
+// delivery must opt in explicitly via UiThreadHandler/UiThreadPropertyChangedHandler (see
+// Utilities/UiThreadHandler.cs) at its own subscription site; this class deliberately does not -
+// and must not - try to detect that need itself (see
+// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md for why an automatic
+// per-listener check was removed from here).
+//
+// If bugs recur from callers forgetting to wrap a UI-bound subscription in one of those wrappers, or
+// from unsubscribing with a different delegate than was subscribed, consider a Roslyn analyzer over
+// a runtime check here - both mistakes are structural and syntactic (visible in the subscription
+// code itself), which is exactly what an analyzer is well-suited to catch at compile time instead of
+// at whatever point in the future the mistake happens to surface at runtime. Deferred for now - see
+// issue #49.
+public void RaiseEvent(object sender, Q args)
+{
+    object[] array = new object[] { sender, args };
+    foreach (Delegate d in this.list)
+    {
+        try
+        {
+            this.Invoke(d, array);
+        }
+        catch (System.Reflection.TargetInvocationException e)
+        {
+            if (e.InnerException != null) { throw e.InnerException; }
+            throw;
+        }
+    }
+}
+</code></pre>
+<p>Always synchronous, always direct — zero UI awareness. <code>protected virtual void Invoke(Delegate d,
+object[] args) =&gt; d.Method.Invoke(d.Target, args);</code> is unchanged.</p>
+<h2 id="design-uithreadhandler-and-uithreadpropertychangedhandler-new-files-sourcewpfmymoneybusinessutilities">Design: <code>UiThreadHandler</code> and <code>UiThreadPropertyChangedHandler</code> (new files, <code>Source/WPF/MyMoney.Business/Utilities/</code>)<a class="headerlink" href="#design-uithreadhandler-and-uithreadpropertychangedhandler-new-files-sourcewpfmymoneybusinessutilities" title="Permanent link">#</a></h2>
+<p>A full audit of every <code>EventHandlerCollection</code>-backed event across <code>MyMoney.Business</code> (see "Migration:
+WPF call sites" below) found exactly two distinct delegate shapes with real, live subscribers needing
+this wrapping — <code>EventHandler&lt;ChangeEventArgs&gt;</code> (<code>PersistentObject.Changed</code>,
+<code>PersistentContainer.Changed</code>, <code>MyMoney.Rebalanced</code>) and <code>PropertyChangedEventHandler</code>
+(<code>PersistentObject</code>'s actual <code>PropertyChanged</code> implementation). These are two concrete classes, not
+one generic class: <code>PropertyChangedEventHandler</code> predates generic <code>EventHandler&lt;T&gt;</code> in .NET and isn't
+assignable to/from <code>EventHandler&lt;PropertyChangedEventArgs&gt;</code> despite the matching signature, so a
+single <code>UiThreadHandler&lt;T&gt;</code> couldn't cover both shapes without an awkward adapter. (A third
+<code>EventHandlerCollection</code>-backed surface exists — <code>AsyncSqlQuery.Completed</code>,
+<code>EventHandler&lt;SqlQueryResultArgs&gt;</code> — but <code>AsyncSqlQuery</code> has zero subscribers anywhere in the
+solution; see below. No wrapper is needed for it.)</p>
+<pre><code class="language-csharp">using System;
+
+namespace Walkabout.Utilities
+{
+    /// &lt;summary&gt;
+    /// Wraps a Changed/Rebalanced-event handler so it's delivered via UiDispatcher's marshaling
+    /// instead of running synchronously on whichever thread raised the event. Wraps exactly once, at
+    /// construction, and always exposes the same delegate reference - subscribing and
+    /// unsubscribing with `Handler` therefore always match, unlike a bare wrapping function
+    /// (which allocates a new closure per call and silently breaks unsubscribe - see
+    /// docs/superpowers/specs/2026-09-17-uidispatcher-portability-rewrite-design.md).
+    ///
+    /// Always store the UiThreadHandler instance (e.g. as a field) and subscribe/unsubscribe via
+    /// its Handler property - never call `new UiThreadHandler(...)` a second time expecting the
+    /// same Handler back, and never subscribe with this.Handler but unsubscribe with the bare
+    /// original method group (or vice versa). Both mistakes are easy to make by hand and easy to
+    /// miss in review; if they recur across enough call sites, a Roslyn analyzer flagging a
+    /// subscribe/unsubscribe pair that doesn't reference the same UiThreadHandler instance would be
+    /// more reliable than continuing to catch these by hand. Deferred for now - see issue #49.
+    /// &lt;/summary&gt;
+    public sealed class UiThreadHandler
+    {
+        public EventHandler&lt;ChangeEventArgs&gt; Handler { get; }
+
+        public UiThreadHandler(EventHandler&lt;ChangeEventArgs&gt; inner)
+        {
+            this.Handler = (sender, args) =&gt; UiDispatcher.BeginInvoke(inner, sender, args);
+        }
+    }
+}
+</code></pre>
+<pre><code class="language-csharp">using System.ComponentModel;
+
+namespace Walkabout.Utilities
+{
+    /// &lt;summary&gt;
+    /// Same shape and same rationale as UiThreadHandler, for PersistentObject.PropertyChanged
+    /// subscribers instead of Changed/Rebalanced subscribers - PropertyChangedEventHandler is a
+    /// distinct delegate type from EventHandler&amp;lt;ChangeEventArgs&amp;gt;, not interchangeable with it,
+    /// so this needs its own concrete wrapper rather than reusing UiThreadHandler.
+    /// &lt;/summary&gt;
+    public sealed class UiThreadPropertyChangedHandler
+    {
+        public PropertyChangedEventHandler Handler { get; }
+
+        public UiThreadPropertyChangedHandler(PropertyChangedEventHandler inner)
+        {
+            this.Handler = (sender, args) =&gt; UiDispatcher.BeginInvoke(inner, sender, args);
+        }
+    }
+}
+</code></pre>
+<h2 id="migration-wpf-call-sites">Migration: WPF call sites<a class="headerlink" href="#migration-wpf-call-sites" title="Permanent link">#</a></h2>
+<p>A complete audit of every <code>EventHandlerCollection</code>-backed event in <code>MyMoney.Business</code> — not just
+<code>.Changed</code>, which an initial narrower grep had assumed was the only one — found four real event
+surfaces:</p>
+<ul>
+<li><code>PersistentContainer.Changed</code> / <code>PersistentObject.Changed</code> — <code>EventHandler&lt;ChangeEventArgs&gt;</code>.</li>
+<li><code>MyMoney.Rebalanced</code> — <code>EventHandler&lt;ChangeEventArgs&gt;</code>, same shape as <code>Changed</code>, easy to miss by
+  grepping for <code>.Changed</code> specifically.</li>
+<li><code>PersistentObject.PropertyChanged</code> (the actual <code>INotifyPropertyChanged</code> implementation for
+  <code>Account</code>/<code>Transaction</code>/etc.) — <code>PropertyChangedEventHandler</code>. Note this is <em>not</em> the same thing as
+  WPF's own internal data-binding subscription to <code>PropertyChanged</code> (via
+  <code>PropertyChangedEventManager</code>, a <code>WeakEventManager</code>/<code>DispatcherObject</code> — not a <code>DependencyObject</code>),
+  which was never affected by the <code>DependencyObject</code> check in the first place and needs no migration;
+  only <em>manual</em>, explicit <code>.PropertyChanged +=</code> subscriptions from genuinely <code>DependencyObject</code>-derived
+  code are in scope.</li>
+<li><code>AsyncSqlQuery.Completed</code> — <code>EventHandler&lt;SqlQueryResultArgs&gt;</code>. Confirmed via
+  <code>grep -rln "AsyncSqlQuery" Source/WPF</code> to have <strong>zero subscribers anywhere in the solution</strong> — dead
+  code. No migration needed; noted here only for completeness of the audit.</li>
+</ul>
+<p>Grepping the WPF app for subscriptions to the first three surfaces (<code>.Changed +=</code>, <code>.Rebalanced +=</code>,
+and <code>.PropertyChanged +=</code> where the <em>subscribing</em> class — not the event source — is genuinely
+<code>DependencyObject</code>-derived) found <strong>30 real subscriptions across 13 files</strong>. Every <code>.PropertyChanged</code>
+hit was individually checked against its enclosing class: e.g. <code>AccountsControl.xaml.cs</code>'s
+<code>this.account.PropertyChanged += this.OnPropertyChanged;</code> looked like a match but its enclosing class,
+<code>AccountItemViewModel</code>, is a plain (non-<code>DependencyObject</code>) view-model class with its own independent
+<code>INotifyPropertyChanged</code> implementation, so that one specific subscription is correctly excluded.
+Likewise <code>Settings</code>/<code>DatabaseSettings</code>/<code>OnlineServiceSettings</code>'s <code>PropertyChanged</code> subscriptions
+(<code>OnlineServiceDialog.xaml.cs</code>, <code>MainWindow.xaml.cs</code>'s <code>databaseSettings</code>, <code>StockQuoteManager.cs</code>'s
+<code>ss</code>) are unaffected regardless of subscriber type, since those classes implement
+<code>INotifyPropertyChanged</code> directly and never go through <code>EventHandlerCollection</code> at all.</p>
+<p>Of the real subscriptions, 7 are on plain (non-<code>DependencyObject</code>) classes and need <strong>no change</strong>,
+since they already run synchronously today and this rewrite doesn't change that:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Subscriptions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Attachments/StatementManager.cs</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>Attachments/AttachmentManager.cs</code></td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>StockQuotes/StockQuoteManager.cs</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Views/ChangeTracker.cs</code></td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+<p>The remaining 30 subscriptions are on WPF <code>Window</code>/<code>UserControl</code>/<code>Border</code>/<code>TextBlock</code>-derived
+(<code>DependencyObject</code>) targets and must migrate to <code>UiThreadHandler</code> (for <code>.Changed</code>/<code>.Rebalanced</code>) or
+<code>UiThreadPropertyChangedHandler</code> (for <code>.PropertyChanged</code>) to keep today's UI-thread delivery:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th><code>.Changed</code></th>
+<th><code>.Rebalanced</code></th>
+<th><code>.PropertyChanged</code></th>
+<th>Total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Views/TransactionsView.xaml.cs</code> (outer <code>Money</code> property)</td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Views/TransactionsView.xaml.cs</code> (5 nested cell/field classes: <code>TransactionCell</code>, <code>TransactionAttachmentIcon</code>, <code>TransactionTextField</code>, <code>TransactionStatusButton</code>, <code>TransactionAmountControl</code>)</td>
+<td>—</td>
+<td>—</td>
+<td>10</td>
+<td>10</td>
+</tr>
+<tr>
+<td><code>Views/SecuritiesView.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Views/CurrenciesView.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Views/AliasesView.xaml.cs</code></td>
+<td>2</td>
+<td>—</td>
+<td>—</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>View Selectors/AccountsControl.xaml.cs</code></td>
+<td>2</td>
+<td>1</td>
+<td>—</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>View Selectors/BalanceControl.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>View Selectors/PayeesControl.xaml.cs</code></td>
+<td>2</td>
+<td>1</td>
+<td>—</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>View Selectors/CategoriesControl.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>View Selectors/SecuritiesControl.xaml.cs</code></td>
+<td>2</td>
+<td>1</td>
+<td>—</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>View Selectors/RentsControl.xaml.cs</code></td>
+<td>—</td>
+<td>1</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Dialogs/AccountDialog.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>Dialogs/RenamePayeeDialog.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>MainWindow.xaml.cs</code></td>
+<td>1</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>16</strong></td>
+<td><strong>4</strong></td>
+<td><strong>10</strong></td>
+<td><strong>30</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>TransactionsView.xaml.cs</code>'s 5 nested classes (<code>TransactionCell : Border</code>,
+<code>TransactionAttachmentIcon : Border</code>, <code>TransactionTextField : TextBlock</code>,
+<code>TransactionStatusButton : Border</code>, <code>TransactionAmountControl : UserControl</code>) each follow the exact
+same shape: a <code>private Transaction context;</code> field, an <code>OnLoaded</code>/<code>OnUnloaded</code> pair (subscribe on
+load, unsubscribe on unload) and a <code>SetContext</code> method (unsubscribe from the old context, subscribe to
+the new one) — 2-3 call sites per class, all referencing the same handler method
+(<code>this.OnPropertyChanged</code> or <code>this.OnContextPropertyChanged</code> depending on the class).</p>
+<h3 id="transactionpropertychangesubscription-new-file-sourcewpfmymoneyviewstransactionpropertychangesubscriptioncs"><code>TransactionPropertyChangeSubscription</code> (new file, <code>Source/WPF/MyMoney/Views/TransactionPropertyChangeSubscription.cs</code>)<a class="headerlink" href="#transactionpropertychangesubscription-new-file-sourcewpfmymoneyviewstransactionpropertychangesubscriptioncs" title="Permanent link">#</a></h3>
+<p>Given the identical shape repeated 5 times above, extract a small composition helper rather than
+migrating each class's subscribe/unsubscribe dance by hand 5 times over — more repetition of this
+exact bookkeeping is more surface for the subscribe/unsubscribe-identity bug class this whole design
+exists to prevent. A shared <em>base class</em> doesn't fit (the 5 classes have three different, unrelated
+WPF base types — <code>Border</code>, <code>TextBlock</code>, <code>UserControl</code> — and C# has single inheritance, already spent);
+composition does:</p>
+<pre><code class="language-csharp">using System.ComponentModel;
+using Walkabout.Data;
+using Walkabout.Utilities;
+
+namespace Walkabout.Views
+{
+    /// &lt;summary&gt;
+    /// Shared subscribe/unsubscribe bookkeeping for TransactionsView's several small per-cell
+    /// controls (TransactionCell, TransactionAttachmentIcon, TransactionTextField,
+    /// TransactionStatusButton, TransactionAmountControl), each of which tracks a `Transaction`
+    /// context and needs its PropertyChanged notifications marshaled to the UI thread. Wraps the
+    /// given handler exactly once, in a UiThreadPropertyChangedHandler - the caller still owns its
+    /// own `Transaction` field (this class only manages the subscription, not the reference), so
+    /// existing code that reads the current Transaction elsewhere in these classes needs no change.
+    /// &lt;/summary&gt;
+    internal sealed class TransactionPropertyChangeSubscription
+    {
+        private readonly UiThreadPropertyChangedHandler handler;
+
+        public TransactionPropertyChangeSubscription(PropertyChangedEventHandler onPropertyChanged)
+        {
+            this.handler = new UiThreadPropertyChangedHandler(onPropertyChanged);
+        }
+
+        public void Unsubscribe(Transaction from)
+        {
+            if (from != null)
+            {
+                from.PropertyChanged -= this.handler.Handler;
+            }
+        }
+
+        public void Subscribe(Transaction to)
+        {
+            if (to != null)
+            {
+                to.PropertyChanged += this.handler.Handler;
+            }
+        }
+    }
+}
+</code></pre>
+<p>Each of the 5 classes gets one <code>private readonly TransactionPropertyChangeSubscription
+propertyChangeSubscription = new TransactionPropertyChangeSubscription(this.OnPropertyChanged);</code> field
+(or <code>this.OnContextPropertyChanged</code> for <code>TransactionAttachmentIcon</code>), and every existing
+<code>if (this.context != null) { this.context.PropertyChanged -= this.OnPropertyChanged; }</code> /
+<code>+= this.OnPropertyChanged</code> pair becomes <code>this.propertyChangeSubscription.Unsubscribe(this.context);</code> /
+<code>this.propertyChangeSubscription.Subscribe(this.context);</code> — the <code>context</code> field itself, and every
+other place that reads it, is untouched.</p>
+<h3 id="migration-shape-non-transactionsview-sites">Migration shape (non-<code>TransactionsView</code> sites)<a class="headerlink" href="#migration-shape-non-transactionsview-sites" title="Permanent link">#</a></h3>
+<p>Example from <code>AccountDialog.xaml.cs</code>:</p>
+<pre><code class="language-csharp">// Before:
+money.Changed += new EventHandler&lt;ChangeEventArgs&gt;(this.OnMoneyChanged);
+
+// After:
+// Wrapped once in the ctor and reused for both subscribe and unsubscribe below - see
+// UiThreadHandler's doc comment for why a bare re-wrap or a mismatched raw method group here would
+// silently break unsubscription (a mistake a Roslyn analyzer could catch at compile time if this
+// class of bug recurs - deferred for now, see issue #49).
+this.onMoneyChangedUi = new UiThreadHandler(this.OnMoneyChanged);   // field, ctor-initialized
+money.Changed += this.onMoneyChangedUi.Handler;
+</code></pre>
+<p>Include a short version of that comment (pointing back to <code>UiThreadHandler</code>'s or
+<code>UiThreadPropertyChangedHandler</code>'s own doc comment rather than repeating it in full) at least at one
+fully-worked example per pattern shape (already done) - the wrapper field names themselves (e.g.
+<code>onBalanceChangedUi</code>) are self-documenting enough that repeating the full comment at all 30 sites was
+judged not worth the noise.</p>
+<p>Any existing <code>-=</code> unsubscription for the same handler (check each site individually — not all
+subscribe sites currently unsubscribe) must use the same wrapper field's <code>.Handler</code>, never the bare
+original method group, or it will silently fail to unsubscribe (this is precisely the bug class this
+design closes, but only for code written the new way).</p>
+<p><strong>Two pre-existing anomalies found during the audit — migrate as-is, do not "fix" them</strong> (out of scope
+for this rewrite; behavior preservation is the goal):
+- <code>Views/AliasesView.xaml.cs</code>'s constructor has an <code>Unloaded += (s, e) =&gt; { ... this.money.Changed +=
+  this.OnMoneyChanged; ...}</code> — this reads like it should be <code>-=</code> (clean up on unload) but is actually
+  <code>+=</code> today. Migrate the operator exactly as-is (<code>+=</code>, using the new wrapper's <code>.Handler</code>); do not
+  silently change it to <code>-=</code> as part of this rewrite.
+- <code>View Selectors/BalanceControl.xaml.cs</code>'s <code>this.myMoney.Transactions.Changed</code> subscription isn't in
+  a property setter — it's inside a method that runs an unconditional <code>-=</code> immediately followed by
+  <code>+=</code> every time that method is called (a defensive re-subscribe-without-duplicating pattern used
+  repeatedly throughout that method for several unrelated events). The <code>UiThreadHandler</code> instance for
+  this one must be a class-level field constructed once (not re-constructed inside that method), or
+  each call would produce a different wrapper and the <code>-=</code>/<code>+=</code> pair would stop matching — exactly the
+  bug class this whole design exists to avoid.</p>
+<p><code>RenamePayeeDialog.xaml.cs</code> already has an existing <code>readonly EventHandler&lt;ChangeEventArgs&gt; handler</code>
+field, assigned once in the constructor (<code>this.handler = new EventHandler&lt;ChangeEventArgs&gt;(this.OnPayees_Changed);</code>)
+and consistently reused for both subscribe (<code>+=</code>) and unsubscribe (<code>-=</code>) in the <code>MyMoney</code> property
+setter — this is already exactly the "wrap once, reuse the same reference" shape this design needs.
+Migrate by changing the field's declared type to <code>UiThreadHandler</code> and its initializer to
+<code>new UiThreadHandler(this.OnPayees_Changed)</code>, then use <code>this.handler.Handler</code> at both the <code>+=</code> and
+<code>-=</code> call sites in place of the bare field.</p>
+<h2 id="design-systemwindowspoint-double-x-double-y-migration">Design: <code>System.Windows.Point</code> → <code>(double X, double Y)</code> migration<a class="headerlink" href="#design-systemwindowspoint-double-x-double-y-migration" title="Permanent link">#</a></h2>
+<p>Four files change:</p>
+<p><strong><code>Source/WPF/MyMoney.Business/Utilities/MathHelpers.cs</code></strong> — remove <code>using System.Windows;</code>. Change
+<code>Covariance(IEnumerable&lt;Point&gt; pts)</code> to <code>Covariance(IEnumerable&lt;(double X, double Y)&gt; pts)</code> (body
+unchanged beyond <code>foreach (Point d in pts)</code> becoming <code>foreach (var d in pts)</code> — <code>.X</code>/<code>.Y</code> access is
+identical on a named tuple). Change <code>LinearRegression(IEnumerable&lt;Point&gt; pts, out double a, out
+double b)</code> the same way. The double-only <code>LinearRegression(IEnumerable&lt;double&gt; pts, ...)</code> overload's
+internal <code>List&lt;Point&gt; pts2</code> becomes <code>List&lt;(double X, double Y)&gt; pts2</code>, and
+<code>pts2.Add(new Point(x++, y));</code> becomes <code>pts2.Add((x++, y));</code>. The LINQ projections inside
+<code>LinearRegression(IEnumerable&lt;(double X, double Y)&gt;, ...)</code> (<code>from p in pts select p.X</code>, etc.) need no
+change — tuple member access works identically in LINQ.</p>
+<p><strong><code>Source/WPF/MyMoney.Business/Utilities/NativeMethods.cs</code></strong> — change <code>GetMousePosition()</code>'s return
+type from <code>System.Windows.Point</code> to <code>(double X, double Y)</code>. <code>return new System.Windows.Point(0, 0);</code>
+becomes <code>return (0, 0);</code>; the final <code>return new System.Windows.Point(ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));</code>
+becomes <code>return (ConvertPixelsToDeviceIndependentPixels(p.X), ConvertPixelsToDeviceIndependentPixels(p.Y));</code>.</p>
+<p><strong><code>Source/WPF/MyMoney/Charts/HistoryBarChart.xaml.cs</code></strong> (<code>ComputeLinearRegression()</code>) — <code>points</code> is a
+purely local variable, built only to feed <code>MathHelpers.LinearRegression(points, out a, out b)</code>; it is
+never used for WPF rendering (confirmed by reading the full method). <code>List&lt;Point&gt; points = new
+List&lt;Point&gt;();</code> becomes <code>List&lt;(double X, double Y)&gt; points = new List&lt;(double X, double Y)&gt;();</code>, and
+<code>points.Add(new Point(x++, (double)c.Amount));</code> becomes <code>points.Add((x++, (double)c.Amount));</code>.</p>
+<p><strong><code>Source/WPF/MyMoney/Utilities/DragAndDrop.cs</code></strong> (<code>UpdateWindowLocation()</code>) — <code>Point pos =
+NativeMethods.GetMousePosition();</code> becomes <code>var pos = NativeMethods.GetMousePosition();</code>; the
+following <code>pos.X</code>/<code>pos.Y</code> reads are unchanged.</p>
+<p>Before applying any of this, re-verify (fresh grep, don't trust this document's file list as
+exhaustive) that these are the only files referencing <code>System.Windows.Point</code> reachable from
+<code>MyMoney.Business</code>, and that <code>NativeMethods.GetMousePosition()</code>'s only caller is
+<code>DragAndDrop.cs</code> and <code>MathHelpers.LinearRegression</code>/<code>Covariance</code>'s only callers are <code>Payments.cs</code>
+(double-only overload) and <code>HistoryBarChart.xaml.cs</code> (<code>Point</code>-based overload) — this spec's own
+account of the call sites was itself discovered by exploration during Task 16, not by an exhaustive
+audit planned from the start, so re-confirm rather than assume completeness.</p>
+<h2 id="design-removing-the-mymoneybusinesscsproj-wpf-frameworkreference">Design: removing the <code>MyMoney.Business.csproj</code> WPF <code>FrameworkReference</code><a class="headerlink" href="#design-removing-the-mymoneybusinesscsproj-wpf-frameworkreference" title="Permanent link">#</a></h2>
+<p>Once the <code>Point</code> migration above lands, re-run an exhaustive check (<code>grep -rln "System.Windows"
+Source/WPF/MyMoney.Business --include=*.cs</code>) to confirm nothing else in the project needs
+<code>WindowsBase</code> for any reason. If clean, remove from <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>:</p>
+<ul>
+<li>The <code>&lt;ItemGroup&gt;</code> containing <code>&lt;FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" /&gt;</code>.</li>
+<li>The <code>RemoveWpfViewRenderingAssemblies</code> target and its preceding doc comment.</li>
+<li>The <code>VerifyNoWpfViewRenderingAssemblies</code> target and its preceding doc comment (this one references
+  issue #11 as its own rationale — that issue doesn't need updating, it documented why the
+  self-test existed, and the self-test's job is now done differently: <code>LayerBoundaryTests</code> is the
+  ongoing check, matching how <code>MyMoney.Data</code> already relies on it with zero MSBuild-level machinery).</li>
+</ul>
+<p>After removal, <code>MyMoney.Business.csproj</code> needs no WPF-specific <code>ItemGroup</code>s or <code>Target</code>s at all —
+structurally identical to <code>MyMoney.Data.csproj</code> in this respect.</p>
+<h2 id="characterization-tests-for-mathhelpers">Characterization tests for <code>MathHelpers</code><a class="headerlink" href="#characterization-tests-for-mathhelpers" title="Permanent link">#</a></h2>
+<p>No existing test coverage exists anywhere for <code>MathHelpers.Covariance</code>/<code>LinearRegression</code>/
+<code>DistancesToLine</code>, despite <code>Payments.cs</code> depending on <code>LinearRegression</code> for real bill/loan
+amortization outlier detection. Before changing the type these methods operate on, write
+characterization tests proving today's numeric behavior, so the migration can be verified as
+behavior-preserving rather than merely "still compiles":</p>
+<ol>
+<li>Write tests for <code>LinearRegression(IEnumerable&lt;double&gt;, out double, out double)</code> (the overload
+   <code>Payments.cs</code> actually calls) against the <strong>current</strong>, unmigrated code: a perfectly linear input
+   (e.g. <code>[2, 4, 6, 8, 10]</code>, expecting <code>a</code> and <code>b</code> matching <code>y = a + b*x</code> for that sequence) and a
+   noisy/non-trivial input, with concrete expected numeric values computed independently (not just
+   "whatever the code currently outputs" — that would validate nothing).</li>
+<li>Write a test for <code>Covariance</code> and the <code>Point</code>-based <code>LinearRegression</code> overload directly, with a
+   small hand-computed <code>(X, Y)</code> dataset.</li>
+<li>Run these tests against the current code. They must pass — this proves they capture real, correct
+   behavior, not an assumption about what the code does.</li>
+<li>Migrate the type per the design above.</li>
+<li>Mechanically update the same tests' input construction from <code>new Point(x, y)</code> to <code>(x, y)</code> (the
+   expected output values do not change — that is the point of the test).</li>
+<li>Re-run. Identical results confirm the migration changed no observable behavior.</li>
+<li>Add one minimal test for <code>NativeMethods.GetMousePosition()</code>'s new tuple-returning signature —
+   this method reads the real OS mouse position, so a test can only sensibly assert it returns
+   without throwing and produces a well-formed <code>(double, double)</code>, not exact coordinates.</li>
+</ol>
+<h2 id="test-changes">Test changes<a class="headerlink" href="#test-changes" title="Permanent link">#</a></h2>
+<p><code>Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs</code> (PR #48) must be updated in the <strong>same
+commit</strong> that removes the <code>DependencyObject</code> check from <code>EventHandlerCollection</code> — never leave CI red
+for an unaddressed reason (migration panelist's finding):</p>
+<ul>
+<li><code>RaiseEvent_DependencyObjectListener_RunsOnDispatcherThreadNotCallingThread</code> — obsolete (asserts
+  automatic <code>DependencyObject</code>-based marshaling, which no longer exists). Replace with
+  <code>RaiseEvent_DependencyObjectListener_NoLongerAutoMarshals_RunsSynchronouslyOnCallingThread</code>: subscribe
+  a raw <code>DependencyObject</code>-derived listener <em>directly</em> (no wrapper), and assert it now runs on the
+  <em>calling</em> thread, not the dispatcher thread — the direct, meaningful proof that the automatic
+  <code>DependencyObject</code> check is gone.</li>
+<li><code>RaiseEvent_PlainListener_RunsSynchronouslyOnCallingThread</code> — still valid, now trivially true for
+  <em>every</em> unwrapped listener (not just non-<code>DependencyObject</code> ones); keep as basic coverage of the
+  base synchronous-by-default behavior.</li>
+<li><code>RaiseEvent_FromThreadHoldingALockTheUiThreadWants_DoesNotDeadlock</code> — update its subscription to use
+  <code>new UiThreadHandler(listener.OnChanged).Handler</code> instead of subscribing the raw <code>DependencyObject</code>
+  listener directly (which would no longer be marshaled at all under the new design); the deadlock-
+  avoidance property itself is unchanged, still <code>Post</code>-based, still non-blocking.</li>
+<li><strong>New</strong>: promote the validation experiment's proof directly into permanent coverage —
+  <code>UiThreadHandler_Unsubscribe_ActuallyStopsDelivery</code> (subscribe and unsubscribe via the same
+  <code>.Handler</code> reference; listener must not fire) and <code>UiThreadHandler_StillMarshalsToUiThreadWhileSubscribed</code>
+  (a companion sanity check that it still delivers while subscribed, ruling out a trivial "never
+  delivers anything" implementation passing by accident). This is the actual load-bearing property of
+  the new production API and must be a real regression test, not just a deleted experiment.</li>
+</ul>
+<h2 id="layerboundarytests-sourcewpfunittestslayerboundarytestscs"><code>LayerBoundaryTests</code> (<code>Source/WPF/UnitTests/LayerBoundaryTests.cs</code>)<a class="headerlink" href="#layerboundarytests-sourcewpfunittestslayerboundarytestscs" title="Permanent link">#</a></h2>
+<p>Once the rewrite <strong>and</strong> the <code>Point</code>/<code>FrameworkReference</code> migration above are both complete — this
+test genuinely cannot pass until both are done, since either one alone leaves <code>WindowsBase</code>
+referenced — tighten <code>MyMoneyBusiness_HasNoUiRenderingAssemblyReference</code> (or add a new test) to check
+against <code>AllWpfAssemblyNames</code> (all three: <code>PresentationFramework</code>, <code>PresentationCore</code>,
+<code>WindowsBase</code>) instead of just <code>UiRenderingAssemblyNames</code> — matching
+<code>MyMoneyData_HasNoWpfAssemblyReference</code>'s existing pattern exactly. This is the concrete, automated
+acceptance criterion proving issue #7's goal achieved; update the class-level doc comment
+accordingly (it currently documents the WindowsBase allowance as intentional).</p>
+<h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">#</a></h2>
+<ul>
+<li><code>dotnet build Source/WPF/MyMoney.sln</code> — clean.</li>
+<li><code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code> — full pass, including the tightened
+  <code>LayerBoundaryTests</code> (this is the test that would fail if any WPF-only type leaked back into
+  <code>MyMoney.Business</code>), the rewritten <code>CrossThreadEventMarshalingTests</code>, and the new <code>MathHelpers</code>
+  characterization tests.</li>
+<li>Full-solution regression matching this session's established baseline.</li>
+<li><strong>Manual interactive smoke pass</strong> through the main app (<code>MyMoney.exe</code>), specifically exercising
+  every migrated view/dialog (Accounts, Transactions, Securities, Currencies, Aliases, Categories,
+  Payees, Rents, rename-payee dialog, account dialog) to confirm UI updates still arrive correctly
+  after migration — this is the migration panelist's explicit completion gate and cannot be done by
+  an agent without a real interactive desktop; flag this to the user as a manual step before merge.</li>
+</ul>
+<h2 id="known-deferred-items">Known deferred items<a class="headerlink" href="#known-deferred-items" title="Permanent link">#</a></h2>
+<ul>
+<li>Roslyn analyzer for compile-time detection of a forgotten <code>UiThreadHandler</code>/
+  <code>UiThreadPropertyChangedHandler</code> wrap (ergonomics panelist's proposal) — separate follow-up, not
+  part of this work. Tracked as issue #49 (low priority).</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

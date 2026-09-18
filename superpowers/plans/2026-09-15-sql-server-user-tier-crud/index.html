@@ -1,0 +1,2655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-15-sql-server-user-tier-crud/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>SQL Server MyMoneyUser CRUD Coverage Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "SQL Server MyMoneyUser CRUD Coverage Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Self-Review Notes", url: "#self-review-notes" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="sql-server-mymoneyuser-crud-coverage-implementation-plan">SQL Server <code>MyMoneyUser</code> CRUD Coverage Implementation Plan<a class="headerlink" href="#sql-server-mymoneyuser-crud-coverage-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Give the <code>MyMoneyUser</code> SQL Server login (the tier the shipped app actually connects as) full CRUD access — via stored procedures, matching the existing Payees pattern — to Accounts, Categories, Currencies, Securities, StockSplits, Aliases, Transactions, Splits, and Investment, closing GitHub issue #22.</p>
+<p><strong>Architecture:</strong> <code>SqlServerStoredProcDatabase</code> (in <code>MyMoney.Data</code>) gets one <code>ReadXxx</code>/<code>UpdateXxx</code> override pair per entity (three pairs for Transactions/Splits/Investment, mirroring how the generic base class already treats them as three separately-updated tables), each calling a new stored-proc script deployed by <code>MyMoneyAdmin</code>'s bootstrap. A shared <code>ExecuteProc</code> helper removes per-entity ADO.NET boilerplate. <code>Load()</code> is extended to read all 9 entities instead of just Payees. A new <code>SqlServerDatabaseContractTests</code> fixture (in <code>MyMoney.TestSupport</code>) proves the whole thing works under the <code>MyMoneyUser</code> tier using the existing shared <code>DatabaseContractTests</code> suite.</p>
+<p><strong>Tech Stack:</strong> .NET 10 (<code>net10.0-windows7.0</code>), <code>Microsoft.Data.SqlClient</code>, T-SQL stored procedures, NUnit 4.6.1.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-15-sql-server-user-tier-crud-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Scope is exactly 9 entities: Accounts, Categories, Currencies, Securities, StockSplits, Aliases, Transactions, Splits, Investment. Everything else (OnlineAccounts, AccountAliases, TransactionExtras, RentBuildings, RentUnits, LoanPayments) is out of scope — tracked separately as issue #23.</li>
+<li>Every new stored-proc script follows <code>Payees_AccessProcs.sql</code>'s exact template: header comment naming the file and "Run as the MyMoneyAdmin login against the MyMoney database", <code>USE MyMoney; GO</code>, <code>CREATE OR ALTER PROCEDURE</code> per operation, <code>GRANT EXECUTE</code> to both <code>MyMoneyUser</code> and <code>MyMoneyTest</code> at the end.</li>
+<li>Transactions, Splits, and Investment are three independent proc sets and three independent <code>SqlServerStoredProcDatabase</code> override methods — never one atomic parent+children proc. This matches how <code>SqlDatabase.UpdateTransactions</code>/<code>UpdateSplits</code>/<code>UpdateInvestment</code> already treat them as separately-updated tables.</li>
+<li>All new entity CRUD methods on <code>SqlServerStoredProcDatabase</code> call the shared <code>ExecuteProc(SqlConnection, string procName, params (string Name, object Value)[] parameters)</code> helper (Task 1) instead of hand-rolling <code>SqlCommand</code>/parameter-binding code, and use the same local-<code>SqlConnection</code>-per-call style <code>ExecutePayeeProc</code> already uses — never the base class's different ambient-connection/<code>this.transaction</code> style.</li>
+<li><code>SqlServerDatabaseContractTests</code> (Task 11) connects as <code>MyMoneyUser</code> via environment variable <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code> (same variable <code>SqlServerStoredProcDatabaseTests</code> already uses) and <strong>must fail, not skip/Ignore, if that variable is unset or the connection fails</strong> — this is a deliberate deviation from <code>SqlServerStoredProcDatabaseTests</code>'s <code>Assert.Ignore</code> pattern; do not "fix" it back.</li>
+<li>Table-cleanup between contract-test runs (Task 11) connects as <code>MyMoneyAdmin</code> via a separate new environment variable, <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code> — used only for cleanup, never as the <code>IDatabase</code> under test.</li>
+<li>No change to the tiered-security model itself, to <code>MyMoneyAdmin</code>'s bootstrap process beyond what's specified here, to the SQLite/generic <code>SqlServerDatabase</code> CRUD paths, or to <code>SupportsParameterizedUpdate</code> (deliberately <code>SqliteDatabase</code>-only, unrelated to this plan).</li>
+<li>Every new/changed <code>.sql</code> script must actually get deployed to the shared SQL Server test instance before its task's tests can pass — each task's steps say exactly how (via <code>MyMoneyAdmin.exe</code>, since <code>BootstrapRunner</code> re-running is idempotent).</li>
+</ul>
+<hr />
+<h3 id="task-1-shared-executeproc-helper-visibility-promotions-and-schema-bootstrap-for-the-9-new-tables">Task 1: Shared <code>ExecuteProc</code> helper, visibility promotions, and schema bootstrap for the 9 new tables<a class="headerlink" href="#task-1-shared-executeproc-helper-visibility-promotions-and-schema-bootstrap-for-the-9-new-tables" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (promote <code>DBDateTimeParam</code>, <code>DBNullableDateTimeParam</code>, <code>DBGuidParam</code> from <code>private static</code> to <code>internal static</code> — no body changes)
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ExecuteProc</code> helper, refactor <code>ExecutePayeeProc</code> to call it)
+- Modify: <code>Source/WPF/MyMoneyAdmin/BootstrapRunner.cs</code> (create the 9 new tables' schema via <code>LazyCreateTables()</code>, as <code>MyMoneyAdmin</code>, before deploying any of this plan's new access-proc scripts)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>Walkabout.Data.SqlServerStoredProcDatabase.ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)</code> (private static) — every later task's <code>UpdateXxx</code> override calls this.
+- Produces: <code>Walkabout.Data.SqlDatabase.DBDateTimeParam(DateTime)</code>, <code>DBNullableDateTimeParam(DateTime?)</code>, <code>DBGuidParam(SqlGuid)</code> now <code>internal static</code> (unchanged signatures/bodies) — later tasks' <code>UpdateAccounts</code>/<code>UpdateStockSplits</code>/<code>UpdateTransactions</code>/<code>UpdateSplits</code> overrides call these directly (same-assembly <code>internal</code> access, no inheritance needed).
+- Consumes: nothing new — this task is foundational.</p>
+<ul>
+<li>[ ] <strong>Step 1: Run the existing Payees test to confirm today's green baseline</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code></p>
+<p>Set the <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code> environment variable to a working <code>MyMoneyUser</code> connection string first (e.g. <code>Server=&lt;server&gt;;Database=MyMoney;User Id=MyMoneyUser;Password=&lt;password&gt;;TrustServerCertificate=True;</code>), matching whatever the SQL Server instance from item #2's bootstrap is using.</p>
+<p>Expected: <code>Passed! - Failed: 0, Passed: 1</code>. This is the baseline that Step 5 must still show after refactoring <code>ExecutePayeeProc</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Promote the three DB-parameter helpers to <code>internal static</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, find:</p>
+<pre><code class="language-csharp">        private static object DBDateTimeParam(DateTime dt)
+</code></pre>
+<p>Change to:</p>
+<pre><code class="language-csharp">        internal static object DBDateTimeParam(DateTime dt)
+</code></pre>
+<p>Find:</p>
+<pre><code class="language-csharp">        private static object DBNullableDateTimeParam(DateTime? ndt)
+</code></pre>
+<p>Change to:</p>
+<pre><code class="language-csharp">        internal static object DBNullableDateTimeParam(DateTime? ndt)
+</code></pre>
+<p>Find:</p>
+<pre><code class="language-csharp">        private static object DBGuidParam(SqlGuid guid)
+</code></pre>
+<p>Change to:</p>
+<pre><code class="language-csharp">        internal static object DBGuidParam(SqlGuid guid)
+</code></pre>
+<p>No other changes to these three methods' bodies.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the shared <code>ExecuteProc</code> helper and refactor <code>ExecutePayeeProc</code> to use it</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, add <code>using System;</code> and <code>using System.Data;</code> to the top of the file if not already present, then replace the existing <code>ExecutePayeeProc</code> method:</p>
+<pre><code class="language-csharp">        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        {
+            using (var command = new SqlCommand(procName, connection) { CommandType = System.Data.CommandType.StoredProcedure })
+            {
+                command.Parameters.AddWithValue(&quot;@Id&quot;, p.Id);
+                command.Parameters.AddWithValue(&quot;@Name&quot;, (object)p.Name ?? System.DBNull.Value);
+                command.ExecuteNonQuery();
+            }
+        }
+</code></pre>
+<p>with:</p>
+<pre><code class="language-csharp">        /// &lt;summary&gt;
+        /// Shared ADO.NET helper for every entity's stored-proc CRUD calls
+        /// (see the design spec for issue #22). Keeps each entity's
+        /// Read/Update override thin: build the parameter list, call this.
+        /// &lt;/summary&gt;
+        private static void ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)
+        {
+            using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+            {
+                foreach (var (name, value) in parameters)
+                {
+                    command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                }
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+        {
+            ExecuteProc(connection, procName, (&quot;@Id&quot;, p.Id), (&quot;@Name&quot;, (object)p.Name ?? DBNull.Value));
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add schema creation for the 9 new tables to <code>BootstrapRunner</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoneyAdmin/BootstrapRunner.cs</code>, find:</p>
+<pre><code class="language-csharp">            Console.WriteLine(&quot;Deploying schema and stored procedures as 'MyMoneyAdmin'...&quot;);
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Schema&quot;, &quot;001_CreatePayeesTable.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Payees_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Test&quot;, &quot;Payees_TestProcs.sql&quot;)));
+</code></pre>
+<p>Replace with:</p>
+<pre><code class="language-csharp">            Console.WriteLine(&quot;Deploying schema and stored procedures as 'MyMoneyAdmin'...&quot;);
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Schema&quot;, &quot;001_CreatePayeesTable.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Payees_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Test&quot;, &quot;Payees_TestProcs.sql&quot;)));
+
+            Console.WriteLine(&quot;Creating schema for Accounts/Categories/Currencies/Securities/StockSplits/Aliases/Transactions/Splits/Investments as 'MyMoneyAdmin'...&quot;);
+            var adminDatabase = new SqlServerDatabase
+            {
+                Server = server,
+                UserId = &quot;MyMoneyAdmin&quot;,
+                Password = adminPassword,
+                DatabaseName = databaseName
+            };
+            adminDatabase.LazyCreateTables();
+
+            Console.WriteLine(&quot;Deploying issue #22 access procedures as 'MyMoneyAdmin'...&quot;);
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Accounts_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Categories_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Currencies_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Securities_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;StockSplits_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Aliases_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Transactions_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Splits_AccessProcs.sql&quot;)));
+            ExecuteBatchScript(adminBuilder.ConnectionString, File.ReadAllText(Path.Combine(this.sqlScriptsRoot, &quot;Access&quot;, &quot;Investments_AccessProcs.sql&quot;)));
+</code></pre>
+<p>Note: <code>LazyCreateTables()</code> is idempotent (it checks <code>TableExists</code> per table before creating), and reflects over every <code>[TableMapping]</code>-decorated type in <code>MyMoney.Business</code> — including the 6 out-of-scope entities from issue #23. Creating their tables here too is harmless (empty, unused tables) and avoids having to hand-maintain a filtered list; issue #23 will add access procs for them later without needing any further schema-creation step.</p>
+<p>This step references <code>Accounts_AccessProcs.sql</code> through <code>Investments_AccessProcs.sql</code>, which don't exist yet — that's expected; Tasks 2-10 create them. <code>BootstrapRunner</code> won't compile-fail (these are just string literals evaluated at runtime), but running the bootstrap before those files exist will throw a <code>FileNotFoundException</code>. Don't run the bootstrap again until Task 10 is complete.</p>
+<ul>
+<li>[ ] <strong>Step 5: Rebuild and rerun the existing Payees test to confirm no regression</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: <code>Build succeeded.</code>, 0 errors.</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code>
+Expected: <code>Passed! - Failed: 0, Passed: 1</code> — same result as Step 1, proving the <code>ExecutePayeeProc</code> refactor didn't change behavior.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/MyMoneyAdmin/BootstrapRunner.cs
+git commit -m &quot;Add shared ExecuteProc helper and schema bootstrap for issue #22's 9 entities&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-accounts">Task 2: Accounts<a class="headerlink" href="#task-2-accounts" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Accounts_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadAccounts</code>, <code>UpdateAccounts</code> overrides; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteAccount_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>DBDateTimeParam</code>/<code>DBGuidParam</code> (Task 1, now <code>internal</code>), <code>ReadDbString</code>/<code>ReadInt32</code> (<code>Walkabout.Data.SqlDatabase</code>, already <code>internal static</code>).
+- Produces: <code>Walkabout.Data.SqlServerStoredProcDatabase.ReadAccounts(Accounts, MyMoney)</code>, <code>UpdateAccounts(Accounts)</code> (both <code>public override</code>) — Task 8 (Transactions) calls <code>money.Accounts.FindAccountAt(id)</code> against data this loads.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>In <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code>, add (inside the <code>SqlServerStoredProcDatabaseTests</code> class, after the existing <code>InsertUpdateDeletePayee_RoundTripsThroughStoredProcedures</code> test):</p>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteAccount_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;SqlServerStoredProcDatabaseTests Account&quot;);
+            account.Type = AccountType.Checking;
+            account.Description = &quot;Test account&quot;;
+            account.OpeningBalance = 100.00m;
+            account.OnInserted();
+
+            db.UpdateAccounts(money.Accounts);
+
+            var reloaded = new MyMoney();
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            var found = reloaded.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Account&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Type, Is.EqualTo(AccountType.Checking));
+            Assert.That(found.Description, Is.EqualTo(&quot;Test account&quot;));
+            Assert.That(found.OpeningBalance, Is.EqualTo(100.00m));
+
+            found.Description = &quot;Updated description&quot;;
+            db.UpdateAccounts(reloaded.Accounts);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            var updated = afterUpdate.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Account&quot;);
+            Assert.That(updated.Description, Is.EqualTo(&quot;Updated description&quot;));
+
+            updated.OnDelete();
+            var toDelete = new Accounts(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateAccounts(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Account&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteAccount_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL — <code>UpdateAccounts</code>/<code>ReadAccounts</code> aren't overridden yet, so this calls the base <code>SqlServerDatabase</code> versions, which hit <code>Accounts_SelectAll</code>/etc. procs that don't exist yet (or, if the base generic-SQL path runs instead, a permissions error since <code>MyMoneyUser</code> has no direct table grants). Either way: FAIL, not a compile error.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Accounts_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Accounts_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Accounts table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Accounts_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, AccountId, OfxAccountId, Name, Type, Description, OnlineAccount, OpeningBalance,
+           LastSync, LastBalance, SyncGuid, Flags, Currency, WebSite, ReconcileWarning,
+           CategoryIdForPrincipal, CategoryIdForInterest
+    FROM dbo.Accounts ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Accounts_Insert
+    @Id INT, @AccountId NVARCHAR(20), @OfxAccountId NVARCHAR(50), @Name NVARCHAR(80), @Type INT,
+    @Description NVARCHAR(255), @OnlineAccount INT, @OpeningBalance MONEY, @LastSync DATETIME,
+    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(10),
+    @WebSite NVARCHAR(255), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Accounts (Id, AccountId, OfxAccountId, Name, Type, Description, OnlineAccount,
+        OpeningBalance, LastSync, LastBalance, SyncGuid, Flags, Currency, WebSite, ReconcileWarning,
+        CategoryIdForPrincipal, CategoryIdForInterest)
+    VALUES (@Id, @AccountId, @OfxAccountId, @Name, @Type, @Description, @OnlineAccount, @OpeningBalance,
+        @LastSync, @LastBalance, @SyncGuid, @Flags, @Currency, @WebSite, @ReconcileWarning,
+        @CategoryIdForPrincipal, @CategoryIdForInterest);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Accounts_Update
+    @Id INT, @AccountId NVARCHAR(20), @OfxAccountId NVARCHAR(50), @Name NVARCHAR(80), @Type INT,
+    @Description NVARCHAR(255), @OnlineAccount INT, @OpeningBalance MONEY, @LastSync DATETIME,
+    @LastBalance DATETIME, @SyncGuid UNIQUEIDENTIFIER, @Flags INT, @Currency NVARCHAR(10),
+    @WebSite NVARCHAR(255), @ReconcileWarning INT, @CategoryIdForPrincipal INT, @CategoryIdForInterest INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Accounts SET
+        AccountId = @AccountId, OfxAccountId = @OfxAccountId, Name = @Name, Type = @Type,
+        Description = @Description, OnlineAccount = @OnlineAccount, OpeningBalance = @OpeningBalance,
+        LastSync = @LastSync, LastBalance = @LastBalance, SyncGuid = @SyncGuid, Flags = @Flags,
+        Currency = @Currency, WebSite = @WebSite, ReconcileWarning = @ReconcileWarning,
+        CategoryIdForPrincipal = @CategoryIdForPrincipal, CategoryIdForInterest = @CategoryIdForInterest
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Accounts_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Accounts WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Accounts_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Accounts_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Accounts_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Accounts_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Accounts_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Accounts_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Accounts_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Accounts_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadAccounts</code>/<code>UpdateAccounts</code> overrides</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, add after <code>UpdatePayees</code>:</p>
+<pre><code class="language-csharp">        public override void ReadAccounts(Accounts accts, MyMoney money)
+        {
+            accts.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Accounts_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    accts.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Account a = accts.AddAccount(id);
+                        a.AccountId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        a.OfxAccountId = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        a.Name = reader.IsDBNull(3) ? null : reader.GetString(3);
+                        a.Type = (AccountType)reader.GetInt32(4);
+                        a.Description = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        if (!reader.IsDBNull(6))
+                        {
+                            a.OnlineAccount = money.OnlineAccounts.FindOnlineAccountAt(reader.GetInt32(6));
+                        }
+                        a.OpeningBalance = reader.IsDBNull(7) ? 0 : reader.GetDecimal(7);
+                        if (!reader.IsDBNull(8))
+                        {
+                            a.LastSync = reader.GetDateTime(8);
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            a.LastBalance = reader.GetDateTime(9);
+                        }
+                        if (!reader.IsDBNull(10))
+                        {
+                            a.SyncGuid = new SqlGuid(reader.GetGuid(10));
+                        }
+                        if (!reader.IsDBNull(11))
+                        {
+                            a.Flags = (AccountFlags)reader.GetInt32(11);
+                        }
+                        a.Currency = reader.IsDBNull(12) ? null : reader.GetString(12);
+                        a.WebSite = reader.IsDBNull(13) ? null : reader.GetString(13);
+                        if (!reader.IsDBNull(14))
+                        {
+                            a.ReconcileWarning = reader.GetInt32(14);
+                        }
+                        if (!reader.IsDBNull(15))
+                        {
+                            a.CategoryForPrincipal = money.Categories.FindCategoryById(reader.GetInt32(15));
+                        }
+                        if (!reader.IsDBNull(16))
+                        {
+                            a.CategoryForInterest = money.Categories.FindCategoryById(reader.GetInt32(16));
+                        }
+                        a.OnUpdated();
+                    }
+                    accts.EndUpdate();
+                }
+            }
+            accts.FireChangeEvent(accts, accts, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateAccounts(Accounts accounts)
+        {
+            if (accounts.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Account a in accounts)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, a.Id), (&quot;@AccountId&quot;, (object)a.AccountId ?? DBNull.Value),
+                        (&quot;@OfxAccountId&quot;, (object)a.OfxAccountId ?? DBNull.Value), (&quot;@Name&quot;, (object)a.Name ?? DBNull.Value),
+                        (&quot;@Type&quot;, (int)a.Type), (&quot;@Description&quot;, (object)a.Description ?? DBNull.Value),
+                        (&quot;@OnlineAccount&quot;, a.OnlineAccount != null ? a.OnlineAccount.Id : -1),
+                        (&quot;@OpeningBalance&quot;, a.OpeningBalance), (&quot;@LastSync&quot;, SqlDatabase.DBDateTimeParam(a.LastSync)),
+                        (&quot;@LastBalance&quot;, SqlDatabase.DBDateTimeParam(a.LastBalance)), (&quot;@SyncGuid&quot;, SqlDatabase.DBGuidParam(a.SyncGuid)),
+                        (&quot;@Flags&quot;, (int)a.Flags), (&quot;@Currency&quot;, (object)a.Currency ?? DBNull.Value),
+                        (&quot;@WebSite&quot;, (object)a.WebSite ?? DBNull.Value), (&quot;@ReconcileWarning&quot;, a.ReconcileWarning),
+                        (&quot;@CategoryIdForPrincipal&quot;, a.CategoryForPrincipal == null ? -1 : a.CategoryForPrincipal.Id),
+                        (&quot;@CategoryIdForInterest&quot;, a.CategoryForInterest == null ? -1 : a.CategoryForInterest.Id)
+                    };
+
+                    if (a.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Accounts_Update&quot;, parameters);
+                    }
+                    else if (a.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Accounts_Insert&quot;, parameters);
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Accounts_Delete&quot;, (&quot;@Id&quot;, a.Id));
+                    }
+                }
+            }
+
+            foreach (Account a in accounts)
+            {
+                if (!a.IsDeleted)
+                {
+                    a.OnUpdated();
+                }
+            }
+            accounts.RemoveDeleted();
+        }
+</code></pre>
+<p>Note the <code>@SyncGuid</code>/<code>@LastSync</code>/<code>@LastBalance</code> values use <code>SqlDatabase.DBGuidParam(...)</code>/<code>SqlDatabase.DBDateTimeParam(...)</code> — fully-qualified since these are <code>internal static</code> members of the base class <code>SqlDatabase</code>, accessible from this subclass because both are in the <code>MyMoney.Data</code> assembly (Task 1 promoted them from <code>private</code> to <code>internal</code>).</p>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code> to also read Accounts</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, find:</p>
+<pre><code class="language-csharp">        public override MyMoney Load(IStatusService status)
+        {
+            MyMoney money = new MyMoney();
+            money.BeginUpdate(this);
+            try
+            {
+                this.ReadPayees(money.Payees, money);
+            }
+            finally
+            {
+                money.FlushUpdates();
+                money.EndUpdate();
+                money.OnLoaded();
+            }
+            return money;
+        }
+</code></pre>
+<p>Change to:</p>
+<pre><code class="language-csharp">        public override MyMoney Load(IStatusService status)
+        {
+            MyMoney money = new MyMoney();
+            money.BeginUpdate(this);
+            try
+            {
+                this.ReadPayees(money.Payees, money);
+                this.ReadAccounts(money.Accounts, money);
+            }
+            finally
+            {
+                money.FlushUpdates();
+                money.EndUpdate();
+                money.OnLoaded();
+            }
+            return money;
+        }
+</code></pre>
+<p>(Later tasks add more <code>this.ReadXxx(...)</code> lines here, in dependency order: Categories before Accounts would also work since <code>ReadAccounts</code> only resolves <code>CategoryForPrincipal</code>/<code>CategoryForInterest</code> when non-null and <code>FindCategoryById</code> returns <code>null</code> harmlessly if Categories haven't loaded yet — but to avoid relying on that, Task 3 inserts <code>ReadCategories</code> <em>before</em> <code>ReadAccounts</code> in this method.)</p>
+<ul>
+<li>[ ] <strong>Step 6: Deploy the new proc script and rerun the test</strong></li>
+</ul>
+<p>Run <code>MyMoneyAdmin.exe</code> against the existing bootstrapped SQL Server instance to deploy <code>Accounts_AccessProcs.sql</code> (this also runs Task 1's <code>LazyCreateTables()</code> step, creating the <code>Accounts</code> table if it doesn't already exist):</p>
+<pre><code class="language-bash">dotnet run --project Source/WPF/MyMoneyAdmin/MyMoneyAdmin.csproj -- &lt;server&gt; MyMoney
+</code></pre>
+<p>(Use whatever server argument this environment's existing bootstrap already uses — the same one <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code> points at.)</p>
+<p>Then run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: <code>Build succeeded.</code>, 0 errors.</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteAccount_RoundTripsThroughStoredProcedures"</code>
+Expected: <code>Passed! - Failed: 0, Passed: 1</code></p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Accounts_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Accounts (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-categories">Task 3: Categories<a class="headerlink" href="#task-3-categories" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadCategories</code>, <code>UpdateCategories</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1).
+- Produces: <code>ReadCategories(Categories, MyMoney)</code>, <code>UpdateCategories(Categories)</code> (<code>public override</code>) — Task 2's <code>ReadAccounts</code> (<code>CategoryForPrincipal</code>/<code>CategoryForInterest</code>) and Task 8 (Transactions) both call <code>money.Categories.FindCategoryById(id)</code> against data this loads, so <code>Load()</code> must call <code>ReadCategories</code> before <code>ReadAccounts</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>In <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code>, add:</p>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var category = money.Categories.GetOrCreateCategory(&quot;SqlServerStoredProcDatabaseTests:Category&quot;, CategoryType.Expense);
+            category.Description = &quot;Test category&quot;;
+            category.Budget = 250.00m;
+            category.OnInserted();
+
+            db.UpdateCategories(money.Categories);
+
+            var reloaded = new MyMoney();
+            db.ReadCategories(reloaded.Categories, reloaded);
+            var found = reloaded.Categories.FindCategory(&quot;SqlServerStoredProcDatabaseTests:Category&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Description, Is.EqualTo(&quot;Test category&quot;));
+            Assert.That(found.Budget, Is.EqualTo(250.00m));
+
+            found.Description = &quot;Updated description&quot;;
+            db.UpdateCategories(reloaded.Categories);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCategories(afterUpdate.Categories, afterUpdate);
+            var updated = afterUpdate.Categories.FindCategory(&quot;SqlServerStoredProcDatabaseTests:Category&quot;);
+            Assert.That(updated.Description, Is.EqualTo(&quot;Updated description&quot;));
+
+            updated.OnDelete();
+            var toDelete = new Categories(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateCategories(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadCategories(afterDelete.Categories, afterDelete);
+            Assert.That(afterDelete.Categories.FindCategory(&quot;SqlServerStoredProcDatabaseTests:Category&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL (no override yet, same failure mode as Task 2 Step 2).</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Categories_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Categories table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Name, Description, Type, ParentId, Budget, Frequency, Balance, Color, TaxRefNum
+    FROM dbo.Categories ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_Insert
+    @Id INT, @Name NVARCHAR(255), @Description NVARCHAR(255), @Type INT, @ParentId INT,
+    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(20), @TaxRefNum INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Categories (Id, Name, Description, Type, ParentId, Budget, Frequency, Balance, Color, TaxRefNum)
+    VALUES (@Id, @Name, @Description, @Type, @ParentId, @Budget, @Frequency, @Balance, @Color, @TaxRefNum);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_Update
+    @Id INT, @Name NVARCHAR(255), @Description NVARCHAR(255), @Type INT, @ParentId INT,
+    @Budget MONEY, @Frequency INT, @Balance MONEY, @Color NVARCHAR(20), @TaxRefNum INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Categories SET
+        Name = @Name, Description = @Description, Type = @Type, ParentId = @ParentId, Budget = @Budget,
+        Frequency = @Frequency, Balance = @Balance, Color = @Color, TaxRefNum = @TaxRefNum
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Categories WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Categories_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Categories_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Categories_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Categories_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Categories_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Categories_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Categories_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Categories_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadCategories</code>/<code>UpdateCategories</code> overrides</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, add:</p>
+<pre><code class="language-csharp">        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Categories_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    categories.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Category c = new Category(categories);
+                        c.Id = id;
+                        categories.AddCategory(c);
+                        c.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        c.Description = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            c.Type = (CategoryType)reader.GetInt32(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            c.ParentId = reader.GetInt32(4);
+                        }
+                        if (!reader.IsDBNull(5))
+                        {
+                            c.Budget = reader.GetDecimal(5);
+                        }
+                        if (!reader.IsDBNull(6))
+                        {
+                            c.Frequency = (CalendarRange)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            c.Balance = reader.GetDecimal(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            c.Color = reader.GetString(8);
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            c.TaxRefNum = reader.GetInt32(9);
+                        }
+                        c.OnUpdated();
+                        if (c.Type == CategoryType.Reserved)
+                        {
+                            c.Type = CategoryType.Expense;
+                        }
+                    }
+                    categories.EndUpdate();
+                }
+            }
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateCategories(Categories categories)
+        {
+            if (categories.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Category c in categories)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, c.Id), (&quot;@Name&quot;, (object)c.Name ?? DBNull.Value),
+                        (&quot;@Description&quot;, (object)c.Description ?? DBNull.Value), (&quot;@Type&quot;, (int)c.Type),
+                        (&quot;@ParentId&quot;, c.ParentCategory != null ? c.ParentCategory.Id : -1), (&quot;@Budget&quot;, c.Budget),
+                        (&quot;@Frequency&quot;, (int)c.Frequency), (&quot;@Balance&quot;, c.Balance),
+                        (&quot;@Color&quot;, (object)c.Color ?? DBNull.Value), (&quot;@TaxRefNum&quot;, c.TaxRefNum)
+                    };
+
+                    if (c.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Categories_Update&quot;, parameters);
+                    }
+                    else if (c.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Categories_Insert&quot;, parameters);
+                    }
+                    else if (c.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Categories_Delete&quot;, (&quot;@Id&quot;, c.Id));
+                    }
+                }
+            }
+
+            foreach (Category c in categories)
+            {
+                c.OnUpdated();
+            }
+            categories.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code> to read Categories before Accounts</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, find:</p>
+<pre><code class="language-csharp">                this.ReadPayees(money.Payees, money);
+                this.ReadAccounts(money.Accounts, money);
+</code></pre>
+<p>Change to:</p>
+<pre><code class="language-csharp">                this.ReadPayees(money.Payees, money);
+                this.ReadCategories(money.Categories, money);
+                this.ReadAccounts(money.Accounts, money);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Run <code>MyMoneyAdmin.exe</code> as in Task 2 Step 6 to deploy <code>Categories_AccessProcs.sql</code>.</p>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures"</code> — expect <code>Passed! - Failed: 0, Passed: 1</code>.
+Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code> — expect all tests in the fixture (Payees + Accounts + Categories) still pass, confirming <code>Load()</code>'s new ordering didn't break anything.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Categories (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-4-currencies">Task 4: Currencies<a class="headerlink" href="#task-4-currencies" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Currencies_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadCurrencies</code>, <code>UpdateCurrencies</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteCurrency_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1).
+- Produces: <code>ReadCurrencies(Currencies, MyMoney)</code>, <code>UpdateCurrencies(Currencies)</code> (<code>public override</code>) — nothing later in this plan depends on Currencies directly, but issue #19's rich dataset will.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteCurrency_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var currency = money.Currencies.AddCurrency(0);
+            currency.Symbol = &quot;ZZT&quot;;
+            currency.Name = &quot;SqlServerStoredProcDatabaseTests Currency&quot;;
+            currency.Ratio = 1.5m;
+            currency.CultureCode = &quot;en-US&quot;;
+            currency.OnInserted();
+
+            db.UpdateCurrencies(money.Currencies);
+
+            var reloaded = new MyMoney();
+            db.ReadCurrencies(reloaded.Currencies, reloaded);
+            var found = reloaded.Currencies.FindCurrency(&quot;ZZT&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Name, Is.EqualTo(&quot;SqlServerStoredProcDatabaseTests Currency&quot;));
+            Assert.That(found.Ratio, Is.EqualTo(1.5m));
+
+            found.Ratio = 2.0m;
+            db.UpdateCurrencies(reloaded.Currencies);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCurrencies(afterUpdate.Currencies, afterUpdate);
+            var updated = afterUpdate.Currencies.FindCurrency(&quot;ZZT&quot;);
+            Assert.That(updated.Ratio, Is.EqualTo(2.0m));
+
+            updated.OnDelete();
+            var toDelete = new Currencies(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateCurrencies(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadCurrencies(afterDelete.Currencies, afterDelete);
+            Assert.That(afterDelete.Currencies.FindCurrency(&quot;ZZT&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteCurrency_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Currencies_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Currencies_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Currencies table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Currencies_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Symbol, Name, Ratio, LastRatio, CultureCode FROM dbo.Currencies ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Currencies_Insert
+    @Id INT, @Symbol NVARCHAR(10), @Name NVARCHAR(80), @Ratio DECIMAL(18,6), @LastRatio DECIMAL(18,6), @CultureCode NVARCHAR(10)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Currencies (Id, Symbol, Name, Ratio, LastRatio, CultureCode)
+    VALUES (@Id, @Symbol, @Name, @Ratio, @LastRatio, @CultureCode);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Currencies_Update
+    @Id INT, @Symbol NVARCHAR(10), @Name NVARCHAR(80), @Ratio DECIMAL(18,6), @LastRatio DECIMAL(18,6), @CultureCode NVARCHAR(10)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Currencies SET Symbol = @Symbol, Name = @Name, Ratio = @Ratio, LastRatio = @LastRatio, CultureCode = @CultureCode
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Currencies_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Currencies WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Currencies_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Currencies_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Currencies_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Currencies_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Currencies_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Currencies_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Currencies_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Currencies_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadCurrencies</code>/<code>UpdateCurrencies</code> overrides</strong></li>
+</ul>
+<pre><code class="language-csharp">        public override void ReadCurrencies(Currencies currencies, MyMoney money)
+        {
+            currencies.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Currencies_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    currencies.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Currency s = currencies.AddCurrency(id);
+                        s.Symbol = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        s.Name = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            s.Ratio = reader.GetDecimal(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            s.LastRatio = reader.GetDecimal(4);
+                        }
+                        s.CultureCode = reader.IsDBNull(5) ? &quot;en-US&quot; : reader.GetString(5);
+                        s.OnUpdated();
+                    }
+                    currencies.EndUpdate();
+                }
+            }
+            currencies.FireChangeEvent(currencies, currencies, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateCurrencies(Currencies currencies)
+        {
+            if (currencies.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Currency s in currencies)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, s.Id), (&quot;@Symbol&quot;, (object)s.Symbol ?? DBNull.Value), (&quot;@Name&quot;, (object)s.Name ?? DBNull.Value),
+                        (&quot;@Ratio&quot;, s.Ratio), (&quot;@LastRatio&quot;, s.LastRatio), (&quot;@CultureCode&quot;, (object)s.CultureCode ?? DBNull.Value)
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Currencies_Update&quot;, parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Currencies_Insert&quot;, parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Currencies_Delete&quot;, (&quot;@Id&quot;, s.Id));
+                    }
+                }
+            }
+
+            foreach (Currency s in currencies)
+            {
+                s.OnUpdated();
+            }
+            currencies.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code></strong></li>
+</ul>
+<p>Add <code>this.ReadCurrencies(money.Currencies, money);</code> after the <code>ReadCategories</code> line (order relative to Accounts/Categories doesn't matter — Currencies has no FK dependency on either).</p>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Currencies_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run:
+<code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlServerStoredProcDatabaseTests"</code> — expect all tests in the fixture so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Currencies_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Currencies (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-5-securities">Task 5: Securities<a class="headerlink" href="#task-5-securities" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Securities_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadSecurities</code>, <code>UpdateSecurities</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteSecurity_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1).
+- Produces: <code>ReadSecurities(Securities, MyMoney)</code>, <code>UpdateSecurities(Securities)</code> (<code>public override</code>) — Task 6 (StockSplits) and Task 10 (Investment) both need a Security to exist first, via <code>money.Securities.FindSecurityAt(id)</code>, so <code>Load()</code> must call <code>ReadSecurities</code> before anything that resolves a <code>Security</code> reference.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteSecurity_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var security = money.Securities.AddSecurity(0);
+            security.Name = &quot;SqlServerStoredProcDatabaseTests Security&quot;;
+            security.Symbol = &quot;ZZS&quot;;
+            security.Price = 42.50m;
+            security.SecurityType = SecurityType.Equity;
+            security.OnInserted();
+
+            db.UpdateSecurities(money.Securities);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            var found = reloaded.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests Security&quot;, false);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Name, Is.EqualTo(&quot;SqlServerStoredProcDatabaseTests Security&quot;));
+            Assert.That(found.Price, Is.EqualTo(42.50m));
+
+            found.Price = 50.00m;
+            db.UpdateSecurities(reloaded.Securities);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            var updated = afterUpdate.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests Security&quot;, false);
+            Assert.That(updated.Price, Is.EqualTo(50.00m));
+
+            updated.OnDelete();
+            var toDelete = new Securities(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateSecurities(toDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadSecurities(afterDelete.Securities, afterDelete);
+            Assert.That(afterDelete.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests Security&quot;, false), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteSecurity_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Securities_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Securities_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Securities table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Securities_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Name, Symbol, Price, LastPrice, CuspId, SecurityType, Taxable, PriceDate FROM dbo.Securities ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Securities_Insert
+    @Id INT, @Name NVARCHAR(80), @Symbol NVARCHAR(20), @Price MONEY, @LastPrice MONEY,
+    @CuspId NVARCHAR(20), @SecurityType INT, @Taxable TINYINT, @PriceDate DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Securities (Id, Name, Symbol, Price, LastPrice, CuspId, SecurityType, Taxable, PriceDate)
+    VALUES (@Id, @Name, @Symbol, @Price, @LastPrice, @CuspId, @SecurityType, @Taxable, @PriceDate);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Securities_Update
+    @Id INT, @Name NVARCHAR(80), @Symbol NVARCHAR(20), @Price MONEY, @LastPrice MONEY,
+    @CuspId NVARCHAR(20), @SecurityType INT, @Taxable TINYINT, @PriceDate DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Securities SET
+        Name = @Name, Symbol = @Symbol, Price = @Price, LastPrice = @LastPrice, CuspId = @CuspId,
+        SecurityType = @SecurityType, Taxable = @Taxable, PriceDate = @PriceDate
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Securities_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Securities WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Securities_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Securities_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Securities_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Securities_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Securities_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Securities_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Securities_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Securities_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadSecurities</code>/<code>UpdateSecurities</code> overrides</strong></li>
+</ul>
+<pre><code class="language-csharp">        public override void ReadSecurities(Securities securities, MyMoney money)
+        {
+            securities.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Securities_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    securities.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Security s = securities.AddSecurity(id);
+                        s.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        s.Symbol = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        s.Price = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        if (!reader.IsDBNull(4))
+                        {
+                            s.LastPrice = reader.GetDecimal(4);
+                        }
+                        s.CuspId = reader.IsDBNull(5) ? null : reader.GetString(5);
+                        if (!reader.IsDBNull(6))
+                        {
+                            s.SecurityType = (SecurityType)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            s.Taxable = (YesNo)reader.GetByte(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            s.PriceDate = reader.GetDateTime(8);
+                        }
+                        s.OnUpdated();
+                    }
+                    securities.EndUpdate();
+                }
+            }
+            securities.FireChangeEvent(securities, securities, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateSecurities(Securities securities)
+        {
+            if (securities.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Security s in securities)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, s.Id), (&quot;@Name&quot;, (object)s.Name ?? DBNull.Value), (&quot;@Symbol&quot;, (object)s.Symbol ?? DBNull.Value),
+                        (&quot;@Price&quot;, s.Price), (&quot;@LastPrice&quot;, s.LastPrice), (&quot;@CuspId&quot;, (object)s.CuspId ?? DBNull.Value),
+                        (&quot;@SecurityType&quot;, (int)s.SecurityType), (&quot;@Taxable&quot;, (byte)s.Taxable),
+                        (&quot;@PriceDate&quot;, SqlDatabase.DBDateTimeParam(s.PriceDate))
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Securities_Update&quot;, parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Securities_Insert&quot;, parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Securities_Delete&quot;, (&quot;@Id&quot;, s.Id));
+                    }
+                }
+            }
+
+            foreach (Security s in securities)
+            {
+                s.OnUpdated();
+            }
+            securities.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code></strong></li>
+</ul>
+<p>Add <code>this.ReadSecurities(money.Securities, money);</code> after <code>ReadCurrencies</code> and before <code>ReadAccounts</code> (Securities has no dependency on Accounts, but Task 6/10 need Securities loaded before Transactions/StockSplits resolve <code>Security</code> references, so keep it early).</p>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Securities_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Securities_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Securities (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-6-stocksplits">Task 6: StockSplits<a class="headerlink" href="#task-6-stocksplits" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/StockSplits_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadStockSplits</code>, <code>UpdateStockSplits</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteStockSplit_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>ReadSecurities</code>/<code>UpdateSecurities</code> (Task 5, to set up the Security a StockSplit references).
+- Produces: <code>ReadStockSplits(StockSplits, MyMoney)</code>, <code>UpdateStockSplits(StockSplits)</code> (<code>public override</code>).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteStockSplit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var security = money.Securities.AddSecurity(0);
+            security.Name = &quot;SqlServerStoredProcDatabaseTests StockSplit Security&quot;;
+            security.Symbol = &quot;ZZP&quot;;
+            security.OnInserted();
+            db.UpdateSecurities(money.Securities);
+
+            var split = money.StockSplits.AddStockSplit(0);
+            split.Date = new DateTime(2026, 1, 1);
+            split.Security = security;
+            split.Numerator = 2;
+            split.Denominator = 1;
+            split.OnInserted();
+            db.UpdateStockSplits(money.StockSplits);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            db.ReadStockSplits(reloaded.StockSplits, reloaded);
+            var reloadedSecurity = reloaded.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests StockSplit Security&quot;, false);
+            var found = reloaded.StockSplits.FindStockSplitByDate(reloadedSecurity, split.Date);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Numerator, Is.EqualTo(2));
+            Assert.That(found.Denominator, Is.EqualTo(1));
+
+            found.Numerator = 3;
+            db.UpdateStockSplits(reloaded.StockSplits);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            db.ReadStockSplits(afterUpdate.StockSplits, afterUpdate);
+            var afterUpdateSecurity = afterUpdate.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests StockSplit Security&quot;, false);
+            var updated = afterUpdate.StockSplits.FindStockSplitByDate(afterUpdateSecurity, split.Date);
+            Assert.That(updated.Numerator, Is.EqualTo(3));
+
+            updated.OnDelete();
+            var toDelete = new StockSplits(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateStockSplits(toDelete);
+
+            afterUpdateSecurity.OnDelete();
+            var securitiesToDelete = new Securities(afterUpdate);
+            securitiesToDelete.Add(afterUpdateSecurity);
+            db.UpdateSecurities(securitiesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadSecurities(afterDelete.Securities, afterDelete);
+            db.ReadStockSplits(afterDelete.StockSplits, afterDelete);
+            Assert.That(afterDelete.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests StockSplit Security&quot;, false), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteStockSplit_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/StockSplits_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- StockSplits_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the StockSplits table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.StockSplits_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Date, Security, Numerator, Denominator FROM dbo.StockSplits ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.StockSplits_Insert
+    @Id BIGINT, @Date DATETIME, @Security INT, @Numerator DECIMAL(18,6), @Denominator DECIMAL(18,6)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.StockSplits (Id, Date, Security, Numerator, Denominator)
+    VALUES (@Id, @Date, @Security, @Numerator, @Denominator);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.StockSplits_Update
+    @Id BIGINT, @Date DATETIME, @Security INT, @Numerator DECIMAL(18,6), @Denominator DECIMAL(18,6)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.StockSplits SET Date = @Date, Security = @Security, Numerator = @Numerator, Denominator = @Denominator
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.StockSplits_Delete
+    @Id BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.StockSplits WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.StockSplits_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.StockSplits_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.StockSplits_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.StockSplits_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.StockSplits_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.StockSplits_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.StockSplits_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.StockSplits_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadStockSplits</code>/<code>UpdateStockSplits</code> overrides</strong></li>
+</ul>
+<p>Note: the base <code>SqlDatabase.ReadStockSplits</code> is <code>private</code>, so this is a <em>new</em> <code>public</code> method on <code>SqlServerStoredProcDatabase</code>, not an <code>override</code> (there's nothing virtual to override — <code>IDatabase</code>'s <code>Load()</code> is what calls it, not a public base method). Same for <code>UpdateStockSplits</code>, which <em>is</em> <code>public</code> on the base class, so this one genuinely is <code>override</code>.</p>
+<pre><code class="language-csharp">        public void ReadStockSplits(StockSplits splits, MyMoney money)
+        {
+            splits.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.StockSplits_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    splits.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        StockSplit s = splits.AddStockSplit(id);
+                        if (!reader.IsDBNull(1))
+                        {
+                            s.Date = reader.GetDateTime(1);
+                        }
+                        s.Security = money.Securities.FindSecurityAt(reader.GetInt32(2));
+                        s.Numerator = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        s.Denominator = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        s.OnUpdated();
+                    }
+                    splits.EndUpdate();
+                }
+            }
+            splits.FireChangeEvent(splits, splits, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateStockSplits(StockSplits stockSplits)
+        {
+            if (stockSplits.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (StockSplit s in stockSplits)
+                {
+                    if (s.Security == null || s.Date == DateTime.MinValue)
+                    {
+                        continue;
+                    }
+
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, s.Id), (&quot;@Date&quot;, SqlDatabase.DBDateTimeParam(s.Date)), (&quot;@Security&quot;, s.Security.Id),
+                        (&quot;@Numerator&quot;, s.Numerator), (&quot;@Denominator&quot;, s.Denominator)
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.StockSplits_Update&quot;, parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.StockSplits_Insert&quot;, parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.StockSplits_Delete&quot;, (&quot;@Id&quot;, s.Id));
+                    }
+                }
+            }
+
+            foreach (StockSplit s in stockSplits)
+            {
+                s.OnUpdated();
+            }
+            stockSplits.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code></strong></li>
+</ul>
+<p>Add <code>this.ReadStockSplits(money.StockSplits, money);</code> after <code>ReadSecurities</code> (StockSplits needs Securities loaded first to resolve <code>s.Security</code>).</p>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>StockSplits_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/StockSplits_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for StockSplits (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-7-aliases">Task 7: Aliases<a class="headerlink" href="#task-7-aliases" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Aliases_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadAliases</code>, <code>UpdateAliases</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteAlias_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>ReadPayees</code>/<code>UpdatePayees</code> (pre-existing, to set up the Payee an Alias references).
+- Produces: <code>ReadAliases(Aliases, MyMoney)</code>, <code>UpdateAliases(Aliases)</code> (<code>public override</code>).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteAlias_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var payee = money.Payees.AddPayee(999002);
+            payee.Name = &quot;SqlServerStoredProcDatabaseTests Alias Payee&quot;;
+            payee.OnInserted();
+            db.UpdatePayees(money.Payees);
+
+            var alias = money.Aliases.AddAlias(0);
+            alias.Pattern = &quot;SqlServerStoredProcDatabaseTests Alias Pattern&quot;;
+            alias.Payee = payee;
+            alias.AliasType = AliasType.None;
+            alias.OnInserted();
+            db.UpdateAliases(money.Aliases);
+
+            var reloaded = new MyMoney();
+            db.ReadPayees(reloaded.Payees, reloaded);
+            db.ReadAliases(reloaded.Aliases, reloaded);
+            var found = reloaded.Aliases.FindAlias(&quot;SqlServerStoredProcDatabaseTests Alias Pattern&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Payee.Name, Is.EqualTo(&quot;SqlServerStoredProcDatabaseTests Alias Payee&quot;));
+
+            found.AliasType = AliasType.Regex;
+            db.UpdateAliases(reloaded.Aliases);
+
+            var afterUpdate = new MyMoney();
+            db.ReadPayees(afterUpdate.Payees, afterUpdate);
+            db.ReadAliases(afterUpdate.Aliases, afterUpdate);
+            var updated = afterUpdate.Aliases.FindAlias(&quot;SqlServerStoredProcDatabaseTests Alias Pattern&quot;);
+            Assert.That(updated.AliasType, Is.EqualTo(AliasType.Regex));
+
+            updated.OnDelete();
+            var toDelete = new Aliases(afterUpdate);
+            toDelete.Add(updated);
+            db.UpdateAliases(toDelete);
+
+            var payeeToDelete = afterUpdate.Payees.FindPayee(&quot;SqlServerStoredProcDatabaseTests Alias Payee&quot;, false);
+            payeeToDelete.OnDelete();
+            var payeesToDelete = new Payees(afterUpdate);
+            payeesToDelete.Add(payeeToDelete);
+            db.UpdatePayees(payeesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAliases(afterDelete.Aliases, afterDelete);
+            Assert.That(afterDelete.Aliases.FindAlias(&quot;SqlServerStoredProcDatabaseTests Alias Pattern&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteAlias_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Aliases_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Aliases_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Aliases table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Aliases_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Pattern, Payee, Flags FROM dbo.Aliases ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Aliases_Insert
+    @Id INT, @Pattern NVARCHAR(255), @Payee INT, @Flags INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Aliases (Id, Pattern, Payee, Flags) VALUES (@Id, @Pattern, @Payee, @Flags);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Aliases_Update
+    @Id INT, @Pattern NVARCHAR(255), @Payee INT, @Flags INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Aliases SET Pattern = @Pattern, Payee = @Payee, Flags = @Flags WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Aliases_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Aliases WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Aliases_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Aliases_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Aliases_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Aliases_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Aliases_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Aliases_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Aliases_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Aliases_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadAliases</code>/<code>UpdateAliases</code> overrides</strong></li>
+</ul>
+<pre><code class="language-csharp">        public override void ReadAliases(Aliases aliases, MyMoney money)
+        {
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Aliases_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    aliases.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Alias a = aliases.AddAlias(id);
+                        a.Pattern = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        int payeeId = reader.GetInt32(2);
+                        a.Payee = money.Payees.FindPayeeAt(payeeId);
+                        if (!reader.IsDBNull(3))
+                        {
+                            a.AliasType = (AliasType)reader.GetInt32(3);
+                        }
+                        a.OnUpdated();
+                    }
+                    aliases.EndUpdate();
+                }
+            }
+            aliases.FireChangeEvent(aliases, aliases, null, ChangeType.Reloaded);
+        }
+
+        public override void UpdateAliases(Aliases aliases)
+        {
+            if (aliases.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Alias a in aliases)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, a.Id), (&quot;@Pattern&quot;, (object)a.Pattern ?? DBNull.Value), (&quot;@Payee&quot;, a.Payee.Id),
+                        (&quot;@Flags&quot;, (int)a.AliasType)
+                    };
+
+                    if (a.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Aliases_Update&quot;, parameters);
+                    }
+                    else if (a.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Aliases_Insert&quot;, parameters);
+                    }
+                    else if (a.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Aliases_Delete&quot;, (&quot;@Id&quot;, a.Id));
+                    }
+                }
+            }
+
+            foreach (Alias a in aliases)
+            {
+                a.OnUpdated();
+            }
+            aliases.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code></strong></li>
+</ul>
+<p>Add <code>this.ReadAliases(money.Aliases, money);</code> after <code>ReadPayees</code> (Aliases needs Payees loaded first to resolve <code>a.Payee</code>).</p>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Aliases_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Aliases_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Aliases (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-8-transactions">Task 8: Transactions<a class="headerlink" href="#task-8-transactions" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Transactions_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add <code>ReadTransactions</code>, <code>UpdateTransactions</code>; extend <code>Load()</code>)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteTransaction_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>ReadAccounts</code>/<code>UpdateAccounts</code> (Task 2, an Account is required), <code>ReadPayees</code>/<code>ReadCategories</code> (to optionally resolve Payee/Category references).
+- Produces: <code>ReadTransactions(Transactions, MyMoney)</code> (<code>public override</code> — note the base signature returns <code>ArrayList</code> for error reporting; this override keeps the same signature so <code>Load()</code>'s call site is identical to the base class's usage pattern), <code>UpdateTransactions(Transactions)</code> (<code>public override</code>). This override does <strong>not</strong> yet read/write Splits or Investment rows — those are Tasks 9 and 10, which extend this same method (the base class's <code>ReadTransactions</code> already combines all three reads into one method, and <code>UpdateTransactions</code> already calls <code>UpdateSplits</code>/<code>UpdateInvestment</code> per-transaction; Tasks 9-10 add exactly those calls here).</p>
+<p>Transfer resolution (a transaction whose <code>Transfer</code>/<code>TransferSplit</code> columns point at another transaction) is faithfully reproduced from the base class's <code>ReadTransactions</code>, including the "other side of transfer not found" / "duplicate transfer" error accumulation — this task's test only exercises the non-transfer path, but the code below implements transfer resolution because Task 9's tests and issue #19's later parity test will exercise it.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteTransaction_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;SqlServerStoredProcDatabaseTests Transaction Account&quot;);
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -42.50m;
+            transaction.Memo = &quot;SqlServerStoredProcDatabaseTests Transaction&quot;;
+            money.Transactions.AddTransaction(transaction);
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Transaction Account&quot;);
+            var found = reloaded.Transactions.GetTransactionsFrom(reloadedAccount)
+                .FirstOrDefault(t =&gt; t.Memo == &quot;SqlServerStoredProcDatabaseTests Transaction&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.Amount, Is.EqualTo(-42.50m));
+
+            found.Amount = -50.00m;
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Transaction Account&quot;);
+            var updated = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount)
+                .FirstOrDefault(t =&gt; t.Memo == &quot;SqlServerStoredProcDatabaseTests Transaction&quot;);
+            Assert.That(updated.Amount, Is.EqualTo(-50.00m));
+
+            updated.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updated);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Transaction Account&quot;), Is.Null);
+        }
+</code></pre>
+<p>Add <code>using System.Linq;</code> to the top of <code>SqlServerStoredProcDatabaseTests.cs</code> for <code>.FirstOrDefault</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteTransaction_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Transactions_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Transactions_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Transactions table -- neither has any direct table grants.
+-- Splits and Investments are separate tables with their own access-proc
+-- scripts (Splits_AccessProcs.sql, Investments_AccessProcs.sql) -- see the
+-- design spec for issue #22 for why these stay three independent proc sets.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Transactions_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Number, Date, Amount, Account, Status, Memo, Payee, Category, FITID, SalesTax, Flags,
+           ReconciledDate, BudgetBalanceDate, MergeDate, OriginalPayee, Transfer, TransferSplit
+    FROM dbo.Transactions ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Transactions_Insert
+    @Id BIGINT, @Number NVARCHAR(20), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
+    @Memo NVARCHAR(255), @Payee INT, @Category INT, @Transfer BIGINT, @TransferSplit INT,
+    @FITID NVARCHAR(50), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
+    @BudgetBalanceDate DATETIME, @MergeDate DATETIME, @OriginalPayee NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Transactions (Id, Number, Account, Date, Amount, Status, Memo, Payee, Category,
+        Transfer, TransferSplit, FITID, SalesTax, Flags, ReconciledDate, BudgetBalanceDate, MergeDate, OriginalPayee)
+    VALUES (@Id, @Number, @Account, @Date, @Amount, @Status, @Memo, @Payee, @Category, @Transfer,
+        @TransferSplit, @FITID, @SalesTax, @Flags, @ReconciledDate, @BudgetBalanceDate, @MergeDate, @OriginalPayee);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Transactions_Update
+    @Id BIGINT, @Number NVARCHAR(20), @Account INT, @Date DATETIME, @Amount MONEY, @Status INT,
+    @Memo NVARCHAR(255), @Payee INT, @Category INT, @Transfer BIGINT, @TransferSplit INT,
+    @FITID NVARCHAR(50), @SalesTax MONEY, @Flags INT, @ReconciledDate DATETIME,
+    @BudgetBalanceDate DATETIME, @MergeDate DATETIME, @OriginalPayee NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Transactions SET
+        Number = @Number, Account = @Account, Date = @Date, Amount = @Amount, Status = @Status,
+        Memo = @Memo, Payee = @Payee, Category = @Category, Transfer = @Transfer, TransferSplit = @TransferSplit,
+        FITID = @FITID, SalesTax = @SalesTax, Flags = @Flags, ReconciledDate = @ReconciledDate,
+        BudgetBalanceDate = @BudgetBalanceDate, MergeDate = @MergeDate, OriginalPayee = @OriginalPayee
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Transactions_Delete
+    @Id BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Transactions WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Transactions_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Transactions_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Transactions_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Transactions_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Transactions_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Transactions_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Transactions_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Transactions_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the <code>ReadTransactions</code>/<code>UpdateTransactions</code> overrides</strong></li>
+</ul>
+<pre><code class="language-csharp">        public override ArrayList ReadTransactions(Transactions transactions, MyMoney money)
+        {
+            transactions.Clear();
+            ArrayList errors = new ArrayList();
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Transactions_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    transactions.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        Transaction t = transactions.AddTransaction(id);
+                        t.BatchMode = true;
+                        t.Number = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        t.Account = money.Accounts.FindAccountAt(reader.GetInt32(4));
+                        if (!reader.IsDBNull(2))
+                        {
+                            t.Date = reader.GetDateTime(2);
+                        }
+                        t.Amount = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        t.Status = (TransactionStatus)reader.GetInt32(5);
+                        t.Memo = reader.IsDBNull(6) ? null : reader.GetString(6);
+                        if (!reader.IsDBNull(7))
+                        {
+                            t.Payee = money.Payees.FindPayeeAt(reader.GetInt32(7));
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            t.Category = money.Categories.FindCategoryById(reader.GetInt32(8));
+                        }
+                        t.FITID = reader.IsDBNull(9) ? null : reader.GetString(9);
+                        if (!reader.IsDBNull(10))
+                        {
+                            t.SalesTax = reader.GetDecimal(10);
+                        }
+                        if (!reader.IsDBNull(11))
+                        {
+                            t.Flags = (TransactionFlags)reader.GetInt32(11);
+                        }
+                        if (!reader.IsDBNull(12))
+                        {
+                            t.ReconciledDate = reader.GetDateTime(12);
+                        }
+                        if (!reader.IsDBNull(13))
+                        {
+                            t.BudgetBalanceDate = reader.GetDateTime(13);
+                        }
+                        if (!reader.IsDBNull(14))
+                        {
+                            t.MergeDate = reader.GetDateTime(14);
+                        }
+                        if (!reader.IsDBNull(15))
+                        {
+                            t.OriginalPayee = reader.GetString(15);
+                        }
+                        t.BatchMode = false;
+                        t.OnUpdated();
+                    }
+                    transactions.EndUpdate();
+                }
+
+                // Resolve transfers (mirrors SqlDatabase.ReadTransactions's third pass).
+                using (var command = new SqlCommand(&quot;dbo.Transactions_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        long transferTarget = reader.IsDBNull(16) ? -1 : reader.GetInt64(16);
+                        if (transferTarget == -1)
+                        {
+                            continue;
+                        }
+
+                        Transaction t = transactions.FindTransactionById(id);
+                        Transaction u = transactions.FindTransactionById(transferTarget);
+                        if (u == null)
+                        {
+                            errors.Add(new DataError(id, &quot;Transaction is marked as a transfer, but other side of transfer was not found&quot;));
+                            continue;
+                        }
+
+                        int sid = reader.IsDBNull(17) ? -1 : reader.GetInt32(17);
+                        if (sid == -1)
+                        {
+                            t.Transfer = new Transfer(id, t, u);
+                        }
+                        else
+                        {
+                            Split s = u.FindSplit(sid);
+                            if (s == null)
+                            {
+                                errors.Add(new DataError(id, sid, &quot;Transaction contains a split marked as a transfer, but other side of transfer was not found&quot;));
+                            }
+                            else
+                            {
+                                t.Transfer = new Transfer(id, t, u, s);
+                            }
+                        }
+                        t.OnUpdated();
+                    }
+                }
+            }
+
+            transactions.FireChangeEvent(transactions, transactions, null, ChangeType.Reloaded);
+            return errors;
+        }
+
+        public override void UpdateTransactions(Transactions transactions)
+        {
+            if (transactions.Count == 0)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                foreach (Transaction t in transactions)
+                {
+                    if (t.Account == null)
+                    {
+                        continue;
+                    }
+
+                    connection.Open();
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, t.Id), (&quot;@Number&quot;, (object)t.Number ?? DBNull.Value), (&quot;@Account&quot;, t.Account.Id),
+                        (&quot;@Date&quot;, SqlDatabase.DBDateTimeParam(t.Date)), (&quot;@Amount&quot;, t.Amount), (&quot;@Status&quot;, (int)t.Status),
+                        (&quot;@Memo&quot;, (object)t.Memo ?? DBNull.Value), (&quot;@Payee&quot;, t.Payee != null ? t.Payee.Id : -1),
+                        (&quot;@Category&quot;, t.Category != null ? t.Category.Id : -1),
+                        (&quot;@Transfer&quot;, t.Transfer != null &amp;&amp; t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                        (&quot;@TransferSplit&quot;, t.Transfer != null &amp;&amp; t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                        (&quot;@FITID&quot;, (object)t.FITID ?? DBNull.Value), (&quot;@SalesTax&quot;, t.SalesTax), (&quot;@Flags&quot;, (int)t.Flags),
+                        (&quot;@ReconciledDate&quot;, SqlDatabase.DBNullableDateTimeParam(t.ReconciledDate)),
+                        (&quot;@BudgetBalanceDate&quot;, SqlDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                        (&quot;@MergeDate&quot;, SqlDatabase.DBNullableDateTimeParam(t.MergeDate)),
+                        (&quot;@OriginalPayee&quot;, (object)t.OriginalPayee ?? DBNull.Value)
+                    };
+
+                    if (t.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Transactions_Update&quot;, parameters);
+                    }
+                    else if (t.IsInserted)
+                    {
+                        if (t.Id == -1)
+                        {
+                            connection.Close();
+                            continue;
+                        }
+                        ExecuteProc(connection, &quot;dbo.Transactions_Insert&quot;, parameters);
+                    }
+                    else if (t.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Transactions_Delete&quot;, (&quot;@Id&quot;, t.Id));
+                    }
+                    connection.Close();
+
+                    if (t.Splits != null)
+                    {
+                        this.UpdateSplits(t.Splits);
+                    }
+                    if (t.Investment != null)
+                    {
+                        this.UpdateInvestment(t.Investment);
+                    }
+                }
+            }
+
+            foreach (Transaction t in transactions)
+            {
+                t.OnUpdated();
+            }
+            transactions.RemoveDeleted();
+        }
+</code></pre>
+<p>Note: <code>connection.Open()</code>/<code>connection.Close()</code> are called per-transaction inside the loop here (rather than once outside, as the simpler entities do) because this method also calls <code>this.UpdateSplits(...)</code>/<code>this.UpdateInvestment(...)</code> (Tasks 9-10), which open their own connections — keeping one shared connection open across those nested calls would work too, but per-transaction open/close keeps this method's connection lifetime obviously scoped and matches the "no atomic parent+children" requirement (each table's update is independently connected).</p>
+<p>Add <code>using System.Collections;</code> to the top of <code>SqlServerStoredProcDatabase.cs</code> for <code>ArrayList</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Extend <code>Load()</code></strong></li>
+</ul>
+<p>Find:</p>
+<pre><code class="language-csharp">                this.ReadPayees(money.Payees, money);
+                this.ReadCategories(money.Categories, money);
+                this.ReadCurrencies(money.Currencies, money);
+                this.ReadSecurities(money.Securities, money);
+                this.ReadStockSplits(money.StockSplits, money);
+                this.ReadAliases(money.Aliases, money);
+                this.ReadAccounts(money.Accounts, money);
+</code></pre>
+<p>(exact ordering per Tasks 2-7 above) and add, after <code>ReadAccounts</code>:</p>
+<pre><code class="language-csharp">                this.ReadTransactions(money.Transactions, money);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Transactions_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Transactions_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Transactions (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-9-splits">Task 9: Splits<a class="headerlink" href="#task-9-splits" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Splits_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add split-reading to <code>ReadTransactions</code>; add <code>UpdateSplits</code> override)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteSplit_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>ReadTransactions</code>/<code>UpdateTransactions</code> (Task 8, which this task extends).
+- Produces: <code>UpdateSplits(Splits)</code> (<code>public override</code>) — called from <code>UpdateTransactions</code> (Task 8's code already has the <code>this.UpdateSplits(t.Splits)</code> call site).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteSplit_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;SqlServerStoredProcDatabaseTests Split Account&quot;);
+            account.Type = AccountType.Checking;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var category = money.Categories.GetOrCreateCategory(&quot;SqlServerStoredProcDatabaseTests:SplitCategory&quot;, CategoryType.Expense);
+            category.OnInserted();
+            db.UpdateCategories(money.Categories);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -100.00m;
+            money.Transactions.AddTransaction(transaction);
+            transaction.Splits = new Splits(money.Transactions, transaction);
+            var split = transaction.Splits.AddSplit(0);
+            split.Amount = -100.00m;
+            split.Category = category;
+            split.Memo = &quot;SqlServerStoredProcDatabaseTests Split&quot;;
+            transaction.OnInserted();
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadCategories(reloaded.Categories, reloaded);
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Split Account&quot;);
+            var foundTransaction = reloaded.Transactions.GetTransactionsFrom(reloadedAccount).First();
+            Assert.That(foundTransaction.IsSplit, Is.True);
+            Assert.That(foundTransaction.Splits.Count, Is.EqualTo(1));
+            Assert.That(foundTransaction.Splits[0].Memo, Is.EqualTo(&quot;SqlServerStoredProcDatabaseTests Split&quot;));
+
+            foundTransaction.Splits[0].Memo = &quot;Updated split memo&quot;;
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadCategories(afterUpdate.Categories, afterUpdate);
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Split Account&quot;);
+            var updatedTransaction = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount).First();
+            Assert.That(updatedTransaction.Splits[0].Memo, Is.EqualTo(&quot;Updated split memo&quot;));
+
+            updatedTransaction.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updatedTransaction);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            var categoryToDelete = afterUpdate.Categories.FindCategory(&quot;SqlServerStoredProcDatabaseTests:SplitCategory&quot;);
+            categoryToDelete.OnDelete();
+            var categoriesToDelete = new Categories(afterUpdate);
+            categoriesToDelete.Add(categoryToDelete);
+            db.UpdateCategories(categoriesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Split Account&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteSplit_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL — <code>UpdateSplits</code>/the split-reading code don't exist on <code>SqlServerStoredProcDatabase</code> yet, so the base class's versions run and hit the same <code>MyMoneyUser</code>-has-no-table-grants failure.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Splits_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Splits_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Splits table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Splits_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, [Transaction], Amount, Category, Memo, Transfer, Payee, Flags, BudgetBalanceDate
+    FROM dbo.Splits ORDER BY [Transaction], Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Splits_Insert
+    @Id INT, @Transaction BIGINT, @Amount MONEY, @Category INT, @Memo NVARCHAR(255),
+    @Transfer BIGINT, @Payee INT, @Flags INT, @BudgetBalanceDate DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Splits (Id, [Transaction], Amount, Category, Memo, Transfer, Payee, Flags, BudgetBalanceDate)
+    VALUES (@Id, @Transaction, @Amount, @Category, @Memo, @Transfer, @Payee, @Flags, @BudgetBalanceDate);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Splits_Update
+    @Id INT, @Transaction BIGINT, @Amount MONEY, @Category INT, @Memo NVARCHAR(255),
+    @Transfer BIGINT, @Payee INT, @Flags INT, @BudgetBalanceDate DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Splits SET
+        Amount = @Amount, Category = @Category, Memo = @Memo, Transfer = @Transfer, Payee = @Payee,
+        Flags = @Flags, BudgetBalanceDate = @BudgetBalanceDate
+    WHERE Id = @Id AND [Transaction] = @Transaction;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Splits_Delete
+    @Id INT, @Transaction BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Splits WHERE Id = @Id AND [Transaction] = @Transaction;
+END
+GO
+
+GRANT EXECUTE ON dbo.Splits_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Splits_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Splits_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Splits_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Splits_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Splits_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Splits_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Splits_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add split-reading to <code>ReadTransactions</code> and add the <code>UpdateSplits</code> override</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, find the <code>ReadTransactions</code> override added in Task 8, and change:</p>
+<pre><code class="language-csharp">                    transactions.EndUpdate();
+                }
+
+                // Resolve transfers (mirrors SqlDatabase.ReadTransactions's third pass).
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">                    transactions.EndUpdate();
+                }
+
+                using (var command = new SqlCommand(&quot;dbo.Splits_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        long transactionId = reader.GetInt64(1);
+                        Transaction t = transactions.FindTransactionById(transactionId);
+                        if (t == null)
+                        {
+                            continue;
+                        }
+
+                        if (!t.IsSplit)
+                        {
+                            t.Splits = new Splits(t, t);
+                        }
+                        Split s = t.Splits.AddSplit(id);
+                        s.BatchMode = true;
+                        t.Splits.BeginUpdate(false);
+                        s.Amount = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            s.Category = money.Categories.FindCategoryById(reader.GetInt32(3));
+                        }
+                        s.Memo = reader.IsDBNull(4) ? null : reader.GetString(4);
+                        if (!reader.IsDBNull(6))
+                        {
+                            s.Payee = money.Payees.FindPayeeAt(reader.GetInt32(6));
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            s.Flags = (SplitFlags)reader.GetInt32(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            s.BudgetBalanceDate = reader.GetDateTime(8);
+                        }
+                        t.Splits.EndUpdate();
+                        s.BatchMode = false;
+                        s.OnUpdated();
+                        t.OnUpdated();
+                    }
+                }
+
+                // Resolve transfers (mirrors SqlDatabase.ReadTransactions's third pass).
+</code></pre>
+<p>(Split-side transfer resolution — column 5, <code>Transfer</code> — is intentionally left unhandled here, matching the base class's own <code>ReadTransactions</code>, which also only resolves transfers recorded on <code>Transactions.Transfer</code>/<code>TransferSplit</code>, not <code>Splits.Transfer</code>, when populating the in-memory <code>Transfer</code> object graph on load; both leave the raw column round-trippable via <code>UpdateSplits</code> below without reconstructing a <code>Transfer</code> object for split-level transfers on read.)</p>
+<p>Then add the <code>UpdateSplits</code> override (after <code>UpdateTransactions</code>):</p>
+<pre><code class="language-csharp">        public override void UpdateSplits(Splits splits)
+        {
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                foreach (Split s in splits)
+                {
+                    (string Name, object Value)[] parameters =
+                    {
+                        (&quot;@Id&quot;, s.Id), (&quot;@Transaction&quot;, s.Transaction.Id), (&quot;@Amount&quot;, s.Amount),
+                        (&quot;@Category&quot;, s.Category != null ? s.Category.Id : -1), (&quot;@Memo&quot;, (object)s.Memo ?? DBNull.Value),
+                        (&quot;@Transfer&quot;, s.Transfer != null &amp;&amp; s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                        (&quot;@Payee&quot;, s.Payee != null ? s.Payee.Id : -1), (&quot;@Flags&quot;, (int)s.Flags),
+                        (&quot;@BudgetBalanceDate&quot;, SqlDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate))
+                    };
+
+                    if (s.IsChanged)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Splits_Update&quot;, parameters);
+                    }
+                    else if (s.IsInserted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Splits_Insert&quot;, parameters);
+                    }
+                    else if (s.IsDeleted)
+                    {
+                        ExecuteProc(connection, &quot;dbo.Splits_Delete&quot;, (&quot;@Id&quot;, s.Id), (&quot;@Transaction&quot;, s.Transaction.Id));
+                    }
+                }
+            }
+
+            foreach (Split s in splits)
+            {
+                s.OnUpdated();
+            }
+            splits.RemoveDeleted();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Splits_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code>. Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests so far still pass.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Splits_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Splits (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-10-investment">Task 10: Investment<a class="headerlink" href="#task-10-investment" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Investments_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (add investment-reading to <code>ReadTransactions</code>; add <code>UpdateInvestment</code> override)
+- Test: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code> (add <code>InsertUpdateDeleteInvestment_RoundTripsThroughStoredProcedures</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteProc</code> (Task 1), <code>ReadTransactions</code>/<code>UpdateTransactions</code> (Task 8, which this task extends), <code>ReadSecurities</code>/<code>UpdateSecurities</code> (Task 5, an Investment requires a Security).
+- Produces: <code>UpdateInvestment(Investment)</code> (<code>public override</code>) — called from <code>UpdateTransactions</code> (Task 8's code already has the <code>this.UpdateInvestment(t.Investment)</code> call site). This is the last task before Task 11's verification.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void InsertUpdateDeleteInvestment_RoundTripsThroughStoredProcedures()
+        {
+            string connectionString = this.GetConnectionStringOrSkip();
+            var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;SqlServerStoredProcDatabaseTests Investment Account&quot;);
+            account.Type = AccountType.Brokerage;
+            account.OnInserted();
+            db.UpdateAccounts(money.Accounts);
+
+            var security = money.Securities.AddSecurity(0);
+            security.Name = &quot;SqlServerStoredProcDatabaseTests Investment Security&quot;;
+            security.Symbol = &quot;ZZI&quot;;
+            security.OnInserted();
+            db.UpdateSecurities(money.Securities);
+
+            var transaction = money.Transactions.NewTransaction(account);
+            transaction.Date = new DateTime(2026, 1, 15);
+            transaction.Amount = -1000.00m;
+            money.Transactions.AddTransaction(transaction);
+            var investment = transaction.GetOrCreateInvestment();
+            investment.Security = security;
+            investment.UnitPrice = 100.00m;
+            investment.Units = 10;
+            investment.Type = InvestmentType.Buy;
+            transaction.OnInserted();
+            db.UpdateTransactions(money.Transactions);
+
+            var reloaded = new MyMoney();
+            db.ReadSecurities(reloaded.Securities, reloaded);
+            db.ReadAccounts(reloaded.Accounts, reloaded);
+            db.ReadTransactions(reloaded.Transactions, reloaded);
+            var reloadedAccount = reloaded.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Investment Account&quot;);
+            var foundTransaction = reloaded.Transactions.GetTransactionsFrom(reloadedAccount).First();
+            Assert.That(foundTransaction.Investment, Is.Not.Null);
+            Assert.That(foundTransaction.Investment.UnitPrice, Is.EqualTo(100.00m));
+            Assert.That(foundTransaction.Investment.Units, Is.EqualTo(10));
+
+            foundTransaction.Investment.Units = 20;
+            db.UpdateTransactions(reloaded.Transactions);
+
+            var afterUpdate = new MyMoney();
+            db.ReadSecurities(afterUpdate.Securities, afterUpdate);
+            db.ReadAccounts(afterUpdate.Accounts, afterUpdate);
+            db.ReadTransactions(afterUpdate.Transactions, afterUpdate);
+            var afterUpdateAccount = afterUpdate.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Investment Account&quot;);
+            var updatedTransaction = afterUpdate.Transactions.GetTransactionsFrom(afterUpdateAccount).First();
+            Assert.That(updatedTransaction.Investment.Units, Is.EqualTo(20));
+
+            updatedTransaction.OnDelete();
+            var toDelete = new Transactions(afterUpdate);
+            toDelete.AddTransaction(updatedTransaction);
+            db.UpdateTransactions(toDelete);
+
+            afterUpdateAccount.OnDelete();
+            var accountsToDelete = new Accounts(afterUpdate);
+            accountsToDelete.Add(afterUpdateAccount);
+            db.UpdateAccounts(accountsToDelete);
+
+            var securityToDelete = afterUpdate.Securities.FindSecurity(&quot;SqlServerStoredProcDatabaseTests Investment Security&quot;, false);
+            securityToDelete.OnDelete();
+            var securitiesToDelete = new Securities(afterUpdate);
+            securitiesToDelete.Add(securityToDelete);
+            db.UpdateSecurities(securitiesToDelete);
+
+            var afterDelete = new MyMoney();
+            db.ReadAccounts(afterDelete.Accounts, afterDelete);
+            Assert.That(afterDelete.Accounts.FindAccount(&quot;SqlServerStoredProcDatabaseTests Investment Account&quot;), Is.Null);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~InsertUpdateDeleteInvestment_RoundTripsThroughStoredProcedures"</code>
+Expected: FAIL.</p>
+<ul>
+<li>[ ] <strong>Step 3: Create the stored-proc script</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Investments_AccessProcs.sql</code>:</p>
+<pre><code class="language-sql">-- Investments_AccessProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- These are the only operations MyMoneyUser/MyMoneyTest are permitted to
+-- perform on the Investments table -- neither has any direct table grants.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Investments_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt,
+           Withholding, MarkUpDown, Taxes, Fees, [Load]
+    FROM dbo.Investments ORDER BY Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Investments_Insert
+    @Id BIGINT, @Security INT, @UnitPrice MONEY, @Units DECIMAL(18,4), @Commission MONEY,
+    @InvestmentType INT, @TradeType INT, @TaxExempt BIT, @Withholding MONEY, @MarkUpDown MONEY,
+    @Taxes MONEY, @Fees MONEY, @Load MONEY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType,
+        TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load])
+    VALUES (@Id, @Security, @UnitPrice, @Units, @Commission, @InvestmentType, @TradeType, @TaxExempt,
+        @Withholding, @MarkUpDown, @Taxes, @Fees, @Load);
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Investments_Update
+    @Id BIGINT, @Security INT, @UnitPrice MONEY, @Units DECIMAL(18,4), @Commission MONEY,
+    @InvestmentType INT, @TradeType INT, @TaxExempt BIT, @Withholding MONEY, @MarkUpDown MONEY,
+    @Taxes MONEY, @Fees MONEY, @Load MONEY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Investments SET
+        Security = @Security, UnitPrice = @UnitPrice, Units = @Units, Commission = @Commission,
+        InvestmentType = @InvestmentType, TradeType = @TradeType, TaxExempt = @TaxExempt,
+        Withholding = @Withholding, MarkUpDown = @MarkUpDown, Taxes = @Taxes, Fees = @Fees, [Load] = @Load
+    WHERE Id = @Id;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Investments_Delete
+    @Id BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Investments WHERE Id = @Id;
+END
+GO
+
+GRANT EXECUTE ON dbo.Investments_SelectAll TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Investments_Insert TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Investments_Update TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Investments_Delete TO MyMoneyUser;
+
+GRANT EXECUTE ON dbo.Investments_SelectAll TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Investments_Insert TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Investments_Update TO MyMoneyTest;
+GRANT EXECUTE ON dbo.Investments_Delete TO MyMoneyTest;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add investment-reading to <code>ReadTransactions</code> and add the <code>UpdateInvestment</code> override</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, find the end of the <code>ReadTransactions</code> override (the closing of the transfer-resolution <code>using (var connection ...)</code> block, right before <code>transactions.FireChangeEvent(...)</code>), and add a fourth read pass right after the transfer-resolution block but still inside the outer <code>using (var connection = ...)</code>:</p>
+<pre><code class="language-csharp">                using (var command = new SqlCommand(&quot;dbo.Investments_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        Transaction t = transactions.FindTransactionById(id);
+                        if (t == null)
+                        {
+                            continue;
+                        }
+
+                        Investment i = t.GetOrCreateInvestment();
+                        i.Security = money.Securities.FindSecurityAt(reader.GetInt32(1));
+                        i.UnitPrice = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                        i.Units = reader.IsDBNull(3) ? 0 : reader.GetDecimal(3);
+                        i.Commission = reader.IsDBNull(4) ? 0 : reader.GetDecimal(4);
+                        i.Type = (InvestmentType)reader.GetInt32(5);
+                        if (!reader.IsDBNull(6))
+                        {
+                            i.TradeType = (InvestmentTradeType)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            i.TaxExempt = reader.GetBoolean(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            i.Withholding = reader.GetDecimal(8);
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            i.MarkUpDown = reader.GetDecimal(9);
+                        }
+                        if (!reader.IsDBNull(10))
+                        {
+                            i.Taxes = reader.GetDecimal(10);
+                        }
+                        if (!reader.IsDBNull(11))
+                        {
+                            i.Fees = reader.GetDecimal(11);
+                        }
+                        if (!reader.IsDBNull(12))
+                        {
+                            i.Load = reader.GetDecimal(12);
+                        }
+                        i.OnUpdated();
+                        t.OnUpdated();
+                    }
+                }
+</code></pre>
+<p>Then add the <code>UpdateInvestment</code> override (after <code>UpdateSplits</code>):</p>
+<pre><code class="language-csharp">        public override void UpdateInvestment(Investment i)
+        {
+            if (i == null)
+            {
+                return;
+            }
+
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                (string Name, object Value)[] parameters =
+                {
+                    (&quot;@Id&quot;, i.Id), (&quot;@Security&quot;, i.Security == null ? -1 : i.Security.Id), (&quot;@UnitPrice&quot;, i.UnitPrice),
+                    (&quot;@Units&quot;, i.Units), (&quot;@Commission&quot;, i.Commission), (&quot;@InvestmentType&quot;, (int)i.Type),
+                    (&quot;@TradeType&quot;, (int)i.TradeType), (&quot;@TaxExempt&quot;, i.TaxExempt ? 1 : 0), (&quot;@Withholding&quot;, i.Withholding),
+                    (&quot;@MarkUpDown&quot;, i.MarkUpDown), (&quot;@Taxes&quot;, i.Taxes), (&quot;@Fees&quot;, i.Fees), (&quot;@Load&quot;, i.Load)
+                };
+
+                if (i.IsChanged)
+                {
+                    ExecuteProc(connection, &quot;dbo.Investments_Update&quot;, parameters);
+                }
+                else if (i.IsInserted)
+                {
+                    ExecuteProc(connection, &quot;dbo.Investments_Insert&quot;, parameters);
+                }
+                else if (i.IsDeleted)
+                {
+                    ExecuteProc(connection, &quot;dbo.Investments_Delete&quot;, (&quot;@Id&quot;, i.Id));
+                }
+            }
+            i.OnUpdated();
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Deploy and rerun</strong></li>
+</ul>
+<p>Deploy <code>Investments_AccessProcs.sql</code> via <code>MyMoneyAdmin.exe</code> — this is the last of the 9 new scripts, so from this point on <code>BootstrapRunner.Run()</code> (Task 1 Step 4's full change) can be run end-to-end without a <code>FileNotFoundException</code>.</p>
+<p>Build, then run the full <code>SqlServerStoredProcDatabaseTests</code> fixture — expect all tests (Payees + the 9 new ones across Tasks 2-10) to pass.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Investments_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;Add MyMoneyUser stored-proc CRUD coverage for Investment (issue #22)&quot;
+</code></pre>
+<hr />
+<h3 id="task-11-sqlserverdatabasecontracttests-the-shared-contract-test-flavor-close-out-issues">Task 11: <code>SqlServerDatabaseContractTests</code> (the shared contract-test flavor) + close out issues<a class="headerlink" href="#task-11-sqlserverdatabasecontracttests-the-shared-contract-test-flavor-close-out-issues" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs</code>
+- Test: (the file above <em>is</em> the test — no separate test file)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DatabaseContractTests</code> (abstract base, <code>Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs</code>), <code>SqlServerStoredProcDatabase</code> (all overrides from Tasks 1-10).
+- Produces: nothing further downstream — this is the plan's final proof step.</p>
+<p>This is the plan's own verification that issue #22 is actually done: the <em>existing</em>, unmodified shared contract suite (<code>Load_BeforeAnySave_ReturnsEmptyGraph</code>, <code>Create_ThenCheckExists_ReturnsTrue</code>, <code>SaveAndReload_PreservesAccountAndTransactionData</code>, <code>Insert_ThenReload_ItemAppearsWithCleanState</code>, <code>Update_ThenReload_ChangePersisted</code>, <code>Delete_ThenReload_ItemIsGone</code>) passes against <code>SqlServerStoredProcDatabase</code> connected as <code>MyMoneyUser</code> — proving Accounts, Categories, Payees, and Transactions all work under the real tier the app uses, using nothing but the CRUD paths Tasks 2-10 built.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test (the new fixture itself)</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using Microsoft.Data.SqlClient;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.TestSupport
+{
+    /// &lt;summary&gt;
+    /// Proves the shared IDatabase contract suite (see DatabaseContractTests)
+    /// passes against SqlServerStoredProcDatabase connected as MyMoneyUser --
+    /// the tier the shipped app actually runs under (see issue #22's design
+    /// spec). Deliberately does NOT skip/Ignore when SQL Server is
+    /// unreachable: unlike SqlServerStoredProcDatabaseTests's env-var-driven
+    /// smoke tests, a broken connection here is a real signal that
+    /// MyMoneyUser CRUD coverage has regressed, not an expected local-dev
+    /// absence. Do not add Assert.Ignore/skip logic to this fixture.
+    /// &lt;/summary&gt;
+    [TestFixture]
+    public class SqlServerDatabaseContractTests : DatabaseContractTests
+    {
+        private const string UserConnectionEnvVar = &quot;MYMONEY_TEST_SQLSERVER_USER_CONNECTION&quot;;
+        private const string AdminConnectionEnvVar = &quot;MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION&quot;;
+
+        private static readonly string[] TablesToWipe =
+        {
+            &quot;Splits&quot;, &quot;Investments&quot;, &quot;Transactions&quot;, &quot;StockSplits&quot;, &quot;Aliases&quot;,
+            &quot;Accounts&quot;, &quot;Securities&quot;, &quot;Currencies&quot;, &quot;Categories&quot;, &quot;Payees&quot;
+        };
+
+        public override void SetUp()
+        {
+            WipeAllTables();
+            base.SetUp();
+        }
+
+        protected override IDatabase CreateDatabase()
+        {
+            string connectionString = Environment.GetEnvironmentVariable(UserConnectionEnvVar);
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                throw new InvalidOperationException(
+                    $&quot;{UserConnectionEnvVar} must be set to a MyMoneyUser connection string to run SqlServerDatabaseContractTests. &quot; +
+                    &quot;This fixture intentionally fails rather than skips when SQL Server is unreachable.&quot;);
+            }
+            return new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+        }
+
+        private static void WipeAllTables()
+        {
+            string adminConnectionString = Environment.GetEnvironmentVariable(AdminConnectionEnvVar);
+            if (string.IsNullOrEmpty(adminConnectionString))
+            {
+                throw new InvalidOperationException(
+                    $&quot;{AdminConnectionEnvVar} must be set to a MyMoneyAdmin connection string so SqlServerDatabaseContractTests can &quot; +
+                    &quot;clean up the shared test database between runs.&quot;);
+            }
+
+            using (var connection = new SqlConnection(adminConnectionString))
+            {
+                connection.Open();
+                foreach (string table in TablesToWipe)
+                {
+                    using (var command = new SqlCommand($&quot;DELETE FROM dbo.[{table}];&quot;, connection))
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+    }
+}
+</code></pre>
+<p>Tables are deleted in dependency order (children before parents: <code>Splits</code>/<code>Investments</code> before <code>Transactions</code>, <code>Transactions</code> before <code>Accounts</code>, <code>StockSplits</code>/<code>Aliases</code> before their referenced <code>Securities</code>/<code>Payees</code>, etc.) so foreign-key constraints (if any exist in the schema <code>LazyCreateTables()</code> generates) don't reject the deletes.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails appropriately</strong></li>
+</ul>
+<p>First, without setting <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code> or <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>:</p>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+Expected: every test in the fixture FAILS with the <code>InvalidOperationException</code> message from <code>WipeAllTables()</code> (not skipped/inconclusive) — this proves the "fail, don't skip" requirement actually holds before moving on.</p>
+<p>Then set both environment variables to real <code>MyMoneyAdmin</code>/<code>MyMoneyUser</code> connection strings and rerun:</p>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+Expected: FAILS differently now — either compiles and runs but fails on real assertions if Tasks 1-10 have a bug, or (if Tasks 1-10 are solid, which they should be at this point) this step actually PASSES already, since Task 11 doesn't add any new production code, only a test fixture exercising what's already built. If it passes here, that's fine — proceed to Step 3 as a formality (there's no "implementation" left to write for this task; Step 3 becomes a no-op confirmation rather than new code).</p>
+<ul>
+<li>[ ] <strong>Step 3: No implementation step needed</strong></li>
+</ul>
+<p>Unlike every previous task, there is no production code to write here — Task 11 only adds a test fixture. If Step 2's second run already passed, that confirms Tasks 1-10 are complete and correct. If it failed on a real assertion (not the <code>InvalidOperationException</code> guard), go back to whichever entity's task the failure implicates and fix it there, not in this file.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run the full test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: <code>MyMoney.TestSupport</code> now shows the previous 13 tests plus 6 more from <code>SqlServerDatabaseContractTests</code> (19 total), all passing. <code>UnitTests</code> (32 passed/1 skipped) and <code>UITests</code> (2 passed) unchanged. <code>ScenarioTest</code>'s pre-existing, unrelated failure (see CLAUDE.md's gotchas section) is expected and not a regression.</p>
+<ul>
+<li>[ ] <strong>Step 5: Update and close GitHub issues</strong></li>
+</ul>
+<p>Update issue #1 (<code>gh issue comment 1 --body "..."</code> or via the GitHub UI): note that issue #22 is complete, so item #3's "third contract-test flavor" reference is now satisfied by <code>SqlServerDatabaseContractTests</code>.</p>
+<p>Close issue #22 (<code>gh issue close 22 --comment "..."</code>) summarizing: all 9 entities now have <code>MyMoneyUser</code>-tier stored-proc CRUD coverage; <code>SqlServerDatabaseContractTests</code> proves the shared contract suite passes under that tier; issue #19's rich-dataset parity test can now run through <code>SqlServerStoredProcDatabase</code> + <code>MyMoneyUser</code> instead of the <code>MyMoneyAdmin</code> workaround originally being considered.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs
+git commit -m &quot;Add SqlServerDatabaseContractTests proving MyMoneyUser CRUD coverage (closes #22)&quot;
+</code></pre>
+<hr />
+<h2 id="self-review-notes">Self-Review Notes<a class="headerlink" href="#self-review-notes" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Spec coverage:</strong> Section 1 (procs mirroring Payees template, three independent Transactions/Splits/Investment proc sets) → Tasks 2-10. Section 2 (shared <code>ExecuteProc</code> helper) → Task 1, consumed by every later task. Section 3 (<code>Load()</code> extended to all 9 entities) → one step per task, in FK-safe order (Categories/Currencies/Securities before Accounts before Transactions before Splits/Investment; Payees before Aliases). Section 4 (<code>SqlServerDatabaseContractTests</code>, admin-tier cleanup, fail-don't-skip) → Task 11. Out-of-scope items (issue #23's 6 entities, tiered-security model changes, <code>SupportsParameterizedUpdate</code>) are untouched by every task above.</li>
+<li><strong>Placeholder scan:</strong> every task has complete, entity-specific SQL and C# derived from the actual <code>SqlDatabase.cs</code> generic methods (verified against <code>ReadAccounts</code>/<code>UpdateAccounts</code>, <code>ReadCategories</code>/<code>UpdateCategories</code>, <code>ReadCurrencies</code>/<code>UpdateCurrencies</code>, <code>ReadSecurities</code>/<code>UpdateSecurities</code>, <code>ReadStockSplits</code>/<code>UpdateStockSplits</code>, <code>ReadAliases</code>/<code>UpdateAliases</code>, <code>ReadTransactions</code>/<code>UpdateTransactions</code>/<code>UpdateSplits</code>/<code>UpdateInvestment</code>/<code>ReadInvestments</code> line-by-line); no task says "similar to Task N" instead of showing code.</li>
+<li><strong>Type/signature consistency:</strong> <code>ExecuteProc(SqlConnection, string, params (string, object)[])</code> (Task 1) is called with the same signature in Tasks 2-10. <code>SqlDatabase.DBDateTimeParam</code>/<code>DBNullableDateTimeParam</code>/<code>DBGuidParam</code> are referenced as <code>internal static</code> (Task 1's promotion) consistently from Task 2 onward, always fully-qualified as <code>SqlDatabase.XxxParam(...)</code> since they're called from a subclass in the same assembly, not via inheritance. <code>ReadTransactions</code> keeps the base class's <code>ArrayList</code> return type across Tasks 8-10. <code>Load()</code>'s accumulated <code>this.ReadXxx(...)</code> call sequence is spelled out in full in Task 8 Step 5 to avoid any ambiguity about final ordering.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

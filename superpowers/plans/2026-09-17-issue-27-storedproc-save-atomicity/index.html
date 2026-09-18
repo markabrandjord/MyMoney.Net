@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-17-issue-27-storedproc-save-atomicity/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Issue #27: SqlServerStoredProcDatabase.Save() Atomicity Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Issue #27: SqlServerStoredProcDatabase.Save() Atomicity Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Task 1: Add a failing regression test proving Save() is not atomic", url: "#task-1-add-a-failing-regression-test-proving-save-is-not-atomic" },
+              {title: "Task 2: Thread the ambient transaction through every UpdateXxx override", url: "#task-2-thread-the-ambient-transaction-through-every-updatexxx-override" },
+              {title: "Self-Review Notes", url: "#self-review-notes" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="issue-27-sqlserverstoredprocdatabasesave-atomicity-implementation-plan">Issue #27: SqlServerStoredProcDatabase.Save() Atomicity Implementation Plan<a class="headerlink" href="#issue-27-sqlserverstoredprocdatabasesave-atomicity-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Make <code>SqlServerStoredProcDatabase.Save(MyMoney)</code> actually atomic — a failure partway through must roll back everything the same <code>Save()</code> call already wrote, instead of leaving earlier <code>UpdateXxx</code> calls' work permanently committed.</p>
+<p><strong>Architecture:</strong> <code>SqlServerDatabase.Save(MyMoney)</code> (<code>SqlDatabase.cs</code>) already opens one ambient <code>SqlConnection</code>/<code>SqlTransaction</code> pair and stores the transaction in a private field before calling the 13 <code>UpdateXxx</code> methods virtually. <code>SqlServerStoredProcDatabase</code>'s 16 <code>UpdateXxx</code> overrides ignore that ambient state entirely — each opens its own throwaway <code>SqlConnection</code> and lets every stored-proc call auto-commit independently. The fix exposes the ambient transaction to subclasses, and gives every override a <code>BeginScope()</code> helper that reuses the ambient connection+transaction when <code>Save()</code> is in progress, or falls back to today's own-connection-per-call behavior when an override is invoked standalone (as the existing unit tests already do, calling e.g. <code>db.UpdatePayees(...)</code> directly with no <code>Save()</code> wrapper).</p>
+<p><strong>Tech Stack:</strong> C# / .NET 10, ADO.NET (<code>Microsoft.Data.SqlClient</code>), NUnit.</p>
+<p><strong>Spec:</strong> GitHub issue #27 (<code>SqlServerStoredProcDatabase's Save() is not atomic</code>). No separate design doc — the issue itself lays out the two options and this plan implements option (a): thread the ambient connection+transaction through the overrides.</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Must not change behavior for any override called standalone (not via <code>Save()</code>) — the existing <code>SqlServerStoredProcDatabaseTests</code> suite calls <code>UpdateXxx</code> methods directly, with no ambient transaction, and those tests must keep passing unmodified.</li>
+<li>Must not touch <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> or the <code>*_SaveBatch</code> stored-proc path — that's a separate, already-atomic mechanism (Phase 2c) unrelated to this bug.</li>
+<li>Tests run against real SQL Server via <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>; per user decision this session, running them wipes the shared <code>Redmond/MyMoney</code> test database — that's expected and fine (it's a test database, not production data).</li>
+</ul>
+<hr />
+<h2 id="task-1-add-a-failing-regression-test-proving-save-is-not-atomic">Task 1: Add a failing regression test proving Save() is not atomic<a class="headerlink" href="#task-1-add-a-failing-regression-test-proving-save-is-not-atomic" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>SqlServerStoredProcDatabase.Save(MyMoney)</code>, <code>.UpdateCategories(Categories)</code>, <code>.ReadOnlineAccounts(OnlineAccounts, MyMoney)</code> (all pre-existing, unchanged in this task).
+- Produces: nothing new for later tasks — this is the RED half of the TDD cycle Task 2's GREEN half depends on.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add this test to <code>SqlServerStoredProcDatabaseTests.cs</code> (anywhere among the other <code>[Test]</code> methods, e.g. right after <code>InsertUpdateDeleteCategory_RoundTripsThroughStoredProcedures</code>):</p>
+<pre><code class="language-csharp">[Test]
+public void Save_PartialFailureRollsBackAllEntityTypes()
+{
+    string connectionString = this.GetConnectionStringOrSkip();
+    var db = new SqlServerStoredProcDatabase { ConnectionStringOverride = connectionString };
+
+    // Pre-seed a Category row directly (bypasses Save(), commits immediately on its own
+    // connection) so inserting a second Category with the same Id later, from inside Save(),
+    // collides with a real PRIMARY KEY violation. This proves Save()'s atomicity using a
+    // constraint already confirmed to exist (every [TableMapping] table's Id column is declared
+    // PRIMARY KEY - see SqlDatabase.cs's GetCreateTableScript) rather than relying on schema
+    // details, like foreign keys, that may not be present on every configured database.
+    var seed = new MyMoney();
+    var seedCategory = new Category(seed.Categories) { Id = 999301, Name = &quot;Issue27PreexistingCategory&quot;, Type = CategoryType.Expense };
+    seed.Categories.AddCategory(seedCategory);
+    seedCategory.OnInserted();
+    db.UpdateCategories(seed.Categories);
+
+    var money = new MyMoney();
+    var onlineAccount = money.OnlineAccounts.AddOnlineAccount(999300);
+    onlineAccount.Name = &quot;Issue27RollbackTest Bank&quot;;
+    onlineAccount.OnInserted();
+
+    var conflictingCategory = new Category(money.Categories) { Id = 999301, Name = &quot;Issue27ConflictingCategory&quot;, Type = CategoryType.Expense };
+    money.Categories.AddCategory(conflictingCategory);
+    conflictingCategory.OnInserted();
+
+    // Save(MyMoney) calls UpdateOnlineAccounts before UpdateCategories (see SqlDatabase.cs's
+    // Save(MyMoney) method), so the OnlineAccount insert below succeeds before the Category
+    // insert hits the PRIMARY KEY violation from the pre-seeded row above.
+    Assert.Throws&lt;Microsoft.Data.SqlClient.SqlException&gt;(() =&gt; db.Save(money));
+
+    var reloaded = new MyMoney();
+    db.ReadOnlineAccounts(reloaded.OnlineAccounts, reloaded);
+    Assert.That(reloaded.OnlineAccounts.FindOnlineAccountAt(999300), Is.Null,
+        &quot;Save() must be atomic: the OnlineAccount insert that succeeded before the later &quot; +
+        &quot;Categories PRIMARY KEY violation should have been rolled back along with it.&quot;);
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run it against today's (unfixed) code and confirm it fails</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter &quot;Name=Save_PartialFailureRollsBackAllEntityTypes&quot;
+</code></pre>
+<p>Expected: <strong>FAIL</strong> at the final <code>Assert.That(...FindOnlineAccountAt(999300), Is.Null)</code> — the OnlineAccount insert commits independently on its own connection today, so it survives the later Category failure. (The <code>Assert.Throws&lt;SqlException&gt;</code> line itself should already pass, since the PK violation does occur.) If the test instead errors out earlier (e.g. <code>Assert.Ignore</code> because <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code> isn't set), set that environment variable to a valid <code>MyMoneyUser</code>/<code>MyMoneyTest</code> connection string first.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/SqlServerStoredProcDatabaseTests.cs
+git commit -m &quot;test: reproduce SqlServerStoredProcDatabase.Save() non-atomicity (#27)&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-thread-the-ambient-transaction-through-every-updatexxx-override">Task 2: Thread the ambient transaction through every UpdateXxx override<a class="headerlink" href="#task-2-thread-the-ambient-transaction-through-every-updatexxx-override" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (expose the ambient transaction)
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (all 16 <code>UpdateXxx</code> overrides + the two <code>ExecuteProc</code>/<code>ExecutePayeeProc</code> helpers)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing new.
+- Produces: <code>protected SqlTransaction AmbientTransaction { get; }</code> on <code>SqlServerDatabase</code>, for any future subclass that needs the same enlistment pattern.</p>
+<ul>
+<li>[ ] <strong>Step 1: Expose the ambient transaction from the base class</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, immediately after the existing <code>private SqlTransaction transaction;</code> field (the one <code>Save(MyMoney)</code> assigns to), add:</p>
+<pre><code class="language-csharp">private SqlTransaction transaction;
+
+/// &lt;summary&gt;
+/// Exposes the ambient transaction Save(MyMoney) begins, so subclasses whose UpdateXxx
+/// overrides open their own ADO.NET calls (e.g. SqlServerStoredProcDatabase) can enlist in it
+/// instead of running outside it. Null outside of an in-progress Save() call.
+/// &lt;/summary&gt;
+protected SqlTransaction AmbientTransaction =&gt; this.transaction;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Add the connection-scope helper and update the shared ADO.NET helpers</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, replace the existing <code>ExecuteProc</code>/<code>ExecutePayeeProc</code> methods:</p>
+<pre><code class="language-csharp">private static void ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)
+{
+    using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+    {
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+        command.ExecuteNonQuery();
+    }
+}
+
+private static void ExecutePayeeProc(SqlConnection connection, string procName, Payee p)
+{
+    ExecuteProc(connection, procName, (&quot;@Id&quot;, p.Id), (&quot;@Name&quot;, (object)p.Name ?? DBNull.Value));
+}
+</code></pre>
+<p>with:</p>
+<pre><code class="language-csharp">/// &lt;summary&gt;
+/// Returns the connection+transaction an UpdateXxx override should use. When Save(MyMoney) is
+/// in progress, this.AmbientTransaction is non-null - reuse the same ambient SqlConnection and
+/// enlist in that transaction so a later failure rolls back everything Save() already wrote.
+/// When called standalone (every existing unit test calls UpdateXxx methods directly, with no
+/// Save() wrapper), AmbientTransaction is null - open a fresh connection with no transaction,
+/// matching this class's pre-existing standalone behavior (each stored-proc call auto-commits
+/// independently). OwnsConnection tells the caller whether it must dispose the connection when
+/// done (true only for the standalone, freshly-opened case).
+/// &lt;/summary&gt;
+private (SqlConnection Connection, SqlTransaction Transaction, bool OwnsConnection) BeginScope()
+{
+    if (this.AmbientTransaction != null)
+    {
+        return (this.ConnectSqlServer(), this.AmbientTransaction, false);
+    }
+    var connection = new SqlConnection(this.GetConnectionString(true));
+    connection.Open();
+    return (connection, null, true);
+}
+
+private static void EndScope(SqlConnection connection, bool ownsConnection)
+{
+    if (ownsConnection)
+    {
+        connection.Dispose();
+    }
+}
+
+private static void ExecuteProc(SqlConnection connection, SqlTransaction transaction, string procName, params (string Name, object Value)[] parameters)
+{
+    using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure, Transaction = transaction })
+    {
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+        command.ExecuteNonQuery();
+    }
+}
+
+private static void ExecutePayeeProc(SqlConnection connection, SqlTransaction transaction, string procName, Payee p)
+{
+    ExecuteProc(connection, transaction, procName, (&quot;@Id&quot;, p.Id), (&quot;@Name&quot;, (object)p.Name ?? DBNull.Value));
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Migrate the 13 simple-shaped UpdateXxx overrides</strong></li>
+</ul>
+<p>These all follow the identical <code>using (var connection = new SqlConnection(...)) { connection.Open(); foreach (...) { ExecuteProc(connection, "proc", params); } }</code> shape. Replace each with the <code>BeginScope()</code>/<code>EndScope()</code> equivalent below (method bodies otherwise byte-for-byte identical — only the connection setup/teardown and the <code>ExecuteProc(...)</code> call sites change to pass <code>transaction</code>).</p>
+<p><code>UpdateOnlineAccounts</code>:</p>
+<pre><code class="language-csharp">public override void UpdateOnlineAccounts(OnlineAccounts accounts)
+{
+    if (accounts.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (OnlineAccount i in accounts)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, i.Id), (&quot;@Name&quot;, (object)i.Name ?? DBNull.Value), (&quot;@Institution&quot;, (object)i.Institution ?? DBNull.Value),
+                (&quot;@OFX&quot;, (object)i.Ofx ?? DBNull.Value), (&quot;@FID&quot;, (object)i.FID ?? DBNull.Value),
+                (&quot;@UserId&quot;, (object)i.UserId ?? DBNull.Value), (&quot;@Password&quot;, (object)i.Password ?? DBNull.Value),
+                (&quot;@BankId&quot;, (object)i.BankId ?? DBNull.Value), (&quot;@BranchId&quot;, (object)i.BranchId ?? DBNull.Value),
+                (&quot;@BrokerId&quot;, (object)i.BrokerId ?? DBNull.Value), (&quot;@OfxVersion&quot;, (object)i.OfxVersion ?? DBNull.Value),
+                (&quot;@LogoUrl&quot;, (object)i.LogoUrl ?? DBNull.Value), (&quot;@AppId&quot;, (object)i.AppId ?? DBNull.Value),
+                (&quot;@AppVersion&quot;, (object)i.AppVersion ?? DBNull.Value), (&quot;@ClientUid&quot;, (object)i.ClientUid ?? DBNull.Value),
+                (&quot;@UserCred1&quot;, (object)i.UserCred1 ?? DBNull.Value), (&quot;@UserCred2&quot;, (object)i.UserCred2 ?? DBNull.Value),
+                (&quot;@AuthToken&quot;, (object)i.AuthToken ?? DBNull.Value), (&quot;@AccessKey&quot;, (object)i.AccessKey ?? DBNull.Value),
+                (&quot;@UserKey&quot;, (object)i.UserKey ?? DBNull.Value),
+                (&quot;@UserKeyExpireDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate))
+            };
+
+            if (i.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.OnlineAccounts_Update&quot;, parameters);
+            }
+            else if (i.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.OnlineAccounts_Insert&quot;, parameters);
+            }
+            else if (i.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.OnlineAccounts_Delete&quot;, (&quot;@Id&quot;, i.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (OnlineAccount i in accounts)
+    {
+        if (!i.IsDeleted)
+        {
+            i.OnUpdated();
+        }
+    }
+    accounts.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateAccountAliases</code>:</p>
+<pre><code class="language-csharp">public override void UpdateAccountAliases(AccountAliases accountAliases)
+{
+    if (accountAliases.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (AccountAlias a in accountAliases)
+        {
+            if (a.IsChanged || a.IsInserted)
+            {
+                (string Name, object Value)[] parameters =
+                {
+                    (&quot;@Id&quot;, a.Id), (&quot;@Pattern&quot;, (object)a.Pattern ?? DBNull.Value),
+                    (&quot;@AccountId&quot;, (object)a.AccountId ?? DBNull.Value), (&quot;@Flags&quot;, (int)a.AliasType)
+                };
+
+                if (a.IsChanged)
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.AccountAliases_Update&quot;, parameters);
+                }
+                else
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.AccountAliases_Insert&quot;, parameters);
+                }
+            }
+            else if (a.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.AccountAliases_Delete&quot;, (&quot;@Id&quot;, a.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (AccountAlias a in accountAliases)
+    {
+        a.OnUpdated();
+    }
+    accountAliases.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateTransactionExtras</code>:</p>
+<pre><code class="language-csharp">public override void UpdateTransactionExtras(TransactionExtras extras)
+{
+    if (extras.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (TransactionExtra e in extras)
+        {
+            if (e.IsChanged || e.IsInserted)
+            {
+                (string Name, object Value)[] parameters =
+                {
+                    (&quot;@Id&quot;, e.Id), (&quot;@Transaction&quot;, e.Transaction), (&quot;@TaxYear&quot;, e.TaxYear),
+                    (&quot;@TaxDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(e.TaxDate))
+                };
+
+                if (e.IsChanged)
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.TransactionExtras_Update&quot;, parameters);
+                }
+                else
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.TransactionExtras_Insert&quot;, parameters);
+                }
+            }
+            else if (e.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.TransactionExtras_Delete&quot;, (&quot;@Id&quot;, e.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (TransactionExtra e in extras)
+    {
+        e.OnUpdated();
+    }
+    extras.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateLoanPayments</code>:</p>
+<pre><code class="language-csharp">public override void UpdateLoanPayments(LoanPayments loans)
+{
+    if (loans.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (LoanPayment i in loans)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, i.Id), (&quot;@AccountId&quot;, i.AccountId), (&quot;@Date&quot;, SqlServerDatabase.DBDateTimeParam(i.Date)),
+                (&quot;@Principal&quot;, i.Principal), (&quot;@Interest&quot;, i.Interest), (&quot;@Memo&quot;, (object)i.Memo ?? DBNull.Value)
+            };
+
+            if (i.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.LoanPayments_Update&quot;, parameters);
+            }
+            else if (i.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.LoanPayments_Insert&quot;, parameters);
+            }
+            else if (i.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.LoanPayments_Delete&quot;, (&quot;@Id&quot;, i.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (LoanPayment i in loans)
+    {
+        i.OnUpdated();
+    }
+    loans.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateRentUnits</code>:</p>
+<pre><code class="language-csharp">public override void UpdateRentUnits(RentUnits units)
+{
+    if (units.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (RentUnit x in units)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, x.Id), (&quot;@Building&quot;, x.Building), (&quot;@Name&quot;, (object)x.Name ?? DBNull.Value),
+                (&quot;@Renter&quot;, (object)x.Renter ?? DBNull.Value), (&quot;@Note&quot;, (object)x.Note ?? DBNull.Value)
+            };
+
+            if (x.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentUnits_Update&quot;, parameters);
+            }
+            else if (x.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentUnits_Insert&quot;, parameters);
+            }
+            else if (x.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentUnits_Delete&quot;, (&quot;@Id&quot;, x.Id), (&quot;@Building&quot;, x.Building));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (RentUnit x in units)
+    {
+        x.OnUpdated();
+    }
+    units.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateRentBuildings</code>:</p>
+<pre><code class="language-csharp">public override void UpdateRentBuildings(RentBuildings buildings)
+{
+    if (buildings.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (RentBuilding p in buildings)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, p.Id), (&quot;@Name&quot;, (object)p.Name ?? DBNull.Value), (&quot;@Address&quot;, (object)p.Address ?? DBNull.Value),
+                (&quot;@PurchasedDate&quot;, SqlServerDatabase.DBDateTimeParam(p.PurchasedDate)), (&quot;@PurchasedPrice&quot;, p.PurchasedPrice),
+                (&quot;@LandValue&quot;, p.LandValue), (&quot;@EstimatedValue&quot;, p.EstimatedValue),
+                (&quot;@CategoryForIncome&quot;, p.CategoryForIncome), (&quot;@CategoryForTaxes&quot;, p.CategoryForTaxes),
+                (&quot;@CategoryForInterest&quot;, p.CategoryForInterest), (&quot;@CategoryForRepairs&quot;, p.CategoryForRepairs),
+                (&quot;@CategoryForMaintenance&quot;, p.CategoryForMaintenance), (&quot;@CategoryForManagement&quot;, p.CategoryForManagement),
+                (&quot;@OwnershipName1&quot;, (object)p.OwnershipName1 ?? DBNull.Value), (&quot;@OwnershipName2&quot;, (object)p.OwnershipName2 ?? DBNull.Value),
+                (&quot;@OwnershipPercentage1&quot;, p.OwnershipPercentage1), (&quot;@OwnershipPercentage2&quot;, p.OwnershipPercentage2),
+                (&quot;@Note&quot;, (object)p.Note ?? DBNull.Value)
+            };
+
+            if (p.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentBuildings_Update&quot;, parameters);
+            }
+            else if (p.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentBuildings_Insert&quot;, parameters);
+            }
+            else if (p.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.RentBuildings_Delete&quot;, (&quot;@Id&quot;, p.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (RentBuilding p in buildings)
+    {
+        p.OnUpdated();
+    }
+    buildings.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdatePayees</code> (the one override with a raw <code>SqlCommand</code> delete branch alongside <code>ExecutePayeeProc</code>):</p>
+<pre><code class="language-csharp">public override void UpdatePayees(Payees payees)
+{
+    if (payees.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Payee p in payees)
+        {
+            if (p.IsChanged)
+            {
+                ExecutePayeeProc(connection, transaction, &quot;dbo.Payees_Update&quot;, p);
+            }
+            else if (p.IsInserted)
+            {
+                ExecutePayeeProc(connection, transaction, &quot;dbo.Payees_Insert&quot;, p);
+            }
+            else if (p.IsDeleted)
+            {
+                using (var command = new SqlCommand(&quot;dbo.Payees_Delete&quot;, connection) { CommandType = System.Data.CommandType.StoredProcedure, Transaction = transaction })
+                {
+                    command.Parameters.AddWithValue(&quot;@Id&quot;, p.Id);
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Payee p in payees)
+    {
+        if (!p.IsDeleted)
+        {
+            p.OnUpdated();
+        }
+    }
+    payees.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateAccounts</code>:</p>
+<pre><code class="language-csharp">public override void UpdateAccounts(Accounts accounts)
+{
+    if (accounts.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Account a in accounts)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, a.Id), (&quot;@AccountId&quot;, (object)a.AccountId ?? DBNull.Value),
+                (&quot;@OfxAccountId&quot;, (object)a.OfxAccountId ?? DBNull.Value), (&quot;@Name&quot;, (object)a.Name ?? DBNull.Value),
+                (&quot;@Type&quot;, (int)a.Type), (&quot;@Description&quot;, (object)a.Description ?? DBNull.Value),
+                (&quot;@OnlineAccount&quot;, a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value),
+                (&quot;@OpeningBalance&quot;, a.OpeningBalance), (&quot;@LastSync&quot;, SqlServerDatabase.DBDateTimeParam(a.LastSync)),
+                (&quot;@LastBalance&quot;, SqlServerDatabase.DBDateTimeParam(a.LastBalance)), (&quot;@SyncGuid&quot;, SqlServerDatabase.DBGuidParam(a.SyncGuid)),
+                (&quot;@Flags&quot;, (int)a.Flags), (&quot;@Currency&quot;, (object)a.Currency ?? DBNull.Value),
+                (&quot;@WebSite&quot;, (object)a.WebSite ?? DBNull.Value), (&quot;@ReconcileWarning&quot;, a.ReconcileWarning),
+                (&quot;@CategoryIdForPrincipal&quot;, a.CategoryForPrincipal == null ? (object)DBNull.Value : a.CategoryForPrincipal.Id),
+                (&quot;@CategoryIdForInterest&quot;, a.CategoryForInterest == null ? (object)DBNull.Value : a.CategoryForInterest.Id)
+            };
+
+            if (a.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Accounts_Update&quot;, parameters);
+            }
+            else if (a.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Accounts_Insert&quot;, parameters);
+            }
+            else if (a.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Accounts_Delete&quot;, (&quot;@Id&quot;, a.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Account a in accounts)
+    {
+        if (!a.IsDeleted)
+        {
+            a.OnUpdated();
+        }
+    }
+    accounts.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateCategories</code>:</p>
+<pre><code class="language-csharp">public override void UpdateCategories(Categories categories)
+{
+    if (categories.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Category c in categories)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, c.Id), (&quot;@Name&quot;, (object)c.Name ?? DBNull.Value),
+                (&quot;@Description&quot;, (object)c.Description ?? DBNull.Value), (&quot;@Type&quot;, (int)c.Type),
+                (&quot;@ParentId&quot;, c.ParentCategory != null ? c.ParentCategory.Id : -1), (&quot;@Budget&quot;, c.Budget),
+                (&quot;@Frequency&quot;, (int)c.Frequency), (&quot;@Balance&quot;, c.Balance),
+                (&quot;@Color&quot;, (object)c.Color ?? DBNull.Value), (&quot;@TaxRefNum&quot;, c.TaxRefNum)
+            };
+
+            if (c.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Categories_Update&quot;, parameters);
+            }
+            else if (c.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Categories_Insert&quot;, parameters);
+            }
+            else if (c.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Categories_Delete&quot;, (&quot;@Id&quot;, c.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Category c in categories)
+    {
+        c.OnUpdated();
+    }
+    categories.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateCurrencies</code>:</p>
+<pre><code class="language-csharp">public override void UpdateCurrencies(Currencies currencies)
+{
+    if (currencies.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Currency s in currencies)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, s.Id), (&quot;@Symbol&quot;, (object)s.Symbol ?? DBNull.Value), (&quot;@Name&quot;, (object)s.Name ?? DBNull.Value),
+                (&quot;@Ratio&quot;, s.Ratio), (&quot;@LastRatio&quot;, s.LastRatio), (&quot;@CultureCode&quot;, (object)s.CultureCode ?? DBNull.Value)
+            };
+
+            if (s.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Currencies_Update&quot;, parameters);
+            }
+            else if (s.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Currencies_Insert&quot;, parameters);
+            }
+            else if (s.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Currencies_Delete&quot;, (&quot;@Id&quot;, s.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Currency s in currencies)
+    {
+        s.OnUpdated();
+    }
+    currencies.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateSecurities</code>:</p>
+<pre><code class="language-csharp">public override void UpdateSecurities(Securities securities)
+{
+    if (securities.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Security s in securities)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, s.Id), (&quot;@Name&quot;, (object)s.Name ?? DBNull.Value), (&quot;@Symbol&quot;, (object)s.Symbol ?? DBNull.Value),
+                (&quot;@Price&quot;, s.Price), (&quot;@LastPrice&quot;, s.LastPrice), (&quot;@CuspId&quot;, (object)s.CuspId ?? DBNull.Value),
+                (&quot;@SecurityType&quot;, (int)s.SecurityType), (&quot;@Taxable&quot;, (byte)s.Taxable),
+                (&quot;@PriceDate&quot;, SqlServerDatabase.DBDateTimeParam(s.PriceDate))
+            };
+
+            if (s.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Securities_Update&quot;, parameters);
+            }
+            else if (s.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Securities_Insert&quot;, parameters);
+            }
+            else if (s.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Securities_Delete&quot;, (&quot;@Id&quot;, s.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Security s in securities)
+    {
+        s.OnUpdated();
+    }
+    securities.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateStockSplits</code>:</p>
+<pre><code class="language-csharp">public override void UpdateStockSplits(StockSplits stockSplits)
+{
+    if (stockSplits.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (StockSplit s in stockSplits)
+        {
+            if (s.IsChanged || s.IsInserted)
+            {
+                if (s.Date == DateTime.MinValue)
+                {
+                    continue;
+                }
+
+                (string Name, object Value)[] parameters =
+                {
+                    (&quot;@Id&quot;, s.Id), (&quot;@Date&quot;, SqlServerDatabase.DBDateTimeParam(s.Date)), (&quot;@Security&quot;, s.Security == null ? (object)DBNull.Value : s.Security.Id),
+                    (&quot;@Numerator&quot;, s.Numerator), (&quot;@Denominator&quot;, s.Denominator)
+                };
+
+                if (s.IsChanged)
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.StockSplits_Update&quot;, parameters);
+                }
+                else
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.StockSplits_Insert&quot;, parameters);
+                }
+            }
+            else if (s.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.StockSplits_Delete&quot;, (&quot;@Id&quot;, s.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (StockSplit s in stockSplits)
+    {
+        s.OnUpdated();
+    }
+    stockSplits.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateAliases</code>:</p>
+<pre><code class="language-csharp">public override void UpdateAliases(Aliases aliases)
+{
+    if (aliases.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Alias a in aliases)
+        {
+            if (a.IsChanged || a.IsInserted)
+            {
+                (string Name, object Value)[] parameters =
+                {
+                    (&quot;@Id&quot;, a.Id), (&quot;@Pattern&quot;, (object)a.Pattern ?? DBNull.Value), (&quot;@Payee&quot;, a.Payee.Id),
+                    (&quot;@Flags&quot;, (int)a.AliasType)
+                };
+
+                if (a.IsChanged)
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.Aliases_Update&quot;, parameters);
+                }
+                else
+                {
+                    ExecuteProc(connection, transaction, &quot;dbo.Aliases_Insert&quot;, parameters);
+                }
+            }
+            else if (a.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Aliases_Delete&quot;, (&quot;@Id&quot;, a.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Alias a in aliases)
+    {
+        a.OnUpdated();
+    }
+    aliases.RemoveDeleted();
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Migrate UpdateTransactions, UpdateSplits, UpdateInvestment</strong></li>
+</ul>
+<p>These three are special: <code>UpdateTransactions</code> currently opens one <code>SqlConnection</code> for the whole method but then calls <code>connection.Open()</code>/<code>connection.Close()</code> again on every single loop iteration (dead weight now that <code>BeginScope()</code> opens it once), and it calls into <code>UpdateSplits</code>/<code>UpdateInvestment</code> mid-loop, which must transparently join the same ambient scope when <code>Save()</code> is running.</p>
+<p><code>UpdateTransactions</code>:</p>
+<pre><code class="language-csharp">public override void UpdateTransactions(Transactions transactions)
+{
+    if (transactions.Count == 0)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Transaction t in transactions)
+        {
+            if (t.Account == null)
+            {
+                continue;
+            }
+
+            // Splits/Investment carry a FK back to this Transaction. On delete, the child
+            // rows must go first or SQL Server rejects the parent DELETE with them still
+            // pointing at it (FK_Splits_Transaction) - unlike insert/update, where the
+            // parent must exist first, so this ordering only flips for the delete case.
+            if (t.IsDeleted)
+            {
+                if (t.Splits != null)
+                {
+                    this.UpdateSplits(t.Splits);
+                }
+                if (t.Investment != null)
+                {
+                    this.UpdateInvestment(t.Investment);
+                }
+            }
+
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, t.Id), (&quot;@Number&quot;, (object)t.Number ?? DBNull.Value), (&quot;@Account&quot;, t.Account.Id),
+                (&quot;@Date&quot;, SqlServerDatabase.DBDateTimeParam(t.Date)), (&quot;@Amount&quot;, t.Amount), (&quot;@Status&quot;, (int)t.Status),
+                (&quot;@Memo&quot;, (object)t.Memo ?? DBNull.Value), (&quot;@Payee&quot;, t.Payee != null ? (object)t.Payee.Id : DBNull.Value),
+                (&quot;@Category&quot;, t.Category != null ? (object)t.Category.Id : DBNull.Value),
+                (&quot;@Transfer&quot;, t.Transfer != null &amp;&amp; t.Transfer.Transaction != null ? t.Transfer.Transaction.Id : -1),
+                (&quot;@TransferSplit&quot;, t.Transfer != null &amp;&amp; t.Transfer.Split != null ? t.Transfer.Split.Id : -1),
+                (&quot;@FITID&quot;, (object)t.FITID ?? DBNull.Value), (&quot;@SalesTax&quot;, t.SalesTax), (&quot;@Flags&quot;, (int)t.Flags),
+                (&quot;@ReconciledDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(t.ReconciledDate)),
+                (&quot;@BudgetBalanceDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate)),
+                (&quot;@MergeDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(t.MergeDate)),
+                (&quot;@OriginalPayee&quot;, (object)t.OriginalPayee ?? DBNull.Value)
+            };
+
+            if (t.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Transactions_Update&quot;, parameters);
+            }
+            else if (t.IsInserted)
+            {
+                if (t.Id == -1)
+                {
+                    continue;
+                }
+                ExecuteProc(connection, transaction, &quot;dbo.Transactions_Insert&quot;, parameters);
+            }
+            else if (t.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Transactions_Delete&quot;, (&quot;@Id&quot;, t.Id));
+            }
+
+            if (!t.IsDeleted)
+            {
+                if (t.Splits != null)
+                {
+                    this.UpdateSplits(t.Splits);
+                }
+                if (t.Investment != null)
+                {
+                    this.UpdateInvestment(t.Investment);
+                }
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Transaction t in transactions)
+    {
+        t.OnUpdated();
+    }
+    transactions.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateSplits</code>:</p>
+<pre><code class="language-csharp">public override void UpdateSplits(Splits splits)
+{
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        foreach (Split s in splits)
+        {
+            (string Name, object Value)[] parameters =
+            {
+                (&quot;@Id&quot;, s.Id), (&quot;@Transaction&quot;, s.Transaction.Id), (&quot;@Amount&quot;, s.Amount),
+                (&quot;@Category&quot;, s.Category != null ? (object)s.Category.Id : DBNull.Value), (&quot;@Memo&quot;, (object)s.Memo ?? DBNull.Value),
+                (&quot;@Transfer&quot;, s.Transfer != null &amp;&amp; s.Transfer.Transaction != null ? s.Transfer.Transaction.Id : -1),
+                (&quot;@Payee&quot;, s.Payee != null ? (object)s.Payee.Id : DBNull.Value), (&quot;@Flags&quot;, (int)s.Flags),
+                (&quot;@BudgetBalanceDate&quot;, SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate))
+            };
+
+            if (s.IsChanged)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Splits_Update&quot;, parameters);
+            }
+            else if (s.IsInserted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Splits_Insert&quot;, parameters);
+            }
+            else if (s.IsDeleted)
+            {
+                ExecuteProc(connection, transaction, &quot;dbo.Splits_Delete&quot;, (&quot;@Id&quot;, s.Id), (&quot;@Transaction&quot;, s.Transaction.Id));
+            }
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+
+    foreach (Split s in splits)
+    {
+        s.OnUpdated();
+    }
+    splits.RemoveDeleted();
+}
+</code></pre>
+<p><code>UpdateInvestment</code>:</p>
+<pre><code class="language-csharp">public override void UpdateInvestment(Investment i)
+{
+    if (i == null)
+    {
+        return;
+    }
+
+    var (connection, transaction, ownsConnection) = this.BeginScope();
+    try
+    {
+        (string Name, object Value)[] parameters =
+        {
+            (&quot;@Id&quot;, i.Id), (&quot;@Security&quot;, i.Security == null ? (object)DBNull.Value : i.Security.Id), (&quot;@UnitPrice&quot;, i.UnitPrice),
+            (&quot;@Units&quot;, i.Units), (&quot;@Commission&quot;, i.Commission), (&quot;@InvestmentType&quot;, (int)i.Type),
+            (&quot;@TradeType&quot;, (int)i.TradeType), (&quot;@TaxExempt&quot;, i.TaxExempt ? 1 : 0), (&quot;@Withholding&quot;, i.Withholding),
+            (&quot;@MarkUpDown&quot;, i.MarkUpDown), (&quot;@Taxes&quot;, i.Taxes), (&quot;@Fees&quot;, i.Fees), (&quot;@Load&quot;, i.Load)
+        };
+
+        if (i.IsChanged)
+        {
+            ExecuteProc(connection, transaction, &quot;dbo.Investments_Update&quot;, parameters);
+        }
+        else if (i.IsInserted)
+        {
+            ExecuteProc(connection, transaction, &quot;dbo.Investments_Insert&quot;, parameters);
+        }
+        else if (i.IsDeleted)
+        {
+            ExecuteProc(connection, transaction, &quot;dbo.Investments_Delete&quot;, (&quot;@Id&quot;, i.Id));
+        }
+    }
+    finally
+    {
+        EndScope(connection, ownsConnection);
+    }
+    i.OnUpdated();
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Build and run the new regression test — confirm it now passes</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code>dotnet build Source/WPF/MyMoney.sln
+dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter &quot;Name=Save_PartialFailureRollsBackAllEntityTypes&quot;
+</code></pre>
+<p>Expected: build succeeds, test <strong>PASSES</strong> — the OnlineAccount insert is now rolled back along with the Category PK violation.</p>
+<ul>
+<li>[ ] <strong>Step 6: Run the full existing SQL Server test suites — confirm no regressions</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter &quot;FullyQualifiedName~SqlServerStoredProcDatabaseTests&quot;
+dotnet test Source/WPF/MyMoney.sln
+</code></pre>
+<p>Expected: every pre-existing test in <code>SqlServerStoredProcDatabaseTests</code> (all of which call <code>UpdateXxx</code> methods standalone, with no <code>Save()</code> wrapper) still passes unchanged, and the full solution test run shows no new failures. This confirms the standalone/no-ambient-transaction fallback path in <code>BeginScope()</code> preserves prior behavior.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;fix: enlist SqlServerStoredProcDatabase's UpdateXxx overrides in Save()'s ambient transaction (#27)&quot;
+</code></pre>
+<hr />
+<h2 id="self-review-notes">Self-Review Notes<a class="headerlink" href="#self-review-notes" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Spec coverage:</strong> Issue #27's option (a) — "have each UpdateXxx override accept/reuse the ambient connection+transaction from Save() instead of opening its own" — is fully implemented; all 16 overrides listed in the issue (OnlineAccounts, AccountAliases, TransactionExtras, LoanPayments, RentUnits, RentBuildings, Payees, Accounts, Categories, Currencies, Securities, StockSplits, Aliases, Transactions, Splits, Investment) are covered in Task 2.</li>
+<li><strong>Standalone-call compatibility:</strong> every override falls back to its pre-existing own-connection, no-transaction behavior when <code>Save()</code> isn't in progress, so the ~30 existing direct <code>db.UpdateXxx(...)</code> calls in <code>SqlServerStoredProcDatabaseTests.cs</code> are unaffected.</li>
+<li><strong>Out of scope, confirmed:</strong> <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> and the <code>*_SaveBatch</code> stored procs are a separate, already-atomic mechanism (Phase 2c) and are not touched by this plan.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>
