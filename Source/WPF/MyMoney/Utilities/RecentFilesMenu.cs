@@ -1,110 +1,56 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
+using System.Linq;
 using System.Windows.Controls;
+using Walkabout.Data;
 
 namespace Walkabout.Utilities
 {
-    public class RecentFileEventArgs : EventArgs
+    public class RecentDatabaseEventArgs : EventArgs
     {
-        public string FileName;
-        public RecentFileEventArgs(string fname)
-        {
-            this.FileName = fname;
-        }
+        public string DisplayName { get; set; }
     }
 
+    /// <summary>
+    /// A thin, pull-based view over DatabaseRegistry.Databases -- no
+    /// separate storage of its own (replaces the old path-list/File.Exists
+    /// pruning approach). Call Refresh(registry) after any registry
+    /// mutation (a new database created, a database opened and its
+    /// LastUsedUtc bumped) to keep the menu in sync.
+    /// </summary>
     internal class RecentFilesMenu
     {
-        private readonly List<string> recentFiles = new List<string>();
-        private const int maxRecentFiles = 10;
+        private const int MaxRecentFiles = 10;
         private readonly MenuItem parent;
 
-        public event EventHandler<RecentFileEventArgs> RecentFileSelected;
+        public event EventHandler<RecentDatabaseEventArgs> RecentDatabaseSelected;
 
         public RecentFilesMenu(MenuItem parent)
         {
             this.parent = parent;
         }
 
-        public string[] ToArray()
+        public void Refresh(DatabaseRegistry registry)
         {
-            return this.recentFiles.ToArray();
-        }
-
-        public void Clear()
-        {
-            this.recentFiles.Clear();
-        }
-
-        public void SetFiles(string[] files)
-        {
-            this.Clear();
-            if (files != null)
-            {
-                foreach (string fileName in files)
-                {
-                    this.AddRecentFileName(fileName);
-                }
-            }
-            this.SyncRecentFilesMenu();
-        }
-
-        private void AddRecentFileName(string fileName)
-        {
-            try
-            {
-                if (this.recentFiles.Contains(fileName))
-                {
-                    this.recentFiles.Remove(fileName);
-                }
-                string fname = fileName;
-                if (!System.IO.File.Exists(fileName))
-                {
-                    return; // ignore deleted files.
-                }
-                this.recentFiles.Add(fileName);
-                if (this.recentFiles.Count > maxRecentFiles)
-                {
-                    this.recentFiles.RemoveAt(0);
-                }
-            }
-            catch (System.IO.IOException)
-            {
-                // ignore bad files
-            }
-        }
-
-        public void AddRecentFile(string fileName)
-        {
-            this.AddRecentFileName(fileName);
-            this.SyncRecentFilesMenu();
-        }
-
-        private void SyncRecentFilesMenu()
-        {
-            // Synchronize menu items.
             this.parent.Items.Clear();
 
-            // Add most recent files first.
-            for (int i = this.recentFiles.Count - 1, j = 0; i >= 0; i--, j++)
+            bool includeTest =
+#if DEBUG
+                true;
+#else
+                false;
+#endif
+            var entries = registry.Databases
+                .Where(kv => includeTest || !kv.Value.TestDatabase)
+                .OrderByDescending(kv => kv.Value.LastUsedUtc ?? DateTime.MinValue)
+                .Take(MaxRecentFiles);
+
+            foreach (var kv in entries)
             {
-                string filename = this.recentFiles[i];
-                MenuItem item = new MenuItem();
-                item.Click += this.OnMenuItemClick;
+                string displayName = kv.Key;
+                var item = new MenuItem { Header = displayName };
+                item.Click += (s, e) => this.RecentDatabaseSelected?.Invoke(this, new RecentDatabaseEventArgs { DisplayName = displayName });
                 this.parent.Items.Add(item);
-                item.Header = string.Format("_{0} {1}", j + 1, filename);
-                item.Tag = filename;
             }
         }
-
-        private void OnMenuItemClick(object sender, System.Windows.RoutedEventArgs e)
-        {
-            if (RecentFileSelected != null)
-            {
-                MenuItem item = (MenuItem)sender;
-                RecentFileSelected(sender, new RecentFileEventArgs((string)item.Tag));
-            }
-        }
-
     }
 }
