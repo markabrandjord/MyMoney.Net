@@ -243,6 +243,17 @@ namespace Walkabout.Data
                 builder.WorkstationID = Environment.MachineName;
             }
             builder.ConnectTimeout = 20;
+            // Every other SQL Server connection in this codebase
+            // (SqlServerBootstrapper, the old MyMoneyAdmin bootstrap code,
+            // test fixtures) already sets this, since Redmond (and any
+            // similarly self-signed-cert dev/home SQL Server) fails login
+            // otherwise with "The certificate chain was issued by an
+            // authority that is not trusted." This shared builder was the
+            // one place that didn't -- confirmed live: DatabaseRegistry.
+            // BuildConnectionString (issue #32), the first caller to
+            // exercise it for a real SQL Server connection, failed exactly
+            // this way until this was added.
+            builder.TrustServerCertificate = true;
 
             return builder.ConnectionString;
         }

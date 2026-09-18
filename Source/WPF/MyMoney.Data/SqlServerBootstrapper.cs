@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 
@@ -54,6 +55,27 @@ namespace Walkabout.Data
 
             try
             {
+                // Both permanent procs are deployed here, as 'sa' -- not
+                // just MyMoney_BootstrapServer. MyMoneyAdmin's dbcreator
+                // server role (granted by MyMoney_BootstrapServer itself)
+                // lets it CREATE DATABASE, but NOT create/alter procedures
+                // in master -- confirmed live against Redmond: deploying
+                // MyMoney_CreateCatalog as MyMoneyAdmin from CreateCatalog()
+                // failed with "CREATE PROCEDURE permission denied in
+                // database 'master'". Only 'sa' (or a login with master DDL
+                // rights) can deploy it, so it happens once here, and
+                // CreateCatalog() below only ever calls the already-
+                // deployed proc, never redeploys it.
+                //
+                // Ordering matters: MyMoney_CreateCatalog.sql's own deploy
+                // script creates a master-scoped database user for
+                // MyMoneyAdmin and grants it EXECUTE -- which requires the
+                // MyMoneyAdmin LOGIN to already exist. That login is only
+                // created when MyMoney_BootstrapServer is actually EXECUTED
+                // (not merely deployed), so that EXEC must happen before
+                // MyMoney_CreateCatalog.sql is deployed, confirmed live
+                // against Redmond (got "Cannot find the user 'MyMoneyAdmin'"
+                // when this ran in the wrong order).
                 DeployScript(saBuilder.ConnectionString, Path.Combine(this.sqlScriptsRoot, "Bootstrap", "MyMoney_BootstrapServer.sql"));
                 using (var connection = new SqlConnection(saBuilder.ConnectionString))
                 {
@@ -66,6 +88,7 @@ namespace Walkabout.Data
                         command.ExecuteNonQuery();
                     }
                 }
+                DeployScript(saBuilder.ConnectionString, Path.Combine(this.sqlScriptsRoot, "Bootstrap", "MyMoney_CreateCatalog.sql"));
             }
             catch (Exception ex)
             {
@@ -106,7 +129,9 @@ namespace Walkabout.Data
 
             try
             {
-                DeployScript(adminBuilder.ConnectionString, Path.Combine(this.sqlScriptsRoot, "Bootstrap", "MyMoney_CreateCatalog.sql"));
+                // MyMoney_CreateCatalog is already deployed by
+                // BootstrapServerIfNeeded (as 'sa' -- see the comment
+                // there); MyMoneyAdmin can call it but cannot redeploy it.
                 using (var connection = new SqlConnection(adminBuilder.ConnectionString))
                 {
                     connection.Open();
@@ -122,6 +147,34 @@ namespace Walkabout.Data
                 var adminDatabase = new SqlServerStoredProcDatabase { ConnectionStringOverride = catalogBuilder.ConnectionString };
                 adminDatabase.LazyCreateTables();
                 adminDatabase.Disconnect();
+
+                // Migrations must run before Access procs: confirmed live
+                // against Redmond that CREATE OR ALTER PROCEDURE validates
+                // column references against EXISTING tables eagerly (unlike
+                // deferred name resolution for objects that don't exist at
+                // all yet) -- deploying Payees_AccessProcs.sql before the
+                // Version column migration failed with "Invalid column
+                // name 'Version'". Migrations/*.sql were previously "run
+                // once, by hand" against the one pre-existing "MyMoney"
+                // catalog (see their own header comments) -- this WI is the
+                // first automated fresh-catalog creation path, so it must
+                // replay every migration to bring a brand-new catalog's
+                // schema up to date, not just LazyCreateTables()'s baseline.
+                // Each migration file's own T-SQL idempotency guards (e.g.
+                // "IF COL_LENGTH(...) IS NULL BEGIN ALTER TABLE ... END")
+                // are trusted as-is via the same ExecuteBatchScript used for
+                // every other script -- an earlier apparent failure of that
+                // guard turned out to be ExecuteBatchScript's now-fixed
+                // shared-connection bug (see its comment below), not a
+                // T-SQL problem, confirmed live against Redmond.
+                string migrationsDir = Path.Combine(this.sqlScriptsRoot, "Migrations");
+                if (Directory.Exists(migrationsDir))
+                {
+                    foreach (string migrationFile in Directory.GetFiles(migrationsDir, "*.sql").OrderBy(f => f))
+                    {
+                        ExecuteBatchScript(catalogBuilder.ConnectionString, File.ReadAllText(migrationFile));
+                    }
+                }
 
                 foreach (string procFile in AccessProcFiles)
                 {
@@ -163,11 +216,26 @@ namespace Walkabout.Data
         /// </summary>
         private static void ExecuteBatchScript(string connectionString, string script)
         {
-            using (var connection = new SqlConnection(connectionString))
+            // A fresh connection per batch, not one connection reused
+            // across every batch in the file: confirmed live against
+            // Redmond that reusing one connection across multiple
+            // CREATE PROCEDURE/GRANT statements in a loop left the target
+            // catalog with zero procs afterward -- no exception anywhere,
+            // every ExecuteNonQuery "succeeded", but nothing persisted.
+            // Isolating each statement to its own connection (matching
+            // DeployMigrationAlterStatements' proven-working pattern)
+            // resolved it completely -- all 16 Access proc files' worth of
+            // CREATE PROCEDURE/GRANT statements now deploy and persist
+            // correctly every time. Root cause not fully isolated (a
+            // single connection running two statements in isolation did
+            // work in testing, so this isn't simply "shared connections
+            // never work") -- this is the empirically verified fix, not a
+            // guess.
+            foreach (string batch in SplitBatches(script))
             {
-                connection.Open();
-                foreach (string batch in SplitBatches(script))
+                using (var connection = new SqlConnection(connectionString))
                 {
+                    connection.Open();
                     using (var command = new SqlCommand(batch, connection) { CommandTimeout = 60 })
                     {
                         command.ExecuteNonQuery();
