@@ -239,6 +239,24 @@ scenario tests, project dependency diagram). Quick reference:
   second `Enter` was tried and confirmed harmful (it re-opens edit on the *next* placeholder row
   instead of just committing). Discovered 2026-09-19 writing `CurrenciesFlaUiTests.cs`.
 
+- **Right-click context-menu invocation, confirmed working**: `AutomationElement.RightClick()`
+  on a `DataGrid` row opens `TransactionsView`'s real `ContextMenu`, and its items (e.g.
+  `menuItemRenamePayee`) are then findable/invokable the same as any menu bar item - no special
+  handling needed, worked first try. Click the row first (select it, satisfying a command's
+  `CanExecute`) before right-clicking.
+
+- **`RenamePayeeDialog`'s "To" field (`comboBox1`/`PART_EditableTextBox`) starts pre-filled with
+  the same payee name being renamed** (`ShowDialogRenamePayee(payee)` sets both `Payee` and
+  `RenameTo` to the same payee) - same caret-at-end-not-select-all gotcha as the Categories
+  rename box, needs Ctrl+A before typing or it appends.
+
+- **`BasicsFixtureBuilder`'s pre-seeded "AMC THEATRES 1234" alias (added for the regex-
+  consolidation scenario) means renaming that same payee with Auto-Rename checked exercises
+  `RenamePayeeDialog.OnOkButton_Click`'s *re-point an existing alias* branch, not its *create a
+  new alias* branch** (`Aliases.FindAlias(pattern)` finds the existing one, so `AddAlias` is
+  never called for it) - a test asserting a new alias was *created* here would be testing the
+  wrong branch. Discovered 2026-09-19 writing `PayeesFlaUiTests.cs`.
+
 - **`QuickFilterControl`'s Quick Search box only applies its filter on a literal Enter keypress**
   (`OnTextBox_KeyUp` checks `e.Key == Key.Enter`) — `TextChanged` alone (fired on every keystroke)
   only toggles the clear-filter (✕) button's visibility, it does not touch the actual filter.
