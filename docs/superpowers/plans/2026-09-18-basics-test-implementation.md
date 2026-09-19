@@ -74,8 +74,24 @@ namespace Walkabout.Tests
         {
             MyMoney money = BasicsFixtureBuilder.Build();
 
-            Assert.That(money.Payees.Count(), Is.EqualTo(2), "Expected exactly 2 seeded payees.");
+            Assert.That(money.Payees.Count(), Is.EqualTo(4), "Expected exactly 4 seeded payees (movie, Alaska, duplicate-target, grocery).");
             Assert.That(money.Aliases.Count(), Is.EqualTo(3), "Expected exactly 3 seeded aliases (1 plain + 2 narrow, for the regex-consolidation scenario).");
+        }
+
+        [Test]
+        public void Build_ReturnsExpectedCurrencyAndBankAccountShape()
+        {
+            MyMoney money = BasicsFixtureBuilder.Build();
+
+            Assert.That(money.Currencies.Count(), Is.EqualTo(10), "Expected exactly 10 non-USD currency rows (EUR, CAD, GBP, JPY, AUD, CHF, MXN, INR, BRL, CNY).");
+
+            Currency eur = money.Currencies.FirstOrDefault(c => c.Symbol == "EUR");
+            Assert.That(eur, Is.Not.Null);
+            Assert.That(eur.Ratio, Is.EqualTo(0.870649M));
+
+            Account italianBankAccount = money.Accounts.FirstOrDefault(a => a.Currency == "EUR");
+            Assert.That(italianBankAccount, Is.Not.Null, "Expected one account denominated in EUR, linked to an Italian bank.");
+            Assert.That(italianBankAccount.Description, Does.Contain("Intesa Sanpaolo"));
         }
 
         [Test]
@@ -203,10 +219,37 @@ namespace Walkabout.Data
             dupB.FITID = "FID-B";
             money.Transactions.AddTransaction(dupB);
 
-            // Currencies & Securities: one non-USD currency row.
-            var eur = money.Currencies.AddCurrency(1);
-            eur.Symbol = "EUR";
-            eur.Ratio = 0.92M;
+            // Currencies & Securities: 10 non-USD currency rows plus one bank-linked account
+            // per currency, using a real, fixed exchange-rate snapshot and real public bank
+            // contact info as the source for realistic (not arbitrary) constants - per
+            // docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md's
+            // "Predicted results" convention, these are fixed values baked in at
+            // plan-writing time, not a live fetch embedded in test code, so the fixture stays
+            // deterministic across every run. Snapshot source: x-rates.com USD table dated
+            // Jan 1, 2026 06:18 UTC (real currency-pair magnitudes, not invented numbers -
+            // the specific date doesn't matter for test purposes, only that the relative
+            // values are realistic). Bank contact info from each bank's own published
+            // head-office address/phone, gathered via WebSearch on 2026-09-18.
+            AddCurrencyWithBankAccount(money, "EUR", 0.870649M, "Intesa Sanpaolo",
+                "Piazza San Carlo 156, 10121 Turin, Italy", "+39 011 5551");
+            AddCurrencyWithBankAccount(money, "CAD", 1.398494M, "Royal Bank of Canada",
+                "200 Bay Street, Royal Bank Plaza, Toronto, ON M5J 2J5, Canada", "(416) 974-5151");
+            AddCurrencyWithBankAccount(money, "GBP", 0.746607M, "HSBC",
+                "8 Canada Square, Canary Wharf, London, E14 5HQ, United Kingdom", "+44 20 7991 8888");
+            AddCurrencyWithBankAccount(money, "JPY", 156.885957M, "MUFG Bank",
+                "2-7-1 Marunouchi, Chiyoda, Tokyo 100-8388, Japan", "+81 3-3240-1111");
+            AddCurrencyWithBankAccount(money, "AUD", 1.403242M, "Commonwealth Bank of Australia",
+                "Tower 1, 201 Sussex Street, Sydney NSW 2000, Australia", "(02) 9378 2000");
+            AddCurrencyWithBankAccount(money, "CHF", 0.822901M, "UBS",
+                "Bahnhofstrasse 45, 8001 Zurich, Switzerland", "+41 44 234 11 11");
+            AddCurrencyWithBankAccount(money, "MXN", 17.229844M, "BBVA Mexico",
+                "Av. Paseo de la Reforma 510, Colonia Juarez, 06600 Mexico City, Mexico", "+52 55 5621 3434");
+            AddCurrencyWithBankAccount(money, "INR", 96.008501M, "State Bank of India",
+                "State Bank Bhavan, Madam Cama Road, Mumbai 400021, India", "022 2274 1216");
+            AddCurrencyWithBankAccount(money, "BRL", 5.143522M, "Banco do Brasil",
+                "SBS Qd. 1 Bloco C, Edificio Sede III, 70073-901 Brasilia DF, Brazil", "+55 61 3310 3400");
+            AddCurrencyWithBankAccount(money, "CNY", 6.701622M, "Industrial and Commercial Bank of China",
+                "55 Fuxingmennei Street, Xicheng District, Beijing 100140, China", "+86 10 6610 6114");
 
             // Auto-Categorization: payee history at a known amount, for suggestion scenarios.
             var groceryPayee = money.Payees.AddPayee(4);
@@ -221,9 +264,25 @@ namespace Walkabout.Data
 
             return money;
         }
+
+        private static void AddCurrencyWithBankAccount(MyMoney money, string symbol, decimal usdRatio,
+            string bankName, string bankAddress, string bankPhone)
+        {
+            int nextCurrencyId = money.Currencies.Count() + 1;
+            var currency = money.Currencies.AddCurrency(nextCurrencyId);
+            currency.Symbol = symbol;
+            currency.Ratio = usdRatio;
+
+            var account = money.Accounts.AddAccount($"{bankName} ({symbol})");
+            account.Type = AccountType.Checking;
+            account.Currency = symbol;
+            account.Description = $"{bankName}, {bankAddress}, {bankPhone}";
+        }
     }
 }
 ```
+
+Add `using System.Linq;` to this file's using directives (needed for `money.Currencies.Count()`).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
