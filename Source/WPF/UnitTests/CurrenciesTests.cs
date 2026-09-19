@@ -46,6 +46,43 @@ namespace Walkabout.Tests
             Assert.That(money.Currencies.Count, Is.EqualTo(countBefore - 1));
         }
 
+        [Test]
+        public void RemoveCurrency_AlreadyPersistedWithoutForceFlag_OnlySoftDeletes()
+        {
+            // Mirrors Categories.RemoveCategory's IsInserted-gated immediate-removal pattern.
+            // OnUpdated() simulates "this currency was already saved in an earlier session"
+            // (flips ChangeType back to None) - without forceRemoveAfterSave, RemoveCurrency
+            // should NOT physically remove it from Count, only soft-delete it (OnDelete()).
+            var money = new MyMoney();
+            var currency = money.Currencies.AddCurrency(1);
+            currency.Symbol = "EUR";
+            currency.OnUpdated();
+            Assert.That(currency.IsInserted, Is.False);
+            int countBefore = money.Currencies.Count;
+
+            bool removed = money.Currencies.RemoveCurrency(currency);
+
+            Assert.That(removed, Is.True, "RemoveCurrency always returns true regardless of which branch it took.");
+            Assert.That(currency.IsDeleted, Is.True);
+            Assert.That(money.Currencies.Count, Is.EqualTo(countBefore), "Without forceRemoveAfterSave, an already-persisted currency should only be soft-deleted, not removed from Count.");
+        }
+
+        [Test]
+        public void RemoveCurrency_AlreadyPersistedWithForceFlag_RemovesImmediately()
+        {
+            var money = new MyMoney();
+            var currency = money.Currencies.AddCurrency(1);
+            currency.Symbol = "EUR";
+            currency.OnUpdated();
+            Assert.That(currency.IsInserted, Is.False);
+            int countBefore = money.Currencies.Count;
+
+            bool removed = money.Currencies.RemoveCurrency(currency, forceRemoveAfterSave: true);
+
+            Assert.That(removed, Is.True);
+            Assert.That(money.Currencies.Count, Is.EqualTo(countBefore - 1), "forceRemoveAfterSave should remove it immediately even though it wasn't IsInserted.");
+        }
+
         // Real, fixed exchange-rate snapshot (x-rates.com USD table, Jan 1 2026 06:18 UTC) and
         // real public bank head-office info (gathered via WebSearch, 2026-09-18), used as test
         // transaction data for this subsection only - per the user's explicit correction, this

@@ -86,5 +86,24 @@ namespace Walkabout.Tests
             Assert.That(subsumed, Does.Contain(narrow1));
             Assert.That(subsumed, Does.Contain(narrow2));
         }
+
+        [Test]
+        public void SettingRegexAliasTypeWithMalformedPattern_ThrowsImmediatelyAtAssignment()
+        {
+            // Alias.OnChanged (fired by both the Pattern and AliasType setters) EAGERLY
+            // constructs `new Regex(this.pattern)` whenever AliasType == Regex and Pattern is
+            // non-null - not lazily on first Matches() call as Matches()'s own
+            // `if (this.regex == null)` guard misleadingly suggests (that guard is usually a
+            // no-op since OnChanged already built it). Confirmed by running this test: setting
+            // Pattern first (while AliasType is still None) is safe, but the very next line -
+            // setting AliasType = Regex - throws synchronously, before FindAliasMatches/
+            // ApplyAlias/FindSubsumedAliases are ever called. There is no validation anywhere in
+            // RenamePayeeDialog.OnOkButton_Click to catch this either (reread to confirm).
+            var malformed = new Alias();
+            malformed.Pattern = "[unclosed";
+
+            Assert.That(() => malformed.AliasType = AliasType.Regex,
+                Throws.InstanceOf<System.ArgumentException>());
+        }
     }
 }

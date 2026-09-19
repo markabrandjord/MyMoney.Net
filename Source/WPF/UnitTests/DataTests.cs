@@ -243,6 +243,32 @@ namespace Walkabout.Tests
             Assert.That(ex.Message, Does.Contain("Split"));
         }
 
+        [Test]
+        public void AddTransaction_DuplicateId_ThrowsInternalError()
+        {
+            // Transactions.AddTransaction(Transaction) honors an explicit (non -1) Id for the
+            // XmlStore.Load scenario (replaying previously-assigned ids), but if that id
+            // collides with one already present it throws rather than silently overwriting an
+            // existing transaction - confirmed by reading Money.cs's AddTransaction.
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("Checking");
+
+            var first = new Transaction(money.Transactions);
+            first.Account = account;
+            first.Date = DateTime.Now;
+            first.Amount = -10.00M;
+            money.Transactions.AddTransaction(first);
+
+            var duplicate = new Transaction(money.Transactions);
+            duplicate.Id = first.Id;
+            duplicate.Account = account;
+            duplicate.Date = DateTime.Now;
+            duplicate.Amount = -20.00M;
+
+            Assert.That(() => money.Transactions.AddTransaction(duplicate),
+                Throws.Exception.With.Message.Contains("Failed to add transaction with duplicate Id"));
+        }
+
     }
 
     [DataContract(Namespace = "http://test")]

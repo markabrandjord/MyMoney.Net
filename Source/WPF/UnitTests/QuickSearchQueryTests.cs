@@ -88,6 +88,48 @@ namespace Walkabout.Tests
 
             Assert.That(result.Count, Is.EqualTo(2), "Expected the Groceries transactions with Payment >= 21.00 (the -21.00 and -22.00 rows).");
         }
+
+        [Test]
+        public void ExecuteQuery_CategoryMatchesOnlyASplitNotTheWholeTransaction_ReturnsFakeSplitTransaction()
+        {
+            // ExecuteQuery's split-row branch (Money.cs's Transactions.ExecuteQuery): when the
+            // whole transaction doesn't match, but it IsSplit, each Split is tried via
+            // Split.Matches(QueryRow) (which supports Category/Memo/Payee but explicitly NOT
+            // Payment/Deposit - "too confusing if we match amount on splits", per its own
+            // comment) and a matching split gets wrapped in a synthetic, read-only
+            // Transaction(t, split) - confirmed by reading that constructor: Category/Amount/
+            // Memo/Payee are all proxied from the split, not the parent transaction.
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("Checking");
+            var groceries = money.Categories.GetOrCreateCategory("Food:Groceries", CategoryType.Expense);
+            var fuel = money.Categories.GetOrCreateCategory("Auto:Fuel", CategoryType.Expense);
+
+            var splitTxn = new Transaction(money.Transactions);
+            splitTxn.Account = account;
+            splitTxn.Date = new DateTime(2026, 1, 15);
+            splitTxn.Amount = -70.00M;
+            splitTxn.Category = money.Categories.Split; // matches production's OnCommandSplits convention
+            var fuelSplit = splitTxn.NonNullSplits.AddSplit();
+            fuelSplit.Category = fuel;
+            fuelSplit.Amount = -40.00M;
+            var groceriesSplit = splitTxn.NonNullSplits.AddSplit();
+            groceriesSplit.Category = groceries;
+            groceriesSplit.Amount = -30.00M;
+            money.Transactions.AddTransaction(splitTxn);
+
+            var query = new[]
+            {
+                new QueryRow { Field = Field.Category, Operation = Operation.Equals, Value = "Food:Groceries" }
+            };
+
+            IList<Transaction> result = money.Transactions.ExecuteQuery(query);
+
+            Assert.That(result.Count, Is.EqualTo(1), "Expected exactly the one matching split, not the whole (non-matching-category) parent transaction.");
+            Transaction fake = result[0];
+            Assert.That(fake.IsReadOnly, Is.True, "Split-row query results are synthetic read-only proxies.");
+            Assert.That(fake.Category, Is.SameAs(groceries));
+            Assert.That(fake.Amount, Is.EqualTo(-30.00M), "The fake transaction's Amount should be the split's amount, not the parent's total.");
+        }
     }
 
     [TestFixture]

@@ -278,6 +278,44 @@ scenario tests, project dependency diagram). Quick reference:
     (`myTemplateSplitPayment`) is a plain `TextBlock` with nothing editable in it - only
     `myTemplatePaymentEditInTheSplitDetailedView` (edit mode) has the `TextBox` F6 needs.
 
+- **Error/invalid-input-path backfill (2026-09-19), after the user pointed out the business-layer
+  test suite up to this point was almost entirely happy-path** (1 real exception test out of 25).
+  Went back through `CategoriesTests.cs`/`CurrenciesTests.cs`/`PayeesAndAliasesTests.cs`/
+  `QuickSearchQueryTests.cs`/`DataTests.cs` and added the concrete gaps already read but not
+  tested:
+  - **`Category.OnDelete()` has no guard against a category that still has transactions** - only
+    the UI layer (`CategoriesControl.Delete()`) checks `GetTransactionsByCategory(c, null).Count
+    > 0` and redirects to `MergeCategoryDialog`; calling `OnDelete()` directly (as e.g. a script
+    or a future code path might) silently leaves transactions pointing at a now-`IsDeleted`
+    category, no exception, no warning.
+  - **`Categories.RemoveCategory`/`Currencies.RemoveCurrency`'s `forceRemoveAfterSave` branch**
+    (immediate removal of an already-persisted, non-`IsInserted` item) was untested - only the
+    `IsInserted` (never-saved) immediate-removal path had a test. Simulate "already persisted" in
+    a test via `entity.OnUpdated()` (flips `ChangeType` back to `None`), matching what a real
+    load/save cycle does.
+  - **`Alias.OnChanged` (fired by both the `Pattern` and `AliasType` setters) eagerly constructs
+    `new Regex(this.pattern)` whenever `AliasType == Regex` and `Pattern` is non-null** - NOT
+    lazily on first `Matches()` call, despite `Matches()`'s own `if (this.regex == null)` guard
+    looking like lazy init (that guard is usually a no-op since `OnChanged` already built it). A
+    malformed pattern throws `RegexParseException` (an `ArgumentException`) synchronously at
+    whichever property assignment completes the `Regex+malformed-pattern` combination - e.g.
+    `alias.Pattern = "[unclosed"; alias.AliasType = AliasType.Regex;` throws on the *second*
+    line, not later when actually matching. **This means `RenamePayeeDialog.CheckConflicts()`
+    (`new Alias() { Pattern = this.Pattern, AliasType = atype }`) would throw an unhandled
+    exception if a user checks "Use regular expressions" with an already-malformed pattern
+    typed** - a real, live robustness gap in the dialog, found but deliberately not fixed (out of
+    scope for a test-writing pass) - flagging here in case it's picked up later.
+  - **`Transactions.ExecuteQuery`'s split-row branch** (`Transaction(Transaction t, Split s)`, the
+    synthetic read-only proxy transaction returned when a query matches a split but not its
+    parent) was untested - confirmed via its constructor that `Category`/`Amount`/`Memo`/`Payee`
+    are all proxied from the `Split`, not the parent `Transaction`, and `IsReadOnly` is always
+    `true`. Also confirmed `Split.Matches(QueryRow)` explicitly does NOT support
+    `Field.Payment`/`Field.Deposit` ("too confusing if we match amount on splits", per its own
+    comment) - only Category/Memo/Payee.
+  - **`Transactions.AddTransaction(Transaction)` throws** (`"Failed to add transaction with
+    duplicate Id=..."`) if given an explicit (non -1) `Id` that already exists - the XmlStore.Load
+    replay path's collision guard.
+
 - **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
   - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
     split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an

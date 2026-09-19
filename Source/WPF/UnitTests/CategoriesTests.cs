@@ -99,5 +99,55 @@ namespace Walkabout.Tests
             Assert.That(stillOnOldCategory, Is.EqualTo(0), "No transaction should remain on the old category.");
             Assert.That(nowOnNewCategory, Is.EqualTo(2), "Both transactions should now be on the new category.");
         }
+
+        [Test]
+        public void OnDelete_CategoryStillHasTransactions_BusinessLayerDoesNotGuardAgainstOrphaning()
+        {
+            // CategoriesControl.Delete() (the real UI entry point) is the ONLY thing that guards
+            // against this: it checks Transactions.GetTransactionsByCategory(c, null).Count > 0
+            // and redirects to MergeCategoryDialog instead of calling OnDelete() when the
+            // category is still in use. Category.OnDelete() itself has no such guard - confirmed
+            // by reading it (it only cascades to subcategories and flips ChangeType). A caller
+            // that bypasses the UI and calls OnDelete() directly on a category with transactions
+            // gets no exception and no warning; the transaction is silently left pointing at a
+            // now-IsDeleted category. This documents that reality so it isn't assumed to be safe.
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount("Checking");
+            Category inUse = money.Categories.GetOrCreateCategory("Fun", CategoryType.Expense);
+
+            var t = new Transaction(money.Transactions);
+            t.Account = account;
+            t.Date = DateTime.Now;
+            t.Amount = -10.00M;
+            t.Category = inUse;
+            money.Transactions.AddTransaction(t);
+
+            Assert.DoesNotThrow(() => inUse.OnDelete());
+
+            Assert.That(inUse.IsDeleted, Is.True);
+            Assert.That(t.Category, Is.SameAs(inUse), "Business layer does not clear or redirect the transaction's Category reference.");
+            Assert.That(t.Category.IsDeleted, Is.True, "The transaction is left pointing at a deleted category - a real orphaning gap only the UI layer's Delete() guards against.");
+        }
+
+        [Test]
+        public void RemoveCategory_ForceRemoveAfterSaveOnAlreadyPersistedCategory_RemovesImmediately()
+        {
+            // Categories.RemoveCategory's normal immediate-removal path only fires for a
+            // not-yet-saved category (c.IsInserted). forceRemoveAfterSave is the override used
+            // during a real Save() cycle to physically purge a category that was soft-deleted
+            // (OnDelete()) in an earlier, already-persisted session - simulate that by calling
+            // OnUpdated() (flips ChangeType back to None, as a real load/save would) before
+            // removing, so IsInserted is false and only the force flag lets removal through.
+            var money = new MyMoney();
+            Category category = money.Categories.GetOrCreateCategory("Persisted", CategoryType.Expense);
+            category.OnUpdated();
+            Assert.That(category.IsInserted, Is.False, "Category should no longer look newly-inserted after OnUpdated().");
+            int countBefore = money.Categories.Count;
+
+            bool removed = money.Categories.RemoveCategory(category, forceRemoveAfterSave: true);
+
+            Assert.That(removed, Is.True);
+            Assert.That(money.Categories.Count, Is.EqualTo(countBefore - 1), "forceRemoveAfterSave should remove it immediately even though it wasn't IsInserted.");
+        }
     }
 }
