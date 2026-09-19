@@ -1,3 +1,4 @@
+using System.IO;
 using FlaUI.Core.AutomationElements;
 using NUnit.Framework;
 
@@ -27,7 +28,10 @@ namespace Walkabout.UITests.Basics
 
             OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
 
-            Assert.That(mainWindow.Title, Does.Contain(this.db.RegisteredName).IgnoreCase);
+            // MainWindow.UpdateCaption (MainWindow.xaml.cs) builds the title from the
+            // underlying database file's name, not the registry's display name - the
+            // registered name is only used to pick the entry in the Open dialog's list.
+            Assert.That(mainWindow.Title, Does.Contain(Path.GetFileName(this.db.ScratchPath)).IgnoreCase);
         }
     }
 }
