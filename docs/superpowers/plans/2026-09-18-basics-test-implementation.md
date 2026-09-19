@@ -12,6 +12,22 @@
 
 ## Global Constraints
 
+- **No LINQ in business-layer test code — use plain `foreach` loops** (user preference, stated
+  during Task 1's implementation). This is a style rule for test code operating on the
+  in-memory `MyMoney` graph, not an architectural change — these tests still never touch a SQL
+  database (data-layer correctness stays out of scope, per "Testing responsibility by layer"
+  above).
+- **`PersistentContainer : IEnumerable<PersistentObject>` diamond gotcha** (discovered during
+  Task 1): every `MyMoney` collection (`Categories`, `Payees`, `Currencies`, `Aliases`,
+  `Transactions`, `Accounts`, ...) implements *two* different `IEnumerable<T>` instantiations —
+  `IEnumerable<PersistentObject>` via `PersistentContainer`, and `IEnumerable<TSpecific>` via
+  its own `ICollection<TSpecific>`. Passing one of these collections to *any* generic method
+  expecting `IEnumerable<T>` (including LINQ, if it were used) fails with a confusing
+  `CS0411`/type-inference error unless the type argument is given explicitly or a `foreach`
+  loop is used instead (foreach resolves against the collection's own declared enumerator,
+  not generic inference, so it isn't affected). Given the no-LINQ preference above, `foreach`
+  is both the required style and the simplest way to avoid this gotcha entirely.
+
 - Never run `dotnet test Source/WPF/MyMoney.sln` (whole solution) — pulls in FlaUI `UITests`/`ScenarioTest`, hangs unattended. Business-layer runs: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "..."`.
 - FlaUI tests are fully self-driving (no human interaction during a run); the very first FlaUI test run in this plan (Task 3, Step in "run it live") happens with the user present to bootstrap the environment — every run after that is autonomous.
 - Fresh Fixture per test, always: business-layer tests build their own minimal in-memory `MyMoney`; FlaUI tests call `BasicsFixtureBuilder.Build()` fresh and save it to a brand-new scratch SQLite path — never a checked-in binary, never reused state between tests.
@@ -42,7 +58,6 @@
 Create `Source/WPF/UnitTests/BasicsFixtureBuilderTests.cs`:
 
 ```csharp
-using System.Linq;
 using NUnit.Framework;
 using Walkabout.Data;
 
@@ -51,19 +66,47 @@ namespace Walkabout.Tests
     [TestFixture]
     public class BasicsFixtureBuilderTests
     {
+        private static Category FindCategoryByName(MyMoney money, string name)
+        {
+            foreach (Category c in money.Categories)
+            {
+                if (c.Name == name)
+                {
+                    return c;
+                }
+            }
+            return null;
+        }
+
+        private static int CountItems<T>(System.Collections.Generic.IEnumerable<T> items)
+        {
+            int count = 0;
+            foreach (T item in items)
+            {
+                count++;
+            }
+            return count;
+        }
+
         [Test]
         public void Build_ReturnsExpectedCategoryShape()
         {
             MyMoney money = BasicsFixtureBuilder.Build();
 
-            Category fun = money.Categories.FirstOrDefault(c => c.Name == "Fun" && c.ParentCategory == null);
+            // Category.Name stores the full colon-separated path (e.g. "Fun:Movies"), not just
+            // the leaf segment - Category.Label derives the leaf from Name's last ':' segment.
+            // Confirmed by reading Money.cs during Task 1's implementation.
+            Category fun = FindCategoryByName(money, "Fun");
             Assert.That(fun, Is.Not.Null, "Expected a top-level 'Fun' category.");
 
-            Category movies = money.Categories.FirstOrDefault(c => c.Name == "Movies" && c.ParentCategory == fun);
+            Category movies = FindCategoryByName(money, "Fun:Movies");
             Assert.That(movies, Is.Not.Null, "Expected 'Fun:Movies' child category.");
+            Assert.That(movies.Label, Is.EqualTo("Movies"));
+            Assert.That(movies.ParentCategory, Is.SameAs(fun));
 
-            Category videos = money.Categories.FirstOrDefault(c => c.Name == "Videos" && c.ParentCategory == fun);
+            Category videos = FindCategoryByName(money, "Fun:Videos");
             Assert.That(videos, Is.Not.Null, "Expected 'Fun:Videos' child category.");
+            Assert.That(videos.ParentCategory, Is.SameAs(fun));
 
             int moviesTransactionCount = money.Transactions.GetTransactionsByCategory(movies, null).Count;
             Assert.That(moviesTransactionCount, Is.EqualTo(1), "Expected exactly 1 seeded transaction under Fun:Movies.");
@@ -74,8 +117,8 @@ namespace Walkabout.Tests
         {
             MyMoney money = BasicsFixtureBuilder.Build();
 
-            Assert.That(money.Payees.Count(), Is.EqualTo(4), "Expected exactly 4 seeded payees (movie, Alaska, duplicate-target, grocery).");
-            Assert.That(money.Aliases.Count(), Is.EqualTo(3), "Expected exactly 3 seeded aliases (1 plain + 2 narrow, for the regex-consolidation scenario).");
+            Assert.That(CountItems<Payee>(money.Payees), Is.EqualTo(4), "Expected exactly 4 seeded payees (movie, Alaska, duplicate-target, grocery).");
+            Assert.That(CountItems<Alias>(money.Aliases), Is.EqualTo(3), "Expected exactly 3 seeded aliases (1 plain + 2 narrow, for the regex-consolidation scenario).");
         }
 
         [Test]
@@ -86,14 +129,20 @@ namespace Walkabout.Tests
 
             Assert.That(first, Is.Not.SameAs(second), "Each call must return an independent MyMoney graph.");
 
-            first.Categories.First().Name = "Mutated";
+            Category firstFun = FindCategoryByName(first, "Fun");
+            firstFun.Name = "Mutated";
 
-            Category funInSecond = second.Categories.FirstOrDefault(c => c.Name == "Fun" && c.ParentCategory == null);
+            Category funInSecond = FindCategoryByName(second, "Fun");
             Assert.That(funInSecond, Is.Not.Null, "Mutating one Build() result must not affect another - each call is a fresh graph.");
         }
     }
 }
 ```
+
+Note: `money.Categories`/`money.Payees`/etc. each implement two different `IEnumerable<T>`
+instantiations (see Global Constraints' diamond gotcha) — `foreach` works directly against
+them, but any generic helper taking `IEnumerable<T>` needs an explicit type argument at the
+call site (`CountItems<Payee>(money.Payees)`, not `CountItems(money.Payees)`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -170,7 +219,7 @@ namespace Walkabout.Data
             splitTxn.Date = new DateTime(2026, 1, 10);
             splitTxn.Amount = -100.00M;
             splitTxn.Payee = alaskaPayee;
-            var split1 = splitTxn.GetOrCreateSplits().AddSplit();
+            var split1 = splitTxn.NonNullSplits.AddSplit();
             split1.Category = fun;
             split1.Amount = -40.00M;
             money.Transactions.AddTransaction(splitTxn);
@@ -1508,7 +1557,7 @@ namespace Walkabout.Tests
             t.Account = account;
             t.Date = System.DateTime.Now;
             t.Amount = -100.00M;
-            var splits = t.GetOrCreateSplits();
+            var splits = t.NonNullSplits;
             var s = splits.AddSplit();
             s.Category = category;
             s.Amount = -40.00M;
@@ -1563,7 +1612,7 @@ namespace Walkabout.Tests
 }
 ```
 
-If `Transaction.GetOrCreateSplits()`/`Splits.AddSplit()` differ from the actual member names, correct them per Step 1's findings before running — do not guess a second time once the real names are known.
+Confirmed during Task 1's implementation: the correct member is `Transaction.NonNullSplits` (not `GetOrCreateSplits`), already used above.
 
 - [ ] **Step 3: Run tests to verify they pass**
 

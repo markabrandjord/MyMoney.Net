@@ -26,6 +26,7 @@
     <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.Data\MyMoney.Data.csproj" />
+    <ProjectReference Include="..\MyMoney.TestSupport\MyMoney.TestSupport.csproj" />
   </ItemGroup>
 
   <ItemGroup>

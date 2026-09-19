@@ -104,3 +104,24 @@ scenario tests, project dependency diagram). Quick reference:
   straight to the post-renormalization target instead of the old `HEAD`).
   New branches created after this point, and fresh clones, should not hit
   this class of issue at all going forward.
+
+- **`Money.cs`'s collection classes (`Categories`, `Payees`, `Currencies`, `Aliases`,
+  `Transactions`, `Accounts`, ...) each implement two different `IEnumerable<T>`
+  instantiations**, because `PersistentContainer` itself implements
+  `IEnumerable<PersistentObject>` while each concrete collection also implements
+  `ICollection<TSpecific>` (e.g. `ICollection<Category>`). Passing one of these collections to
+  a generic method expecting `IEnumerable<T>` — including LINQ (`.FirstOrDefault(...)`,
+  `.Count()`, etc.) — fails with a confusing `CS0411` ("type arguments... cannot be inferred"),
+  often naming an unrelated overload (e.g. `ImmutableArrayExtensions.FirstOrDefault`) in the
+  error message, because the compiler can't decide which `IEnumerable<T>` to bind `T` against.
+  Fix: use a plain `foreach` loop instead (its enumerator resolution isn't affected by this),
+  or supply the type argument explicitly if a generic method call is unavoidable
+  (`Enumerable.FirstOrDefault<Category>(money.Categories, ...)`). Discovered 2026-09-18 writing
+  `BasicsFixtureBuilderTests.cs`.
+
+- **`Category.Name` stores the full colon-separated path** (e.g. `"Fun:Movies"`), not just the
+  leaf segment — `Category.Label` derives the leaf name from `Name`'s last `:`-separated
+  segment (`Money.cs`'s `Label` getter). A category created via
+  `Categories.GetOrCreateCategory("Fun:Movies", ...)` has `Name == "Fun:Movies"` and
+  `Label == "Movies"`, not `Name == "Movies"` — easy to assume backwards. Discovered
+  2026-09-18.
