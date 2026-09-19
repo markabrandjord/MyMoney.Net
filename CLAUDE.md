@@ -165,16 +165,42 @@ scenario tests, project dependency diagram). Quick reference:
 - **Opening a database does not select or display any account's register.** The Accounts panel
   (`MainWindow.xaml.cs`'s `toolBox.Add("ACCOUNTS", "AccountsSelector", ...)`) starts collapsed —
   its account `ListItem`s (`AutomationId` = the account's name) aren't even in the UIA tree until
-  the section's `HeaderSite` button is clicked (a plain `Button`; `Invoke` pattern throws
-  `InvalidOperationException` there, use `Click()`) — and even once visible, no account is
-  auto-selected, so the transaction `DataGrid` (`AutomationId="TheGrid_BankTransactionDetails"`)
-  renders zero `DataItem` rows (just column headers) until one is explicitly selected via
-  `SelectionItem.Pattern.Select()`. `Source/WPF/UITests/Basics/OpenFixtureDatabase.SelectAccount`
-  does this (idempotently, since the app/window is reused across every test in a `[SetUpFixture]`
-  session, so a section an earlier test expanded stays expanded). Also: the `DataGrid` always
-  renders one extra `{NewItemPlaceholder}` `DataItem` for its add-new-row affordance regardless of
-  filtering — real transaction rows are the ones whose `Name` starts with `"Transaction:"`.
-  Discovered 2026-09-19 writing `QuickSearchFlaUiTests.cs`.
+  the section is expanded — and even once visible, no account is auto-selected, so the
+  transaction `DataGrid` (`AutomationId="TheGrid_BankTransactionDetails"`) renders zero `DataItem`
+  rows (just column headers) until one is explicitly selected via `SelectionItem.Pattern.Select()`.
+  `Source/WPF/UITests/Basics/OpenFixtureDatabase.SelectAccount`/`ExpandCategoriesPanel`/
+  `EnsureToolboxSectionExpanded` do this (idempotently, since the app/window is reused across
+  every test in a `[SetUpFixture]` session, so a section an earlier test expanded stays expanded).
+  Also: the `DataGrid` always renders one extra `{NewItemPlaceholder}` `DataItem` for its
+  add-new-row affordance regardless of filtering — real transaction rows are the ones whose
+  `Name` starts with `"Transaction:"`. Discovered 2026-09-19 writing `QuickSearchFlaUiTests.cs`.
+
+- **Each left-hand toolbox section (Accounts/Categories/Payees/Securities) is a real WPF
+  `Expander`** (`Controls/Accordion.xaml.cs`'s `Add()` builds one per section), whose automation
+  peer is exposed as `ControlType.Group` and natively supports the `ExpandCollapse` pattern —
+  call `section.Patterns.ExpandCollapse.Pattern.Expand()` on the section itself. The nested
+  `AutomationId="HeaderSite"` element is just the Expander's default-template toggle button;
+  clicking it directly (`Click()`) proved unreliable in practice (worked for Accounts, silently
+  did nothing for Categories in the same run) — prefer the pattern call on the section, not a
+  click on its child. Discovered 2026-09-19 writing `CategoriesFlaUiTests.cs`.
+
+- **Opening a second database in the same app session can pop a "Save Changes" `YesNoCancel`
+  prompt (`MainWindow.SaveIfDirty`, title `"Save Changes"`, button `AutomationId="ButtonNo"`)
+  before the real "Open Database" dialog** — observed even when no test explicitly edited
+  anything (e.g. just showing/expanding the Categories panel for the first time in a session was
+  enough to flip `MainWindow.dirty`). Since `BasicsAppSession` launches the app once per
+  `[SetUpFixture]` and every test in a multi-test fixture calls `OpenFixtureDatabase.Open` again,
+  any fixture with 2+ FlaUI tests can hit this. `OpenFixtureDatabase.Open` now detects a
+  `"Save Changes"` modal and clicks `ButtonNo` (discard) before continuing to the real dialog.
+  Discovered 2026-09-19 writing `CategoriesFlaUiTests.cs`.
+
+- **The Categories rename edit box does not select-all on entry.**
+  `CategoriesControl.xaml.cs`'s `OnTextEditorForRenaming_Loaded` sets
+  `CaretIndex = Text.Length` (end of the existing text), not select-all — typing immediately
+  after F2 appends to the existing label instead of replacing it (confirmed: doing this literally
+  produced a real category named `"MoviesVideos"`, not a rename attempt at all). A real rename
+  test needs `Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A)` before
+  typing the new name. Discovered 2026-09-19 writing `CategoriesFlaUiTests.cs`.
 
 - **`QuickFilterControl`'s Quick Search box only applies its filter on a literal Enter keypress**
   (`OnTextBox_KeyUp` checks `e.Key == Key.Enter`) — `TextChanged` alone (fired on every keystroke)
@@ -191,6 +217,12 @@ scenario tests, project dependency diagram). Quick reference:
     `Transactions.GetTransactionsByCategory(oldCategory, null)` then call `t.ReCategorize(...)`
     on each result. It reads `this.MyMoney.Categories.ReParent(...)`, so it needs a properly
     parented `Transaction` (see the `new Transaction()` gotcha above).
+  - `Category.ToString()` returns `Category.Name` (the full colon-separated path). A `TreeItem`
+    bound to a `Category` (Categories panel) gets its automation `Name` from `ToString()` when no
+    explicit `AutomationProperties.Name` is set - so a tree item's real UIA name is
+    `"Fun:Movies"`, not the `Label` ("Movies") its `TextBlock` visibly displays (that leaf text
+    only shows up as a separate nested `Text` element's own `Name`). Search `TreeItem`s by the
+    full dotted name, not the visible label. Discovered 2026-09-19 writing `CategoriesFlaUiTests.cs`.
   - `Category.OnDelete()` (base `PersistentObject.OnDelete()`) is a **soft delete** - it only
     flips `ChangeType` to `Deleted`, firing a change event. It does **not** remove the category
     from `Categories`'s internal dictionary/`Count`; that's what `Categories.RemoveCategory(c)`
