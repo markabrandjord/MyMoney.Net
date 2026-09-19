@@ -125,3 +125,19 @@ scenario tests, project dependency diagram). Quick reference:
   `Categories.GetOrCreateCategory("Fun:Movies", ...)` has `Name == "Fun:Movies"` and
   `Label == "Movies"`, not `Name == "Movies"` — easy to assume backwards. Discovered
   2026-09-18.
+
+- **`new Transaction()` (the parameterless constructor) leaves `.MyMoney` permanently `null`,
+  even after `money.Transactions.AddTransaction(t)`.** `Transaction.MyMoney`'s getter walks
+  `this.Parent as Transactions` → `parent.Parent as MyMoney`, and `Parent` is only set by
+  `PersistentObject(PersistentContainer container)` — the constructor
+  `Transaction(Transactions container) : base(container)` — never by `AddTransaction`, which
+  just inserts into the internal dictionary (`this.transactions[t.Id] = t`) without touching
+  `Parent`. Any business-layer code that reads `t.MyMoney` (e.g. `AutoCategorization.
+  AutoCategoryMatch`, which calls `t.MyMoney.Transactions.GetTransactionsFrom(...)`) throws
+  `NullReferenceException` on a transaction built the parameterless way, even one already added
+  via `AddTransaction`. Fix: always construct test transactions via
+  `new Transaction(money.Transactions)` (matching production's own `Transactions.NewTransaction
+  (Account a)`, which does exactly this), not `new Transaction()`. Discovered 2026-09-19 writing
+  `AutoCategorizationTests.cs` — confirmed by reading `AutoCategoryMatch`'s real logic rather
+  than patching around the symptom, per this migration's own "characterization testing, don't
+  silently fix code to match a guessed test" rule.
