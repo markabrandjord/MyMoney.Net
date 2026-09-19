@@ -111,6 +111,28 @@ parsing/download. For these, before writing tests:
    batch of tests for one API — not a hard gate, but a cheap way to catch a branch that was
    *designed* to be hit but whose test data didn't actually reach it.
 
+**FlaUI test session lifecycle (shared app instance, per-test data isolation).** Launching the
+WPF app is the expensive part (several seconds cold start); opening/closing a database within
+an already-running app is fast. So the app itself is launched once per section, not once per
+test, while each test still gets its own scratch fixture copy:
+
+- All of Basics' FlaUI test classes live in a new namespace (e.g. `Walkabout.UITests.Basics`),
+  separate from the existing `Walkabout.UITests.PayeeSelectionTests` so this doesn't touch or
+  risk that file.
+- A `[SetUpFixture]` class in that namespace does `[OneTimeSetUp]` (launch the app once with
+  `/nosettings`, create the `UIA3Automation`, get the main window — before any test in the
+  namespace runs) and `[OneTimeTearDown]` (close the app, dispose automation — once, after
+  every test in the namespace has finished).
+- Each individual `[Test]`'s own `[SetUp]`/`[TearDown]` handles per-test isolation within that
+  shared session: `[SetUp]` copies `BasicsFixture.mmdb` to a scratch path, registers it, opens
+  it via File\|Open against the already-running app; `[TearDown]` closes the database
+  (answering "don't save" to any prompt) and deletes the scratch file + registry entry, so the
+  next test starts from a clean "no database open" state without relaunching the process.
+
+This generalizes past Basics without redesign — a later section's FlaUI test classes either
+join the same `[SetUpFixture]`-managed session or get their own namespace-scoped one, following
+the same shape.
+
 **Deferred, not part of this pass:** a randomized/property-based approach (random sequence of
 add/update/delete/query operations against a dynamically-tracked shadow model of "what the
 state should be," ending in a full reset) is a legitimate but materially heavier technique —
