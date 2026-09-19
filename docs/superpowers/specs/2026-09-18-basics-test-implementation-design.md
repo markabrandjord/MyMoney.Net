@@ -147,6 +147,26 @@ This generalizes past Basics without redesign — a later section's FlaUI test c
 join the same `[SetUpFixture]`-managed session or get their own namespace-scoped one, following
 the same shape.
 
+**Standard dialog-lifecycle scenarios (applied to every dialog, in addition to its specific
+scenarios).** FlaUI has full visibility into the automation tree — what's in a control, what a
+dialog's title/state is, what a query returns before and after an action — so every dialog
+scenario gets these generic checks alongside its specific business scenario(s), not instead of
+them:
+
+1. **Cancel closes without side effects** — open the dialog, enter data, click Cancel; re-query
+   the underlying state and assert it's identical to before the dialog opened.
+2. **Title-bar Close (X) behaves like Cancel** — same as above, using the standard window Close
+   button instead of the dialog's own Cancel button.
+3. **OK/Save applies exactly what was entered** — open the dialog, enter data, click OK/Save;
+   re-query and assert the state now matches exactly what was entered (this overlaps with each
+   subsection's specific scenario tests, which already cover the successful-save path in more
+   detail — the point of listing it here is to confirm the Cancel/Close tests above have a
+   contrasting "did apply" case to compare against, not to duplicate that coverage).
+
+Where the same dialog shape recurs (e.g. several dialogs in this catalog follow a simple
+enter-fields/OK-or-Cancel pattern), a shared helper method for the Cancel/Close checks is
+worth writing once and reusing, rather than rewriting the same three assertions per dialog.
+
 **Deferred, not part of this pass:** a randomized/property-based approach (random sequence of
 add/update/delete/query operations against a dynamically-tracked shadow model of "what the
 state should be," ending in a full reset) is a legitimate but materially heavier technique —
@@ -168,13 +188,11 @@ possible future addition, not built into these ~35 scenario tests.
    per test (see "Test content conventions" below — never a checked-in binary), `DatabaseRegistry`
    registration/cleanup, `[TearDown]` cleanup.
 4. **Run the FlaUI test.** Fully automated, self-driving — the test code performs every
-   interaction (`Keyboard.Type`, clicks, dialog dismissal) itself, no human present or
-   watching. This requires a real interactive Windows desktop session to execute against
-   (a Windows UI Automation constraint, not a design choice); it cannot run from this
-   background-job environment (confirmed by the earlier whole-solution-test-run hang). Once
-   written, running it is a single unattended `dotnet test Source/WPF/UITests/UITests.csproj
-   --filter "..."` invocation on a machine with an interactive session — see "FlaUI execution
-   environment" below for how that invocation actually happens.
+   interaction (`Keyboard.Type`, clicks, dialog dismissal) and every assertion (reading control
+   values via UI Automation) itself, no human present or watching. The very first run of the
+   very first Basics FlaUI test happens with the user present to bootstrap the environment (see
+   "FlaUI execution environment" below); every run after that, I invoke `dotnet test
+   Source/WPF/UITests/UITests.csproj --filter "..."` myself with no assistance needed.
 5. **Update the tracking doc's Status column** for every scenario touched in this subsection —
    `Written` with the test file name, or `Passing` with today's date once the live FlaUI run
    confirms it, or `Business-layer gap (deferred — issue #NN)` / `Not automatable in this
@@ -298,28 +316,26 @@ Status → next subsection → end-of-section retro) carries over unchanged.
 
 ## FlaUI execution environment
 
-FlaUI tests are fully automated — no human clicks, types, or watches during a run — but
-Windows UI Automation requires a real interactive desktop session to attach to, which this
-background-job environment doesn't have (confirmed by the earlier whole-solution `dotnet test`
-hang: the app opened a dialog with no interactive session able to display or dismiss it). This
-is a Windows-API-level constraint, not something solvable by writing the tests differently.
+FlaUI tests are fully automated — no human clicks, types, or watches during a run — and use
+FlaUI's own UI Automation introspection (reading control values, confirming a dialog's
+presence/absence, confirming a button's effect on the underlying data) to make real assertions,
+not just "no exception was thrown."
 
-Practical consequence: I can write and hand off the FlaUI test files, but I cannot invoke
-`dotnet test Source/WPF/UITests/UITests.csproj` myself from this session and see it run to
-completion. Someone/something with access to a real interactive Windows session needs to run
-that command — once — and it completes fully unattended (no interaction needed during the
-run itself, just like any other `dotnet test` invocation). Options for *what* triggers that
-run, to be settled before Basics' first FlaUI test is written (not a blocker to the
-business-layer half of each subsection):
+**Bootstrapping (one time only):** the first FlaUI test run happens with the user present, to
+work through any first-run environment issues (window focus/`SetForeground` behavior,
+`DatabaseRegistry` paths, an unexpected dialog the test doesn't yet know how to handle). This
+is a one-time debugging session, not ongoing involvement — an earlier whole-solution `dotnet
+test` run did hang once during unattended dispatch (the app opened a dialog nothing answered),
+but that was a different incident's environment and hasn't been re-verified for this specific
+setup; rather than assume it's a hard wall here too, the first joint run establishes whether
+it's a real constraint or something fixable in the test code (e.g. handling a dialog the test
+didn't anticipate).
 
-1. You run the command yourself on your own machine, whenever convenient — not "watching a
-   test," just starting a normal test run and reading the result afterward, same as any other
-   test suite.
-2. A scheduled task on your machine (auto-logon, unlocked session) runs it on a cadence,
-   fully hands-off after initial setup.
-3. Reinstating a self-hosted CI runner scoped safely for this — bigger infrastructure decision
-   than this pass warrants, given the project deliberately moved off self-hosted CI for the
-   public-repo safety reasons noted earlier in this project's history; not proposed here.
+**After bootstrapping:** I run `dotnet test Source/WPF/UITests/UITests.csproj --filter "..."`
+myself, autonomously, with no human interaction required — same as running the business-layer
+suite. If a genuine environment obstacle surfaces during bootstrapping that can't be fixed in
+the test code, we'll revisit execution options at that point rather than pre-planning around a
+constraint that hasn't actually been confirmed for this setup.
 
 ## Testing/tooling notes
 
