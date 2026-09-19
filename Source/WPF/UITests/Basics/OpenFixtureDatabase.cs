@@ -44,5 +44,43 @@ namespace Walkabout.UITests.Basics
                 () => mainWindow.Title.IndexOf(registeredName, StringComparison.OrdinalIgnoreCase) >= 0,
                 TimeSpan.FromSeconds(10));
         }
+
+        /// <summary>
+        /// Selects an account in the left Accounts panel so its transaction register renders in
+        /// the grid. Opening a database does NOT auto-select an account or show any register -
+        /// confirmed by dumping the automation tree after Open() with nothing selected: the
+        /// DataGrid has column headers but zero DataItem rows, and the Accounts panel's account
+        /// ListItems ("Basics Checking" etc., AutomationId = account name) aren't even in the
+        /// tree until its collapsible "AccountsSelector" section (MainWindow.xaml.cs's toolBox)
+        /// is expanded via its "HeaderSite" button (a plain Button - Invoke pattern throws
+        /// InvalidOperationException, use Click() instead).
+        /// The BasicsAppSession app/window is reused across every test in a fixture (one launch
+        /// per [SetUpFixture]), so a section expanded by an earlier test stays expanded - this
+        /// probes for the account item first before clicking, rather than blindly toggling
+        /// (which would re-collapse an already-expanded section).
+        /// </summary>
+        internal static void SelectAccount(Window mainWindow, string accountName)
+        {
+            AutomationElement accountItem = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId(accountName)),
+                TimeSpan.FromSeconds(1)).Result;
+
+            if (accountItem == null)
+            {
+                AutomationElement accountsSelector = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsSelector"));
+                Assert.That(accountsSelector, Is.Not.Null, "AccountsSelector section not found.");
+                AutomationElement headerSite = accountsSelector.FindFirstDescendant(cf => cf.ByAutomationId("HeaderSite"));
+                Assert.That(headerSite, Is.Not.Null, "AccountsSelector's HeaderSite (expand/collapse) button not found.");
+                headerSite.Click();
+
+                accountItem = Retry.WhileNull(
+                    () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId(accountName)),
+                    TimeSpan.FromSeconds(5)).Result;
+            }
+
+            Assert.That(accountItem, Is.Not.Null, $"Account '{accountName}' not found in the Accounts panel.");
+            accountItem.Patterns.SelectionItem.Pattern.Select();
+            Wait.UntilInputIsProcessed();
+        }
     }
 }

@@ -141,3 +141,45 @@ scenario tests, project dependency diagram). Quick reference:
   `AutoCategorizationTests.cs` — confirmed by reading `AutoCategoryMatch`'s real logic rather
   than patching around the symptom, per this migration's own "characterization testing, don't
   silently fix code to match a guessed test" rule.
+
+- **`Transactions.ExecuteQuery` and `QuickFilterParser`/`Filter<T>` gotchas, found writing
+  `QuickSearchQueryTests.cs`:**
+  - `ExecuteQuery(QueryRow[])` lives on `MyMoney.Transactions` (`money.Transactions.ExecuteQuery(...)`),
+    not on `MyMoney` itself, despite how it reads in passing references.
+  - `QueryRow.Matches(decimal)`'s `Operation.GreaterThan` case is implemented as `value >=
+    TryParseDecimal(...)` (i.e. inclusive, same as `GreaterThanEquals`) — read `Query.cs` before
+    assuming a `>` query excludes the boundary value.
+  - `Transaction.Matches(QueryRow)`'s `Field.Payment` case returns `q.Matches(-this.Amount)` only
+    when `Amount <= 0` (and `false` otherwise) — Payment is always compared as a positive number.
+  - The only concrete `FilteredObservableCollection<Transaction>` subclass is `TransactionCollection`
+    in `MyMoney/Views/TransactionsView.xaml.cs` (WPF project, not `MyMoney.Business` — `UnitTests`
+    already references `MyMoney.csproj` directly, so this is fine to use from a test). Its
+    constructor takes an already-materialized `IEnumerable<Transaction>` — passing the raw
+    `Transactions` container itself throws `NotImplementedException` from
+    `Transactions.CopyTo(Transaction[], int)`, an unimplemented `ICollection<Transaction>` member
+    that `ObservableCollection<T>`'s constructor calls when its source is an `ICollection<T>`. No
+    production code path hits this since every real call site already passes a materialized list
+    (e.g. `GetSelectedTransactions()`); use `money.Transactions.GetTransactionsFrom(account)` (or
+    similar) in tests instead of the container.
+
+- **Opening a database does not select or display any account's register.** The Accounts panel
+  (`MainWindow.xaml.cs`'s `toolBox.Add("ACCOUNTS", "AccountsSelector", ...)`) starts collapsed —
+  its account `ListItem`s (`AutomationId` = the account's name) aren't even in the UIA tree until
+  the section's `HeaderSite` button is clicked (a plain `Button`; `Invoke` pattern throws
+  `InvalidOperationException` there, use `Click()`) — and even once visible, no account is
+  auto-selected, so the transaction `DataGrid` (`AutomationId="TheGrid_BankTransactionDetails"`)
+  renders zero `DataItem` rows (just column headers) until one is explicitly selected via
+  `SelectionItem.Pattern.Select()`. `Source/WPF/UITests/Basics/OpenFixtureDatabase.SelectAccount`
+  does this (idempotently, since the app/window is reused across every test in a `[SetUpFixture]`
+  session, so a section an earlier test expanded stays expanded). Also: the `DataGrid` always
+  renders one extra `{NewItemPlaceholder}` `DataItem` for its add-new-row affordance regardless of
+  filtering — real transaction rows are the ones whose `Name` starts with `"Transaction:"`.
+  Discovered 2026-09-19 writing `QuickSearchFlaUiTests.cs`.
+
+- **`QuickFilterControl`'s Quick Search box only applies its filter on a literal Enter keypress**
+  (`OnTextBox_KeyUp` checks `e.Key == Key.Enter`) — `TextChanged` alone (fired on every keystroke)
+  only toggles the clear-filter (✕) button's visibility, it does not touch the actual filter.
+  FlaUI's `AsTextBox().Enter(text)` (despite the name) only types the text via simulated keyboard
+  input; it does not itself send an Enter keypress. Fix: follow it with
+  `FlaUI.Core.Input.Keyboard.Type(FlaUI.Core.WindowsAPI.VirtualKeyShort.ENTER)`. Discovered
+  2026-09-19 writing `QuickSearchFlaUiTests.cs`.
