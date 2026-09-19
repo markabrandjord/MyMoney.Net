@@ -90,6 +90,27 @@ and FlaUI tests (against one scratch fixture copy). Read-only/pure-computation s
 (`AutoCategorization`, `QuickFilterParser`) don't need this shape — they already fit the
 existing input-in/value-out unit test pattern.
 
+**Code-path-driven design for transformation/generation APIs.** The CRUD-lifecycle shape
+above fits entity persistence (Categories, Payees, Splits, ...). It doesn't fit APIs whose job
+is producing an artifact or running a pipeline — exporters (XML/CSV/PDF/TXF), importers, Ofx
+parsing/download. For these, before writing tests:
+
+1. Read the API's actual implementation and enumerate its distinct code paths: one per output
+   format/success branch, one per validation/error condition, one per malformed-input handling
+   branch. The tracking doc's scenario rows are the starting point, not the full list — reading
+   the source usually surfaces branches no scenario description mentions (e.g. an exporter's
+   empty-input special case, or a specific `OfxErrorCode` dispatch branch).
+2. Design one test per enumerated branch, with input data deliberately shaped to hit that exact
+   branch — not input reused loosely across multiple "similar" tests.
+3. Assert precisely: for a success branch, that the produced artifact is actually well-formed
+   for that path (valid XML shape, correct TXF record format, expected byte content) — not just
+   "no exception was thrown." For an error branch, assert the specific error/exception
+   type/error code expected, not a generic `Assert.Throws<Exception>`.
+4. Since `coverlet.collector` is already referenced in `UnitTests.csproj`, spot-check with
+   `dotnet test Source/WPF/UnitTests/UnitTests.csproj --collect:"XPlat Code Coverage"` after a
+   batch of tests for one API — not a hard gate, but a cheap way to catch a branch that was
+   *designed* to be hit but whose test data didn't actually reach it.
+
 **Deferred, not part of this pass:** a randomized/property-based approach (random sequence of
 add/update/delete/query operations against a dynamically-tracked shadow model of "what the
 state should be," ending in a full reset) is a legitimate but materially heavier technique —
