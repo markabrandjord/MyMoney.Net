@@ -24,6 +24,36 @@ user input to that API correctly. Update the tracking doc's `Status` column as e
 At the end of the section, do a short retro on whether the catalog itself held up (accurate
 descriptions, no missing gaps, no rows that needed splitting).
 
+## Testing responsibility by layer
+
+This catalog spans two layers (UI, business), and a third (data) already has its own
+established test suite from earlier work — keeping each layer's tests scoped to what only that
+layer can prove is what makes "don't duplicate coverage" (below) enforceable rather than just
+aspirational:
+
+- **UI layer (FlaUI).** Tests that the UI correctly hands entered values to the business-layer
+  API, correctly displays whatever the business layer returns, and correctly handles whatever
+  the business layer signals back — an error (`IBusinessLayerUiCallback.ShowError` and friends),
+  a confirmation prompt, an event/callback invocation — by showing the right dialog/state, not
+  silently swallowing it or crashing. Does **not** re-verify that the business layer's computed
+  values are themselves correct — that's a business-layer test's job (see "Predicted results"
+  above: the FlaUI test gets its expected value *from* the business-layer API, it doesn't
+  re-derive correctness independently at this layer).
+- **Business layer.** Tests that (a) computed results are correct — the actual logic/algorithms
+  (CRUD-lifecycle shape, code-path-driven design, both above), (b) calls made *to* the data
+  layer are correct — `MockDatabase`-backed tests confirming the right entities/values reach
+  `SaveOne`/`SaveBatch`/etc., and (c) when the data layer signals an error or event back, the
+  business layer handles it correctly. `MockDatabase` already supports forcing this — it can be
+  configured to throw a `ConcurrencyConflictException` on every save (`MockDatabase.cs:269`) —
+  so business-layer tests should include cases exercising that, asserting the business layer's
+  actual response (propagate, wrap, surface via a callback), not just the happy-path save.
+  Does **not** re-verify the data layer's persistence mechanics themselves.
+- **Data layer.** Tests that `SqliteDatabase`/`SqlServerDatabase`/`XmlStore`/`CsvStore` actually
+  implement the `IDatabase` contract correctly. Already covered by the existing
+  `DatabaseContractTests`/dual-engine suite from the persistence-concurrency phase 2 work —
+  out of scope for this catalog entirely (the tracking doc's scenarios are UI + business layer
+  only; a scenario never needs a new data-layer test, only to lean on what already exists there).
+
 ## Non-goals (this pass)
 
 - **New extraction work.** Several Basics rows are `Business-layer gap` because the logic
