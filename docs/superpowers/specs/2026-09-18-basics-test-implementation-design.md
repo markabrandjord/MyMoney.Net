@@ -43,6 +43,59 @@ descriptions, no missing gaps, no rows that needed splitting).
   FlaUI patterns), not architecturally risky work — the user reviews each subsection directly
   before moving to the next.
 
+## Test content conventions (isolation + thoroughness)
+
+Two separate concerns, solved separately:
+
+**Isolation (idempotent, order-independent, re-runnable any number of times).**
+Business-layer tests already get this for free — every existing test (`ExportersTests.cs`,
+etc.) constructs a fresh in-memory `new MyMoney()` per test method, so there's no shared or
+persisted state to leave behind. FlaUI tests are the real risk: `MainWindow` doesn't autosave
+(confirmed — writes only happen on explicit File\|Save or on a dirty-database close prompt,
+`MainWindow.xaml.cs:5011`'s `OnClosing` → `SaveIfDirty()`), so a FlaUI test that mutates data
+and then just closes the app risks either blocking on an unanswered save prompt or, if
+answered "Yes," permanently drifting the checked-in fixture. The fix: **every FlaUI test
+copies the checked-in `BasicsFixture.mmdb` to a scratch temp path at the start of the test,
+registers the scratch copy (never the original) in `DatabaseRegistry`, and deletes the scratch
+file + registry entry in `[TearDown]` regardless of pass/fail.** The checked-in fixture is
+never mutated, so isolation holds even if a test fails partway through — there's no partial
+state to accumulate, unlike a manual "undo my own mutation" approach would risk.
+
+**Thoroughness (any test that exercises an entity's persistent lifecycle).** Where a scenario
+adds, updates, or deletes a record, structure the test as a full round trip, not a single
+assertion:
+
+1. Query first — confirm the starting count is what's expected (0, or a known N from seeded
+   fixture/setup data).
+2. Add the record(s) — with a **valid** input, confirm success and re-query to confirm the
+   count increased by exactly the expected amount.
+3. Add/update with an **invalid** input (where the API has real validation to test) — confirm
+   the operation is rejected (exception, or whatever failure signal the API actually uses) and
+   that the record count/state is unchanged afterward. Skip this step for rows the tracking
+   doc already flags as having no validation seam (e.g. `Currency`'s silent-fallback case,
+   account-number truncation) — those get a test asserting the *actual* (non-rejecting)
+   behavior instead, so the test documents reality rather than an aspirational contract.
+4. Update the record(s) — confirm the update took (re-query and check the changed field), not
+   just that no exception was thrown.
+5. Query with a filter/condition designed against known seeded data to return an **exact**
+   count (e.g. "exactly 3 categories under this parent," "exactly 1 payee matching this
+   alias") — not a loose `Is.Not.Empty`/`Is.GreaterThan(0)` check. Exact counts catch a query
+   silently over- or under-matching in a way a non-empty check would miss.
+6. Delete the record(s) — re-query and confirm the count returns to 0 (or the pre-test
+   baseline), proving delete actually removed data rather than just not throwing.
+
+This is the shape for any test touching persistent entities (Categories, Payees, Aliases,
+Splits, Currencies, etc.) in both business-layer tests (within one fresh in-memory `MyMoney`)
+and FlaUI tests (against one scratch fixture copy). Read-only/pure-computation scenarios
+(`AutoCategorization`, `QuickFilterParser`) don't need this shape — they already fit the
+existing input-in/value-out unit test pattern.
+
+**Deferred, not part of this pass:** a randomized/property-based approach (random sequence of
+add/update/delete/query operations against a dynamically-tracked shadow model of "what the
+state should be," ending in a full reset) is a legitimate but materially heavier technique —
+a model-based stress-test harness, not a scenario test. Logged under Open Questions below as a
+possible future addition, not built into these ~35 scenario tests.
+
 ## Process (applies to every subsection, in every section)
 
 1. **Business-layer tests first.** For each scenario in the subsection whose row names a real,
@@ -54,7 +107,8 @@ descriptions, no missing gaps, no rows that needed splitting).
    "..."` — safe to run unattended. Confirm green before moving on.
 3. **FlaUI test second**, only for scenarios whose business-layer half is now covered (or
    never had one — e.g. a pure UI toggle). Follow `PayeeSelectionTests.cs`'s conventions:
-   `FlaUI.Core`/`FlaUI.UIA3`, NUnit, the shared Basics fixture (below), `DatabaseRegistry`
+   `FlaUI.Core`/`FlaUI.UIA3`, NUnit, a scratch copy of the shared Basics fixture per test (see
+   "Test content conventions" below — never the checked-in file directly), `DatabaseRegistry`
    registration/cleanup, `[TearDown]` cleanup.
 4. **Run the FlaUI test live**, with the user watching, using real `Keyboard.Type` +
    deliberate pauses + `SetForeground` (not instant `SetValue`) per the established
@@ -101,6 +155,11 @@ with enough data to cover most Basics scenarios in a single file (mirrors
 
 Business-layer tests do **not** use this fixture — they build their own minimal in-memory
 `MockDatabase`/`MyMoney` state per the existing convention, one setup per test class.
+
+FlaUI tests never open `BasicsFixture.mmdb` directly — each test copies it to a scratch temp
+path at the start of the test, registers the scratch copy in `DatabaseRegistry`, and deletes
+the scratch file + registry entry in `[TearDown]` (see "Test content conventions" above). The
+checked-in fixture itself is read-only from the test suite's perspective.
 
 ### Subsections, in implementation order
 
@@ -174,3 +233,9 @@ Status → next subsection → end-of-section retro) carries over unchanged.
   the Splits & Transfers business-layer tests, not a blocker to starting.
 - Attachments' `AttachmentManager` extraction is deferred to a follow-up issue, filed once this
   section reaches that subsection (not filed speculatively now).
+- A randomized/property-based test harness (random add/update/delete/query sequences against a
+  dynamically-tracked shadow model of expected state, ending in a full reset to a known state)
+  was considered as a way to stress-test persistence beyond fixed scenarios. Legitimate future
+  idea, but a materially heavier effort than scenario testing — not part of this pass. Worth
+  revisiting once several sections' worth of scenario tests exist and a stress-test layer on
+  top of them would add real value beyond what the scenario tests already catch.
