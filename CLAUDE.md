@@ -257,6 +257,22 @@ scenario tests, project dependency diagram). Quick reference:
   never called for it) - a test asserting a new alias was *created* here would be testing the
   wrong branch. Discovered 2026-09-19 writing `PayeesFlaUiTests.cs`.
 
+- **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
+  - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
+    split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an
+    empty method, and `Splits.AddSplit`'s `InsertItem` only fires property-changed notifications,
+    never `Rebalance()`. A direct business-layer caller must call `Splits.Rebalance()` explicitly;
+    real UI code only works because WPF's grid plumbing happens to trigger it eventually.
+  - **`MyMoney.RemoveTransfer(Transaction t)` does NOT remove both sides of a transfer** - read
+    `RemoveTransfer(Transfer t)`'s real logic: it only calls `RemoveTransaction` on the *other*
+    side (the transfer's linked `Transaction`, called "target" in the source); the side you called
+    it on just has its own `Transfer` link cleared (`t.Transfer = null`) and survives as an
+    ordinary, non-transfer transaction. Don't assume symmetric deletion.
+  - Removing a transfer whose *other* side is `TransactionStatus.Reconciled` throws
+    `MoneyException("Transfer is reconciled on the other side and cannot be modified outside of
+    balancing the target account.")` (found in `RemoveTransfer(Transfer t)`) - a real exception,
+    not a bool result or silent no-op, and it's checked before either side is touched.
+
 - **`QuickFilterControl`'s Quick Search box only applies its filter on a literal Enter keypress**
   (`OnTextBox_KeyUp` checks `e.Key == Key.Enter`) — `TextChanged` alone (fired on every keystroke)
   only toggles the clear-filter (✕) button's visibility, it does not touch the actual filter.
