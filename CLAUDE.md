@@ -335,6 +335,19 @@ scenario tests, project dependency diagram). Quick reference:
     target account was deleted), it returns `false` immediately without merging any field at all,
     even ones the survivor is missing.
 
+- **The duplicate-connector's "Merge" button has no `AutomationId`** - `TransactionConnectorAdorner`
+  (`TransactionsView.xaml.cs`) creates it in code as a plain `RoundedButton` with
+  `Content = "Merge"` and never sets `AutomationProperties.AutomationId`; find it via
+  `ByControlType(Button).And(ByName("Merge"))` instead (a WPF `Button`'s automation `Name`
+  defaults to its `Content` when it's a plain string). It renders inside a WPF `Adorner`
+  (`AdornerLayer` overlay), not the normal element tree, but is still discoverable via a normal
+  `FindFirstDescendant` walk from the main window - adorners are still part of the same visual
+  tree UIA walks. It auto-appears (no explicit "select the row" step needed) via a
+  `DispatcherTimer`-delayed `ShowPotentialDuplicates`, once whatever transaction is currently
+  selected has a nearby `FindPotentialDuplicate` match - confirmed in this repo's Basics fixture,
+  where the grid's default selection already lands on one of the two seeded `TARGET T-1234`
+  duplicates as soon as the account opens.
+
 - **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
   - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
     split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an
