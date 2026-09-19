@@ -79,22 +79,6 @@ namespace Walkabout.Tests
         }
 
         [Test]
-        public void Build_ReturnsExpectedCurrencyAndBankAccountShape()
-        {
-            MyMoney money = BasicsFixtureBuilder.Build();
-
-            Assert.That(money.Currencies.Count(), Is.EqualTo(10), "Expected exactly 10 non-USD currency rows (EUR, CAD, GBP, JPY, AUD, CHF, MXN, INR, BRL, CNY).");
-
-            Currency eur = money.Currencies.FirstOrDefault(c => c.Symbol == "EUR");
-            Assert.That(eur, Is.Not.Null);
-            Assert.That(eur.Ratio, Is.EqualTo(0.870649M));
-
-            Account italianBankAccount = money.Accounts.FirstOrDefault(a => a.Currency == "EUR");
-            Assert.That(italianBankAccount, Is.Not.Null, "Expected one account denominated in EUR, linked to an Italian bank.");
-            Assert.That(italianBankAccount.Description, Does.Contain("Intesa Sanpaolo"));
-        }
-
-        [Test]
         public void Build_IsFreshEveryCall()
         {
             MyMoney first = BasicsFixtureBuilder.Build();
@@ -219,37 +203,13 @@ namespace Walkabout.Data
             dupB.FITID = "FID-B";
             money.Transactions.AddTransaction(dupB);
 
-            // Currencies & Securities: 10 non-USD currency rows plus one bank-linked account
-            // per currency, using a real, fixed exchange-rate snapshot and real public bank
-            // contact info as the source for realistic (not arbitrary) constants - per
-            // docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md's
-            // "Predicted results" convention, these are fixed values baked in at
-            // plan-writing time, not a live fetch embedded in test code, so the fixture stays
-            // deterministic across every run. Snapshot source: x-rates.com USD table dated
-            // Jan 1, 2026 06:18 UTC (real currency-pair magnitudes, not invented numbers -
-            // the specific date doesn't matter for test purposes, only that the relative
-            // values are realistic). Bank contact info from each bank's own published
-            // head-office address/phone, gathered via WebSearch on 2026-09-18.
-            AddCurrencyWithBankAccount(money, "EUR", 0.870649M, "Intesa Sanpaolo",
-                "Piazza San Carlo 156, 10121 Turin, Italy", "+39 011 5551");
-            AddCurrencyWithBankAccount(money, "CAD", 1.398494M, "Royal Bank of Canada",
-                "200 Bay Street, Royal Bank Plaza, Toronto, ON M5J 2J5, Canada", "(416) 974-5151");
-            AddCurrencyWithBankAccount(money, "GBP", 0.746607M, "HSBC",
-                "8 Canada Square, Canary Wharf, London, E14 5HQ, United Kingdom", "+44 20 7991 8888");
-            AddCurrencyWithBankAccount(money, "JPY", 156.885957M, "MUFG Bank",
-                "2-7-1 Marunouchi, Chiyoda, Tokyo 100-8388, Japan", "+81 3-3240-1111");
-            AddCurrencyWithBankAccount(money, "AUD", 1.403242M, "Commonwealth Bank of Australia",
-                "Tower 1, 201 Sussex Street, Sydney NSW 2000, Australia", "(02) 9378 2000");
-            AddCurrencyWithBankAccount(money, "CHF", 0.822901M, "UBS",
-                "Bahnhofstrasse 45, 8001 Zurich, Switzerland", "+41 44 234 11 11");
-            AddCurrencyWithBankAccount(money, "MXN", 17.229844M, "BBVA Mexico",
-                "Av. Paseo de la Reforma 510, Colonia Juarez, 06600 Mexico City, Mexico", "+52 55 5621 3434");
-            AddCurrencyWithBankAccount(money, "INR", 96.008501M, "State Bank of India",
-                "State Bank Bhavan, Madam Cama Road, Mumbai 400021, India", "022 2274 1216");
-            AddCurrencyWithBankAccount(money, "BRL", 5.143522M, "Banco do Brasil",
-                "SBS Qd. 1 Bloco C, Edificio Sede III, 70073-901 Brasilia DF, Brazil", "+55 61 3310 3400");
-            AddCurrencyWithBankAccount(money, "CNY", 6.701622M, "Industrial and Commercial Bank of China",
-                "55 Fuxingmennei Street, Xicheng District, Beijing 100140, China", "+86 10 6610 6114");
+            // Currencies & Securities: BasicsFixtureBuilder stays lean here deliberately - the
+            // real exchange-rate snapshot and bank contact info gathered for this plan live in
+            // Task 6 (CurrenciesTests.cs) and Task 7 (CurrenciesFlaUiTests.cs) as test-routine-
+            // local data instead, per the user's explicit correction: this data is only
+            // relevant to the Currencies subsection, so it belongs in that subsection's own
+            // test transactions, not baked into the shared builder every other subsection's
+            // tests also carry around. See Task 6/7 below for where it actually lives.
 
             // Auto-Categorization: payee history at a known amount, for suggestion scenarios.
             var groceryPayee = money.Payees.AddPayee(4);
@@ -264,25 +224,9 @@ namespace Walkabout.Data
 
             return money;
         }
-
-        private static void AddCurrencyWithBankAccount(MyMoney money, string symbol, decimal usdRatio,
-            string bankName, string bankAddress, string bankPhone)
-        {
-            int nextCurrencyId = money.Currencies.Count() + 1;
-            var currency = money.Currencies.AddCurrency(nextCurrencyId);
-            currency.Symbol = symbol;
-            currency.Ratio = usdRatio;
-
-            var account = money.Accounts.AddAccount($"{bankName} ({symbol})");
-            account.Type = AccountType.Checking;
-            account.Currency = symbol;
-            account.Description = $"{bankName}, {bankAddress}, {bankPhone}";
-        }
     }
 }
 ```
-
-Add `using System.Linq;` to this file's using directives (needed for `money.Currencies.Count()`).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1156,11 +1100,66 @@ namespace Walkabout.Tests
             Assert.That(removed, Is.True);
             Assert.That(money.Currencies.Count, Is.EqualTo(countBefore - 1));
         }
+
+        // Real, fixed exchange-rate snapshot (x-rates.com USD table, Jan 1 2026 06:18 UTC) and
+        // real public bank head-office info (gathered via WebSearch, 2026-09-18), used as test
+        // transaction data for this subsection only - per the user's explicit correction, this
+        // does NOT live in the shared BasicsFixtureBuilder (every other subsection's tests
+        // would otherwise carry it around for no reason). Split 5/5 with Task 7's FlaUI test:
+        // this business-layer test covers EUR/CAD/GBP/JPY/AUD; Task 7 covers the other 5.
+        [Test]
+        public void MultiCurrencyTransactions_ComputeCorrectUsdEquivalent()
+        {
+            var money = new MyMoney();
+
+            (string Symbol, decimal UsdRatio, string BankName)[] currencyData =
+            {
+                ("EUR", 0.870649M, "Intesa Sanpaolo"),
+                ("CAD", 1.398494M, "Royal Bank of Canada"),
+                ("GBP", 0.746607M, "HSBC"),
+                ("JPY", 156.885957M, "MUFG Bank"),
+                ("AUD", 1.403242M, "Commonwealth Bank of Australia"),
+            };
+
+            foreach (var data in currencyData)
+            {
+                var currency = money.Currencies.AddCurrency(money.Currencies.Count + 1);
+                currency.Symbol = data.Symbol;
+                currency.Ratio = data.UsdRatio;
+
+                var account = money.Accounts.AddAccount($"{data.BankName} ({data.Symbol})");
+                account.Type = AccountType.Checking;
+                account.Currency = data.Symbol;
+
+                var payee = money.Payees.AddPayee(money.Payees.Count() + 1);
+                payee.Name = data.BankName;
+
+                var deposit = new Transaction();
+                deposit.Account = account;
+                deposit.Date = new System.DateTime(2026, 1, 1);
+                deposit.Amount = 1000.00M; // 1000 units of the foreign currency
+                deposit.Payee = payee;
+                money.Transactions.AddTransaction(deposit);
+
+                // Currency.Ratio is documented as "the current ratio of the given currency to
+                // the US dollar" (Money.cs:4563-4565), i.e. 1 USD = Ratio units of the foreign
+                // currency - so dividing the foreign-currency amount by Ratio gives the USD
+                // equivalent. This is the source-documented formula, not a guess.
+                decimal expectedUsdEquivalent = deposit.Amount / currency.Ratio;
+
+                Assert.That(account.Currency, Is.EqualTo(data.Symbol));
+                Assert.That(deposit.Amount / currency.Ratio, Is.EqualTo(expectedUsdEquivalent),
+                    $"USD equivalent for a {data.Symbol} 1000 deposit at {data.BankName} should compute via amount / ratio.");
+            }
+
+            Assert.That(money.Currencies.Count, Is.EqualTo(5));
+            Assert.That(money.Accounts.Count(a => a.Currency != null), Is.EqualTo(5));
+        }
     }
 }
 ```
 
-Note: `money.Currencies.Count(c => c.Symbol == "EUR")` requires `Currencies` to be `IEnumerable<Currency>` with LINQ available (`using System.Linq;`) — add that using directive if the build fails on this line.
+Note: `money.Currencies.Count(c => c.Symbol == "EUR")`-style LINQ calls require `using System.Linq;` — add it to this file's using directives if the build fails on ambiguous/missing `Count`/`FirstOrDefault` overloads (also check for an unrelated pre-existing ambiguity between `Enumerable.FirstOrDefault`/`Count` and `ImmutableArrayExtensions` if one surfaces — resolve by fully qualifying `System.Linq.Enumerable.Count(...)` at the call site if needed).
 
 - [ ] **Step 2: Run tests to verify they pass**
 
@@ -1181,17 +1180,131 @@ git commit -m "test: add Currencies business-layer tests (AddCurrency, RemoveCur
 - Create: `Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs`
 
 **Interfaces:**
-- Consumes: same shared FlaUI helpers as Tasks 3/5.
+- Consumes: same shared FlaUI helpers as Tasks 3/5. This task builds its own dedicated scratch
+  database (extending `BasicsFixtureBuilder`'s output with 5 more currency-denominated
+  accounts) rather than using the plain `BasicsTestSetup.OpenFreshDatabase` fixture as-is — see
+  Step 2.
 
 - [ ] **Step 1: Read the Currencies view's XAML to confirm automation IDs**
 
 Run: `find Source/WPF/MyMoney -iname "*Currenc*.xaml"` then `grep -n "AutomationId\|x:Name" <that file>`.
 
-- [ ] **Step 2: Write the failing FlaUI test**
+- [ ] **Step 2: Write the failing FlaUI tests, using the other 5 real currencies/banks (CHF, MXN, INR, BRL, CNY — the EUR/CAD/GBP/JPY/AUD half already went into Task 6's business-layer test)**
 
-Create `Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs` following `CategoriesFlaUiTests.cs`'s exact structure (`[SetUp]`/`[TearDown]` calling `BasicsTestSetup`, `OpenFixtureDatabase.Open` at the top of each test) with one test: navigate to View \| Currencies, add a new currency row with code "GBP" via the confirmed automation IDs from Step 1, and assert (source-derived: no such currency exists in the fresh fixture) that exactly one "GBP" row now appears in the grid.
+Create `Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs`:
 
-- [ ] **Step 3: Run the test, adjust automation IDs to match Step 1's real findings, run again until passing**
+```csharp
+using System;
+using System.IO;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Input;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UITests.Basics
+{
+    [TestFixture]
+    public class CurrenciesFlaUiTests
+    {
+        private (string ScratchPath, string RegisteredName) db;
+
+        // Real, fixed exchange-rate snapshot (x-rates.com USD table, Jan 1 2026 06:18 UTC) and
+        // real public bank head-office info (gathered via WebSearch, 2026-09-18) - the other 5
+        // of the 10 currencies/banks gathered for this plan, kept local to this FlaUI test
+        // rather than the shared BasicsFixtureBuilder per the user's explicit correction.
+        private static readonly (string Symbol, decimal UsdRatio, string BankName)[] CurrencyData =
+        {
+            ("CHF", 0.822901M, "UBS"),
+            ("MXN", 17.229844M, "BBVA Mexico"),
+            ("INR", 96.008501M, "State Bank of India"),
+            ("BRL", 5.143522M, "Banco do Brasil"),
+            ("CNY", 6.701622M, "Industrial and Commercial Bank of China"),
+        };
+
+        [SetUp]
+        public void SetUp()
+        {
+            string scratchPath = Path.Combine(Path.GetTempPath(), $"CurrenciesScratch-{Guid.NewGuid():N}.mmdb");
+            string displayName = "CurrenciesFlaUiTests Fixture";
+
+            MyMoney money = BasicsFixtureBuilder.Build();
+            foreach (var data in CurrencyData)
+            {
+                var currency = money.Currencies.AddCurrency(money.Currencies.Count + 1);
+                currency.Symbol = data.Symbol;
+                currency.Ratio = data.UsdRatio;
+
+                var account = money.Accounts.AddAccount($"{data.BankName} ({data.Symbol})");
+                account.Type = AccountType.Checking;
+                account.Currency = data.Symbol;
+            }
+
+            var sqliteDb = new SqliteDatabase();
+            sqliteDb.DatabasePath = scratchPath;
+            sqliteDb.Create();
+            sqliteDb.Save(money);
+
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = scratchPath,
+                TestDatabase = true
+            };
+            registry.Save();
+
+            this.db = (scratchPath, displayName);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BasicsTestSetup.CleanUpDatabase(this.db.ScratchPath, this.db.RegisteredName);
+        }
+
+        [Test]
+        public void CurrenciesView_ShowsAllFiveSeededCurrencyRows()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // Expected result is source-derived: this test seeded exactly 5 currency rows
+            // above (CHF, MXN, INR, BRL, CNY) - not observed from a prior run.
+            foreach (var data in CurrencyData)
+            {
+                AutomationElement row = Retry.WhileNull(
+                    () => mainWindow.FindFirstDescendant(cf => cf.ByName(data.Symbol)),
+                    TimeSpan.FromSeconds(5)).Result;
+                Assert.That(row, Is.Not.Null, $"Expected a '{data.Symbol}' row in the Currencies view.");
+            }
+        }
+
+        [Test]
+        public void AddingNewCurrencyRow_PersistsWithEnteredCode()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // "SEK" is deliberately not one of this test's 5 seeded currencies, so its
+            // expected pre/post state (0 rows, then exactly 1) is known in advance.
+            int sekRowsBefore = mainWindow.FindAllDescendants(cf => cf.ByName("SEK")).Length;
+            Assert.That(sekRowsBefore, Is.EqualTo(0));
+
+            // Navigate to View | Currencies and add a new row - exact automation IDs from Step 1.
+            // ... (interaction sequence using the AutomationIds confirmed in Step 1) ...
+
+            int sekRowsAfter = mainWindow.FindAllDescendants(cf => cf.ByName("SEK")).Length;
+            Assert.That(sekRowsAfter, Is.EqualTo(1));
+        }
+    }
+}
+```
+
+The second test's interaction sequence is intentionally left for Step 1's real automation IDs to fill in — write the actual `Keyboard.Type`/`Click` calls navigating to View \| Currencies and adding a row once those IDs are confirmed, following `CategoriesFlaUiTests.cs`'s interaction style (find control, click, type, `Wait.UntilInputIsProcessed()`).
+
+- [ ] **Step 3: Run the tests, fill in Step 2's interaction sequence and adjust automation IDs to match Step 1's real findings, run again until passing**
 
 Run: `dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~CurrenciesFlaUiTests"`
 
@@ -1199,7 +1312,7 @@ Run: `dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName
 
 ```bash
 git add Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
-git commit -m "test: add Currencies FlaUI wiring test (add currency row)"
+git commit -m "test: add Currencies FlaUI wiring tests using real CHF/MXN/INR/BRL/CNY snapshot data"
 ```
 
 ---
