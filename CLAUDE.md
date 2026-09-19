@@ -183,3 +183,20 @@ scenario tests, project dependency diagram). Quick reference:
   input; it does not itself send an Enter keypress. Fix: follow it with
   `FlaUI.Core.Input.Keyboard.Type(FlaUI.Core.WindowsAPI.VirtualKeyShort.ENTER)`. Discovered
   2026-09-19 writing `QuickSearchFlaUiTests.cs`.
+
+- **`Category`/`Categories` deletion gotchas, found writing `CategoriesTests.cs`:**
+  - `Transaction.ReCategorize(Category oldCategory, Category newCategory)` is a per-`Transaction`
+    instance method - there is no bulk "recategorize all transactions on this category" API.
+    The real production pattern (`CategoriesControl.xaml.cs`'s category-merge handler) is
+    `Transactions.GetTransactionsByCategory(oldCategory, null)` then call `t.ReCategorize(...)`
+    on each result. It reads `this.MyMoney.Categories.ReParent(...)`, so it needs a properly
+    parented `Transaction` (see the `new Transaction()` gotcha above).
+  - `Category.OnDelete()` (base `PersistentObject.OnDelete()`) is a **soft delete** - it only
+    flips `ChangeType` to `Deleted`, firing a change event. It does **not** remove the category
+    from `Categories`'s internal dictionary/`Count`; that's what `Categories.RemoveCategory(c)`
+    does, and even that only removes it immediately when `c.IsInserted` is true (a category
+    that's never been saved) - otherwise it's removed on the next save. Real production delete
+    flows (`CategoriesControl.xaml.cs`) call `OnDelete()` directly for exactly this soft-delete
+    effect; `Categories.GetCategories()` is the collection's "live" view, and explicitly filters
+    out `IsDeleted` categories - that's what the UI tree actually binds to, so "removed
+    immediately" is true from the UI's perspective even though raw `Count` doesn't change.
