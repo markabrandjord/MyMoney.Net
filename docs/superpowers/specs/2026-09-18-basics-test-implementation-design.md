@@ -43,10 +43,12 @@ aspirational:
   (CRUD-lifecycle shape, code-path-driven design, both above), (b) calls made *to* the data
   layer are correct — `MockDatabase`-backed tests confirming the right entities/values reach
   `SaveOne`/`SaveBatch`/etc., and (c) when the data layer signals an error or event back, the
-  business layer handles it correctly. `MockDatabase` already supports forcing this — it can be
-  configured to throw a `ConcurrencyConflictException` on every save (`MockDatabase.cs:269`) —
-  so business-layer tests should include cases exercising that, asserting the business layer's
-  actual response (propagate, wrap, surface via a callback), not just the happy-path save.
+  business layer handles it correctly. `MockDatabase.SaveBatch` already throws
+  `ConcurrencyConflictException` whenever a root's `RowVersion` doesn't match what's committed
+  (`MockDatabase.cs:113-117`, its normal conflict-detection path, not a special test-only mode)
+  — a business-layer test triggers this deliberately by saving a root once, then setting its
+  `RowVersion` to a stale value before saving again, and asserts the business layer's actual
+  response (propagate, wrap, surface via a callback), not just the happy-path save.
   Does **not** re-verify the data layer's persistence mechanics themselves.
 - **Data layer.** Tests that `SqliteDatabase`/`SqlServerDatabase`/`XmlStore`/`CsvStore` actually
   implement the `IDatabase` contract correctly. Already covered by the existing
