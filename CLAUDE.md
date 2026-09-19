@@ -316,6 +316,25 @@ scenario tests, project dependency diagram). Quick reference:
     duplicate Id=..."`) if given an explicit (non -1) `Id` that already exists - the XmlStore.Load
     replay path's collision guard.
 
+- **`Transactions.FindPotentialDuplicate(t, tc, range)` is NOT a "scan `tc` for anything matching
+  `t`" API**, despite reading like one. It requires `t` itself to already be an element of `tc`
+  (`int i = tc.IndexOf(t); if (i > 0) { ... }` — silently returns `null` otherwise, even with an
+  exact duplicate present in the list) and only then checks `t`'s immediate list-neighbors
+  (index `i-1`, `i+1`, `i-2`, `i+2`, ...) for a match, closest first. It's designed to be called
+  with `t` sitting inside the same ordered/materialized list you're searching, not with an
+  arbitrary "here's my incoming transaction, here's a pool of candidates" pair. The plan's
+  original example test built exactly that second (broken) shape and would have silently gotten
+  `null` back, not the intended match. Discovered 2026-09-19 writing
+  `MergingDuplicateTransactionsTests.cs`.
+  - `Transaction.Merge(Transaction t)` throws `ApplicationException("Cannot merge when both
+    transactions are transferred to a different place")` when both sides are already transfers
+    but to *different* target accounts — a real, unresolvable-conflict exception, not a silent
+    pick-one.
+  - `Merge` also has an early silent-no-op guard: if the incoming duplicate's `Category` is the
+    synthetic "Xfer to/from Deleted Account" placeholder (assigned elsewhere when a transfer's
+    target account was deleted), it returns `false` immediately without merging any field at all,
+    even ones the survivor is missing.
+
 - **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
   - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
     split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an
