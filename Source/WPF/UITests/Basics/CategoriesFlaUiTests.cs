@@ -70,10 +70,31 @@ namespace Walkabout.UITests.Basics
             Keyboard.Type(VirtualKeyShort.ENTER);
             Wait.UntilInputIsProcessed();
 
+            // OnRenameNode_CommitAndStopEditing shows a MessageBoxEx ("Category \"Fun:Videos\"
+            // already exist", title "Category") on collision - it's a real MODAL that blocks the
+            // whole window. Missing this dismiss step was a real bug found the hard way: the
+            // assertions below still pass without it (FindFirstDescendant reads the automation
+            // tree fine even while a modal is up), but the dialog then sits open for the rest of
+            // the shared app session, silently breaking every later FlaUI test in other fixtures
+            // that also uses this same session (confirmed via a screenshot after an unrelated
+            // Currencies test started failing for no apparent reason of its own).
+            Window collisionDialog = Retry.WhileNull(() =>
+                mainWindow.ModalWindows.Length > 0 ? mainWindow.ModalWindows[0] : null,
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(collisionDialog, Is.Not.Null, "Expected the 'Category ... already exist' collision dialog to appear.");
+            Assert.That(collisionDialog.Title, Is.EqualTo("Category"));
+
             AutomationElement stillMovies = mainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.TreeItem).And(cf.ByName("Fun:Movies")));
             Assert.That(stillMovies, Is.Not.Null, "'Fun:Movies' node should still exist - the rename-onto-an-existing-name should have been rejected, not silently merged.");
             Assert.That(mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem).And(cf.ByName("Fun:Videos"))).Length, Is.EqualTo(1),
                 "Expected exactly 1 'Fun:Videos' node - no duplicate created by the rejected rename.");
+
+            AutomationElement okButton = collisionDialog.FindFirstDescendant(cf => cf.ByAutomationId("ButtonOK"));
+            Assert.That(okButton, Is.Not.Null, "Collision dialog's OK button not found.");
+            okButton.Patterns.Invoke.Pattern.Invoke();
+            Wait.UntilInputIsProcessed();
+            Assert.That(Retry.WhileTrue(() => mainWindow.ModalWindows.Length > 0, TimeSpan.FromSeconds(5)).Success, Is.True,
+                "Collision dialog should be dismissed.");
         }
 
         [Test]

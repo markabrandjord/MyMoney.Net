@@ -202,6 +202,43 @@ scenario tests, project dependency diagram). Quick reference:
   test needs `Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A)` before
   typing the new name. Discovered 2026-09-19 writing `CategoriesFlaUiTests.cs`.
 
+- **A dismissed-looking `MessageBoxEx` modal can silently keep blocking the whole shared FlaUI
+  app session if the test never clicks its button.** `CategoriesFlaUiTests.RenamingCategoryToExistingName_IsRejected`
+  correctly triggers `CategoriesControl`'s real "Category ... already exist" collision dialog,
+  but originally never dismissed it - and `AutomationElement.FindFirstDescendant`/`FindAllDescendants`
+  keep working and returning correct-looking results even while a modal is up (they just read the
+  automation tree; they don't check for blocking dialogs), so that test's own assertions still
+  passed. The dialog then sat open for the rest of the session, and a *later, unrelated* FlaUI
+  test (`CurrenciesFlaUiTests`) started failing for no apparent reason of its own - root-caused
+  only by taking a screenshot (`FlaUI.Core.Capturing.Capture.Screen().ToFile(...)`) at the point
+  of failure and seeing the leftover dialog sitting on screen. **Lesson: any test that
+  deliberately triggers a modal (error dialog, confirmation, etc.) must assert the modal appeared
+  AND dismiss it before returning** - a passing assertion is not proof the UI is back in a clean
+  state for the next test in the same shared session; when a later, unrelated test fails
+  mysteriously, screenshot the live state before assuming it's that test's own bug.
+
+- **A `DataGridCell`'s automation element goes stale across its own edit-mode template swap.**
+  `CurrenciesView.xaml`'s Symbol column swaps `myTemplateSymbol` (read-only `TextBlock`) for
+  `myTemplateSymbolEdit` (a `FilteringComboBox`) on `BeginEdit` - and the `AutomationElement`
+  handle captured *before* entering edit mode (e.g. to `.Click()`/`.DoubleClick()` it) cannot
+  reliably find the new `ComboBox` via `.FindFirstDescendant(...)` on itself afterward, even
+  though the ComboBox is genuinely there and visible (confirmed via screenshot while the search
+  returned null) - the cell's visual subtree gets replaced, not mutated in place. Fix: after
+  triggering edit mode, re-search for the edit control from a stable ancestor (the grid, not the
+  old cell handle).
+
+- **`CurrenciesView`'s Symbol cell (`myTemplateSymbolEdit`, a `local:FilteringComboBox`,
+  `IsEditable="True"`) does not select an item just from typing.** Typing sets the edit box's
+  `Text` but leaves `SelectedItem` (and therefore the two-way-bound `Currency.Symbol`) untouched
+  unless the dropdown is actually open - confirmed via a tree dump showing zero `ListItem`s after
+  typing alone. The working sequence: click the cell, double-click (or Enter, when the grid
+  itself reliably has focus) to `BeginEdit`, `F4` to open the dropdown, type the code (also live-
+  narrows the list via `FilteringComboBox`'s own `FilterChanged`/`ComboBoxCultureInfo_FilterChanged`),
+  click the first filtered match (its `SelectionItem` pattern isn't supported - use `.Click()`,
+  not `Patterns.SelectionItem.Pattern.Select()`), then exactly one `Enter` to commit the row - a
+  second `Enter` was tried and confirmed harmful (it re-opens edit on the *next* placeholder row
+  instead of just committing). Discovered 2026-09-19 writing `CurrenciesFlaUiTests.cs`.
+
 - **`QuickFilterControl`'s Quick Search box only applies its filter on a literal Enter keypress**
   (`OnTextBox_KeyUp` checks `e.Key == Key.Enter`) — `TextChanged` alone (fired on every keystroke)
   only toggles the clear-filter (✕) button's visibility, it does not touch the actual filter.
