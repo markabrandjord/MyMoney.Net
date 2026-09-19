@@ -47,19 +47,32 @@ descriptions, no missing gaps, no rows that needed splitting).
 
 Two separate concerns, solved separately:
 
-**Isolation (idempotent, order-independent, re-runnable any number of times).**
+**Isolation (idempotent, order-independent, re-runnable any number of times) — Fresh Fixture,
+not Shared Fixture.** The goal, stated precisely: adding a new test case must never change an
+existing test's result, and running tests in a different order (or the same test many times in
+a row) must never change any test's result. The standard, named answer to this (Meszaros,
+*xUnit Test Patterns*: "Fresh Fixture" vs. "Shared Fixture") is that every test builds its own
+clean starting state from scratch rather than reusing or incrementally patching a
+shared/persisted one — "nuke and pave" per test, not per run.
+
 Business-layer tests already get this for free — every existing test (`ExportersTests.cs`,
 etc.) constructs a fresh in-memory `new MyMoney()` per test method, so there's no shared or
-persisted state to leave behind. FlaUI tests are the real risk: `MainWindow` doesn't autosave
-(confirmed — writes only happen on explicit File\|Save or on a dirty-database close prompt,
-`MainWindow.xaml.cs:5011`'s `OnClosing` → `SaveIfDirty()`), so a FlaUI test that mutates data
-and then just closes the app risks either blocking on an unanswered save prompt or, if
-answered "Yes," permanently drifting the checked-in fixture. The fix: **every FlaUI test
-copies the checked-in `BasicsFixture.mmdb` to a scratch temp path at the start of the test,
-registers the scratch copy (never the original) in `DatabaseRegistry`, and deletes the scratch
-file + registry entry in `[TearDown]` regardless of pass/fail.** The checked-in fixture is
-never mutated, so isolation holds even if a test fails partway through — there's no partial
-state to accumulate, unlike a manual "undo my own mutation" approach would risk.
+persisted state to leave behind; this is Fresh Fixture already in practice, just not named as
+such until now.
+
+FlaUI tests need the same property but currently have nothing enforcing it: `MainWindow`
+doesn't autosave (confirmed — writes only happen on explicit File\|Save or on a dirty-database
+close prompt, `MainWindow.xaml.cs:5011`'s `OnClosing` → `SaveIfDirty()`), so a FlaUI test that
+mutates data and then just closes the app risks either blocking on an unanswered save prompt
+or, if answered "Yes," permanently drifting a shared fixture file — reintroducing exactly the
+order-dependence this section is trying to eliminate. The fix, matching the business-layer
+side's Fresh Fixture property instead of just working around the save-prompt risk: **generate
+the fixture fresh, in code, at the start of every single test** — see "Shared fixture builder"
+below — rather than maintaining and copying a static checked-in binary. Each test gets a
+brand-new scratch SQLite file built from identical seed logic every time, registers it in
+`DatabaseRegistry`, and deletes it in `[TearDown]` regardless of pass/fail. There is no
+shared file for a failed test to leave dirty, and no checked-in binary to drift or to manually
+regenerate when the schema changes.
 
 **Thoroughness (any test that exercises an entity's persistent lifecycle).** Where a scenario
 adds, updates, or deletes a record, structure the test as a full round trip, not a single
@@ -124,10 +137,11 @@ test, while each test still gets its own scratch fixture copy:
   namespace runs) and `[OneTimeTearDown]` (close the app, dispose automation — once, after
   every test in the namespace has finished).
 - Each individual `[Test]`'s own `[SetUp]`/`[TearDown]` handles per-test isolation within that
-  shared session: `[SetUp]` copies `BasicsFixture.mmdb` to a scratch path, registers it, opens
-  it via File\|Open against the already-running app; `[TearDown]` closes the database
-  (answering "don't save" to any prompt) and deletes the scratch file + registry entry, so the
-  next test starts from a clean "no database open" state without relaunching the process.
+  shared session: `[SetUp]` calls `BasicsFixtureBuilder.Build()`, saves it to a fresh scratch
+  path, registers it, opens it via File\|Open against the already-running app; `[TearDown]`
+  closes the database (answering "don't save" to any prompt) and deletes the scratch file +
+  registry entry, so the next test starts from a clean "no database open" state without
+  relaunching the process.
 
 This generalizes past Basics without redesign — a later section's FlaUI test classes either
 join the same `[SetUpFixture]`-managed session or get their own namespace-scoped one, following
@@ -150,12 +164,17 @@ possible future addition, not built into these ~35 scenario tests.
    "..."` — safe to run unattended. Confirm green before moving on.
 3. **FlaUI test second**, only for scenarios whose business-layer half is now covered (or
    never had one — e.g. a pure UI toggle). Follow `PayeeSelectionTests.cs`'s conventions:
-   `FlaUI.Core`/`FlaUI.UIA3`, NUnit, a scratch copy of the shared Basics fixture per test (see
-   "Test content conventions" below — never the checked-in file directly), `DatabaseRegistry`
+   `FlaUI.Core`/`FlaUI.UIA3`, NUnit, a fresh scratch database built by `BasicsFixtureBuilder`
+   per test (see "Test content conventions" below — never a checked-in binary), `DatabaseRegistry`
    registration/cleanup, `[TearDown]` cleanup.
-4. **Run the FlaUI test live**, with the user watching, using real `Keyboard.Type` +
-   deliberate pauses + `SetForeground` (not instant `SetValue`) per the established
-   watching-live convention. This is the only step that needs an interactive desktop session.
+4. **Run the FlaUI test.** Fully automated, self-driving — the test code performs every
+   interaction (`Keyboard.Type`, clicks, dialog dismissal) itself, no human present or
+   watching. This requires a real interactive Windows desktop session to execute against
+   (a Windows UI Automation constraint, not a design choice); it cannot run from this
+   background-job environment (confirmed by the earlier whole-solution-test-run hang). Once
+   written, running it is a single unattended `dotnet test Source/WPF/UITests/UITests.csproj
+   --filter "..."` invocation on a machine with an interactive session — see "FlaUI execution
+   environment" below for how that invocation actually happens.
 5. **Update the tracking doc's Status column** for every scenario touched in this subsection —
    `Written` with the test file name, or `Passing` with today's date once the live FlaUI run
    confirms it, or `Business-layer gap (deferred — issue #NN)` / `Not automatable in this
@@ -169,11 +188,27 @@ section from there.
 
 ## Basics: subsection breakdown and fixture plan
 
-### Shared fixture
+### Shared fixture builder
 
-One checked-in FlaUI fixture, `Source/WPF/UITests/Fixtures/BasicsFixture.mmdb`, seeded once
-with enough data to cover most Basics scenarios in a single file (mirrors
-`PayeeSelectionTests.cs`'s existing single-fixture pattern):
+Not a checked-in binary — a shared, plain C# builder method (e.g.
+`BasicsFixtureBuilder.Build()`) living in `Source/WPF/MyMoney.TestSupport/` (WPF-free,
+already referenced by `UnitTests`; `UITests.csproj` needs one new `ProjectReference` to it,
+which it doesn't have today) that constructs a `MyMoney` graph purely via business-layer API
+calls — the same shape as the existing `Source/WPF/UITests/FixtureGenerator.cs`
+(`money.Payees.AddPayee`, `money.Accounts.AddAccount`, etc.), generalized from a one-off
+`[Explicit]` regeneration utility into a function called fresh on every test run. This is the
+Test Data Builder / Object Mother pattern (Meszaros): one place that knows how to construct
+known-valid domain objects, reused everywhere instead of each test hand-rolling setup, and
+reused *across both test layers* so "similar strategy, similar results" holds literally:
+
+- **Business-layer tests** call `BasicsFixtureBuilder.Build()` (or a narrower per-subsection
+  builder method where a test only needs a slice of it) to get an in-memory `MyMoney` directly
+  — no file I/O, matching the existing convention.
+- **FlaUI tests** call the same builder, then `SqliteDatabase.Save()` the result to a brand-new
+  scratch temp path at the start of every test (see the isolation discussion above) — nuke and
+  pave via code, not via copying a file.
+
+The builder seeds enough data to cover most Basics scenarios in one pass:
 
 - 3+ categories including a parent/child pair (`Fun:Movies`, `Fun:Videos`) and one category
   with existing transactions, for the Categories subsection's rename/delete/merge scenarios.
@@ -196,13 +231,16 @@ with enough data to cover most Basics scenarios in a single file (mirrors
 - One attachment on an existing transaction, for the attachment-delete scenario (add-via-
   drag/drop and scan/crop are skipped per non-goals above).
 
-Business-layer tests do **not** use this fixture — they build their own minimal in-memory
-`MockDatabase`/`MyMoney` state per the existing convention, one setup per test class.
+Individual business-layer tests are free to use only the slice of `BasicsFixtureBuilder`'s
+output they need, or build even narrower ad hoc `MyMoney` state directly (as
+`ExportersTests.cs`, etc. already do) — the shared builder is there for reuse where it helps,
+not a mandate to route every test through the full Basics graph when a smaller setup is
+clearer.
 
-FlaUI tests never open `BasicsFixture.mmdb` directly — each test copies it to a scratch temp
-path at the start of the test, registers the scratch copy in `DatabaseRegistry`, and deletes
-the scratch file + registry entry in `[TearDown]` (see "Test content conventions" above). The
-checked-in fixture itself is read-only from the test suite's perspective.
+FlaUI tests never touch a checked-in fixture file at all — each test calls the builder and
+saves a brand-new scratch SQLite file at the start of the test, registers it in
+`DatabaseRegistry`, and deletes the scratch file + registry entry in `[TearDown]` (see "Test
+content conventions" above).
 
 ### Subsections, in implementation order
 
@@ -258,15 +296,77 @@ Each future section gets, before starting:
 Otherwise, the process itself (business-layer test → run → FlaUI test → run live → update doc
 Status → next subsection → end-of-section retro) carries over unchanged.
 
+## FlaUI execution environment
+
+FlaUI tests are fully automated — no human clicks, types, or watches during a run — but
+Windows UI Automation requires a real interactive desktop session to attach to, which this
+background-job environment doesn't have (confirmed by the earlier whole-solution `dotnet test`
+hang: the app opened a dialog with no interactive session able to display or dismiss it). This
+is a Windows-API-level constraint, not something solvable by writing the tests differently.
+
+Practical consequence: I can write and hand off the FlaUI test files, but I cannot invoke
+`dotnet test Source/WPF/UITests/UITests.csproj` myself from this session and see it run to
+completion. Someone/something with access to a real interactive Windows session needs to run
+that command — once — and it completes fully unattended (no interaction needed during the
+run itself, just like any other `dotnet test` invocation). Options for *what* triggers that
+run, to be settled before Basics' first FlaUI test is written (not a blocker to the
+business-layer half of each subsection):
+
+1. You run the command yourself on your own machine, whenever convenient — not "watching a
+   test," just starting a normal test run and reading the result afterward, same as any other
+   test suite.
+2. A scheduled task on your machine (auto-logon, unlocked session) runs it on a cadence,
+   fully hands-off after initial setup.
+3. Reinstating a self-hosted CI runner scoped safely for this — bigger infrastructure decision
+   than this pass warrants, given the project deliberately moved off self-hosted CI for the
+   public-repo safety reasons noted earlier in this project's history; not proposed here.
+
 ## Testing/tooling notes
 
 - Business-layer tests: `dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter
   "Name=TestMethodName"` or a class-level filter — never the whole-solution `dotnet test
   Source/WPF/MyMoney.sln` (pulls in FlaUI `UITests`/`ScenarioTest`, hangs unattended).
-- FlaUI tests: run only in a live interactive session with the user watching; never dispatched
-  to an unattended/background agent.
+- FlaUI tests: fully self-driving, no human interaction during the run — see "FlaUI execution
+  environment" above for where that run actually happens.
 - No new mocking framework, no new test-support abstractions — reuse what Task 10 and the
   original migration already established.
+
+## Test input data for importers/parsers (synthetic vs. real-world samples)
+
+Doesn't block Basics (Importers/CSV/OFX live in Accounts, per the tracking doc's section
+breakdown) but is a general strategy decision worth settling now, before Accounts' CSV
+import/OFX download subsections need it, and it directly extends the "code-path-driven design"
+convention above — for an importer/parser, the "input shaped to hit a branch" *is* a file.
+
+**Synthetic/controlled data — the default, already this codebase's convention.**
+`CsvTransactionImporterTests.cs` already builds input via a `CreateCsv(params string[][] rows)`
+helper; `OfxObjectModelTests.cs` already builds OFX content as inline `const string` XML
+literals. Both give exactly-known expected results by construction — the same principle as
+`BasicsFixtureBuilder`, applied to file-shaped input instead of a `MyMoney` graph. This stays
+the primary approach for branch-coverage tests: one minimal, purpose-built input per code path,
+not a large realistic-looking file that happens to also exercise that path.
+
+**Real-world sample files — a secondary, smaller set of realism/robustness tests.** Bank-
+generated OFX/QFX/CSV files have institution-specific quirks (odd encodings, nonstandard
+fields, malformed-but-tolerated responses) that hand-crafted synthetic data won't think to
+include. If used:
+
+- **Never check in a real, unmodified export.** Any real file must be fully anonymized first —
+  account numbers, names, balances, dates shifted/scrubbed — same discipline already applied to
+  this project's SQL Server credentials. Prefer sourcing already-synthetic sample files (the
+  OFX spec itself ships example files) over starting from a real personal export at all.
+- Store anonymized samples as checked-in fixtures (e.g.
+  `Source/WPF/UnitTests/Fixtures/RealWorldSamples/*.ofx`/`.csv`), read via `File.ReadAllText`,
+  clearly separated from the synthetic branch-coverage tests.
+- Assert more loosely than the synthetic tests do — "parses without throwing," "produces the
+  expected transaction count," not exact byte-for-byte output — since a real-world file's exact
+  shape isn't something the test author fully controls, only observes.
+- If you have real exports you'd like used this way, they need your own review/scrub before
+  handing them over — not something to source or anonymize on your behalf without you looking
+  at the content first.
+
+This is a small supplementary set of tests, not a replacement for the synthetic/branch-coverage
+approach, and gets scoped in detail when Accounts' CSV import/OFX subsections are reached.
 
 ## Open questions / future work
 
