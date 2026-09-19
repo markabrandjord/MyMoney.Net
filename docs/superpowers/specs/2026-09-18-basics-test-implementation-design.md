@@ -167,6 +167,36 @@ Where the same dialog shape recurs (e.g. several dialogs in this catalog follow 
 enter-fields/OK-or-Cancel pattern), a shared helper method for the Cancel/Close checks is
 worth writing once and reusing, rather than rewriting the same three assertions per dialog.
 
+**Predicted results — source-derived expectations, not tautological self-checks.** Every
+assertion's expected value must be known *before* the test runs, derived from reading the
+actual source and/or seed data — never observed from a run and then asserted as "correct"
+after the fact. This applies to every displayed value, not just simple fields: a chart's
+plotted series, a pie slice's proportion, a report's subtotal — if the source and the seed data
+are known, the exact expected number is knowable too.
+
+How the expected value is derived depends on whether a decoupled business-layer API already
+exists for that computation, and this distinction matters — getting it wrong reproduces a real
+bug this project already found and fixed (the final whole-branch review of the original
+business-layer migration caught `Invariant_CategoryTotalsReconcileWithTransactions` computing
+its "expected" value via the same code path it was supposed to be checking, so it could never
+fail even if the underlying calculation were wrong — fixed via a genuinely independent
+reimplementation, verified by mutation testing):
+
+- **A decoupled API exists** (most Basics scenarios, once each subsection's business-layer
+  tests land): call that API directly in the FlaUI test's arrange step against the same seed
+  data to compute the expected value, then assert the UI control shows exactly that. This is
+  legitimate, not tautological, because the API itself is independently unit-tested elsewhere
+  for correctness — the FlaUI test is specifically checking wiring ("does the UI correctly
+  reflect what an already-verified computation produced"), which is this whole effort's stated
+  purpose for FlaUI tests.
+- **No decoupled API exists yet** (this is most of Charts, per the tracking doc's own finding
+  that pie/history-chart aggregation lives in private methods baked into WPF `UserControl`
+  subclasses) — the expected value must be computed independently in the test itself (e.g. a
+  plain LINQ sum over the known seeded transactions, written fresh, not by calling into
+  `CategoryChart`'s own private aggregation) before that section's tests are written. Calling
+  the same UI-embedded method to "check itself" is the exact anti-pattern the incident above
+  already showed doesn't catch real bugs.
+
 **Deferred, not part of this pass:** a randomized/property-based approach (random sequence of
 add/update/delete/query operations against a dynamically-tracked shadow model of "what the
 state should be," ending in a full reset) is a legitimate but materially heavier technique —
