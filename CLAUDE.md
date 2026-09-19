@@ -257,6 +257,27 @@ scenario tests, project dependency diagram). Quick reference:
   never called for it) - a test asserting a new alias was *created* here would be testing the
   wrong branch. Discovered 2026-09-19 writing `PayeesFlaUiTests.cs`.
 
+- **A physical `Click()` on a transaction grid row can silently fail to move selection when the
+  fixture also seeds a near-duplicate pair (e.g. `BasicsFixtureBuilder`'s two `TARGET T-1234`
+  rows).** The app's own duplicate-detection feature auto-selects/expands a "Merge" connector UI
+  for that pair, and a screenshot taken immediately after `Click()`-ing a different row showed
+  selection still sitting on the duplicate pair - the click never took. Fix:
+  `AutomationElement.Patterns.SelectionItem.Pattern.Select()` (a real UIA selection call) instead
+  of a mouse-coordinate `Click()` for selecting a specific transaction row in a fixture that also
+  has duplicates in it. Discovered 2026-09-19 writing `SplitsAndTransfersFlaUiTests.cs` - root-
+  caused only by screenshotting state right after the click, same technique as the Task 5/7
+  leftover-dialog and stale-cell-handle findings.
+  - The split-details sub-grid (`TheGridForAmountSplit`, `AutomationId="TheGridForAmountSplit"`)
+    is reached the same way as the main-grid "Rename Payee" flow: right-click the transaction row
+    → `menuItemSplit` (`Command="CommandSplits"`). Its columns are Payee(0)/Category(1)/
+    Payment(2)/Deposit(3)/Memo(4), and it has the same `{NewItemPlaceholder}` row and stale-
+    cell-handle-after-edit-mode-swap behavior as every other `MoneyDataGrid` in this app.
+  - F6's handler (`OnDataGrid_KeyDown`, `TransactionsView.xaml.cs`) only works when the target
+    cell is genuinely in edit mode: it looks for an editable control inside
+    `dataGrid.CurrentCell.Column.GetCellContent(...)`, and the read-only cell template
+    (`myTemplateSplitPayment`) is a plain `TextBlock` with nothing editable in it - only
+    `myTemplatePaymentEditInTheSplitDetailedView` (edit mode) has the `TextBox` F6 needs.
+
 - **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
   - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
     split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an
