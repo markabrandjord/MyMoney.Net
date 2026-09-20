@@ -140,6 +140,31 @@ If this spike reveals a dead end that can't be reasonably resolved with style ov
 reconsider before Phase 1 — cheaper to find out on one column than after 20 dialogs are
 converted.
 
+### Phase 0 Finding
+
+**Result: PASS** ✓
+
+The spike test (`Source/WPF/UnitTests/WpfUiGridEditSpikeTests.cs`) confirmed that WPF-UI's theme
+resources are **fully compatible** with `MoneyDataGrid`'s edit-mode template-swap pattern:
+
+- Themed `ComboBox` rendered successfully when swapped into `DataGridCell` edit mode
+- Rendered dimensions verified: `ActualWidth > 0` and `ActualHeight > 0`
+- No "big white box" visual failure occurred
+
+**Plan inaccuracies found and corrected during Task 3 implementation:**
+
+1. The plan's verbatim spike-test code referenced `window.SpikeGrid` for direct field access, which
+   fails at compile time across assemblies (the auto-generated XAML field is marked `internal`).
+   Corrected via `FindName("SpikeGrid")` to retrieve the field at runtime.
+
+2. The spike test requires `using System.Windows.Controls.Primitives;` for the `DataGridCellsPresenter`
+   type — this was missing from the plan's verbatim code snippet and was added during implementation.
+
+Both corrections were verified by the task's reviewer. They are minor plan documentation inaccuracies,
+not functional issues, and do not affect the spike result.
+
+**Conclusion:** Phase 1 can proceed as planned. No escalation or design reconsideration needed.
+
 ### Phase 1 — Shell
 
 Remove `ModernWpfUI`, add `lepoco/wpfui`, and migrate `MainWindow`'s chrome (menu, toolbar,
