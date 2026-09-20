@@ -1615,18 +1615,58 @@ namespace Walkabout
             if (themeToApply == "Dark")
             {
                 ModernWpf.ThemeManager.Current.ApplicationTheme = ModernWpf.ApplicationTheme.Dark;
-                // WPF-UI's own stock-control styles (Button, TextBox, DataGrid, etc. - see
-                // App.xaml's ui:ControlsDictionary) don't follow ModernWpf's theme manager;
-                // they need WPF-UI's own theme applied too, or they stay rendered in Light
-                // regardless of this setting (found during Task 6's final review, 2026-09-20).
-                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Dark);
+                SetWpfUiTheme(Wpf.Ui.Appearance.ApplicationTheme.Dark);
                 AppTheme.Instance.SetTheme("Themes/Dark.xaml");
             }
             else
             {
                 ModernWpf.ThemeManager.Current.ApplicationTheme = ModernWpf.ApplicationTheme.Light;
-                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Light);
+                SetWpfUiTheme(Wpf.Ui.Appearance.ApplicationTheme.Light);
                 AppTheme.Instance.SetTheme("Themes/Light.xaml");
+            }
+        }
+
+        // WPF-UI's own stock-control styles (Button, TextBox, DataGrid, etc. - see App.xaml's
+        // ui:ControlsDictionary) don't follow ModernWpf's theme manager; they need WPF-UI's own
+        // theme dictionary swapped too, or they stay rendered in Light regardless of this setting
+        // (found during Task 6's final review, 2026-09-20). Wpf.Ui.Appearance.
+        // ApplicationThemeManager.Apply(...) does this, but ALSO unconditionally applies window
+        // backdrop/Mica effects and DWM immersive-dark-mode, and removes the native title bar's
+        // background, to Application.Current.MainWindow AND every one of its OwnedWindows -
+        // intended for apps built on WPF-UI's FluentWindow (which has its own custom title bar
+        // control to render replacement content). This app's windows are plain Window (no
+        // FluentWindow adoption - see the design spec's Phase 1 Finding), so that side effect
+        // left MainWindow's title bar showing only its icon (no text) and made every owned
+        // dialog (e.g. AttachmentDialog) render a flat dark-grey client area instead of a normal
+        // background (found live, 2026-09-20, after the C1 fix that introduced this).
+        //
+        // Just setting Wpf.Ui.Markup.ThemesDictionary.Theme on the existing merged-dictionary
+        // instance (mutating its Source in place) compiles and runs but does NOT reliably
+        // propagate to already-rendered WPF-UI-styled controls (confirmed live: only the app's
+        // own AppTheme-driven content re-themed, the WPF-UI-styled toolbar/menu did not).
+        // WPF-UI's own internal ResourceDictionaryManager.UpdateDictionary (what
+        // ApplicationThemeManager.Apply actually calls) instead REPLACES the dictionary object in
+        // Application.Resources.MergedDictionaries with a brand-new ResourceDictionary - which is
+        // what reliably triggers WPF's DynamicResource invalidation. Replicated here (same pack
+        // URI WPF-UI's own ThemesDictionary uses, confirmed via its real source) instead of that
+        // internal (inaccessible) class, and matched by Source URI substring - not by type - so
+        // it keeps finding the right slot after the first replacement swaps out the original
+        // Wpf.Ui.Markup.ThemesDictionary instance for a plain ResourceDictionary.
+        private static void SetWpfUiTheme(Wpf.Ui.Appearance.ApplicationTheme theme)
+        {
+            string themeName = theme == Wpf.Ui.Appearance.ApplicationTheme.Dark ? "Dark" : "Light";
+            var newUri = new Uri($"pack://application:,,,/Wpf.Ui;component/Resources/Theme/{themeName}.xaml", UriKind.Absolute);
+
+            var mergedDictionaries = System.Windows.Application.Current.Resources.MergedDictionaries;
+            for (int i = 0; i < mergedDictionaries.Count; i++)
+            {
+                string source = mergedDictionaries[i]?.Source?.ToString() ?? string.Empty;
+                if (source.IndexOf("wpf.ui", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    source.IndexOf("theme", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    mergedDictionaries[i] = new ResourceDictionary { Source = newUri };
+                    return;
+                }
             }
         }
 
