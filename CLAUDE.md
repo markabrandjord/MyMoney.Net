@@ -67,6 +67,12 @@ scenario tests, project dependency diagram). Quick reference:
 
 ## Things that have been gotten wrong before
 
+Durable domain/architecture knowledge only below - narrow FlaUI test-authoring
+mechanics (element-finding, shared-session lifecycle, input sequences) discovered
+during the 2026-09-18 Basics test implementation plan moved to
+`docs/dev/flaui-basics-test-notes.md` in Task 17, to keep this file (loaded into every
+session) from carrying detail that only matters when writing more FlaUI tests.
+
 - **Merging long-lived branches can hit false "whole-file" conflicts from
   `core.autocrlf=true` + `.gitattributes`' `*.cs text eol=crlf` fighting each
   other.** Symptom: `git merge` reports a conflict where the *entire* file is
@@ -104,3 +110,177 @@ scenario tests, project dependency diagram). Quick reference:
   straight to the post-renormalization target instead of the old `HEAD`).
   New branches created after this point, and fresh clones, should not hit
   this class of issue at all going forward.
+
+- **`Money.cs`'s collection classes (`Categories`, `Payees`, `Currencies`, `Aliases`,
+  `Transactions`, `Accounts`, ...) each implement two different `IEnumerable<T>`
+  instantiations**, because `PersistentContainer` itself implements
+  `IEnumerable<PersistentObject>` while each concrete collection also implements
+  `ICollection<TSpecific>` (e.g. `ICollection<Category>`). Passing one of these collections to
+  a generic method expecting `IEnumerable<T>` — including LINQ (`.FirstOrDefault(...)`,
+  `.Count()`, etc.) — fails with a confusing `CS0411` ("type arguments... cannot be inferred"),
+  often naming an unrelated overload (e.g. `ImmutableArrayExtensions.FirstOrDefault`) in the
+  error message, because the compiler can't decide which `IEnumerable<T>` to bind `T` against.
+  Fix: use a plain `foreach` loop instead (its enumerator resolution isn't affected by this),
+  or supply the type argument explicitly if a generic method call is unavoidable
+  (`Enumerable.FirstOrDefault<Category>(money.Categories, ...)`). Discovered 2026-09-18 writing
+  `BasicsFixtureBuilderTests.cs`.
+
+- **`Category.Name` stores the full colon-separated path** (e.g. `"Fun:Movies"`), not just the
+  leaf segment — `Category.Label` derives the leaf name from `Name`'s last `:`-separated
+  segment (`Money.cs`'s `Label` getter). A category created via
+  `Categories.GetOrCreateCategory("Fun:Movies", ...)` has `Name == "Fun:Movies"` and
+  `Label == "Movies"`, not `Name == "Movies"` — easy to assume backwards. Discovered
+  2026-09-18.
+
+- **`new Transaction()` (the parameterless constructor) leaves `.MyMoney` permanently `null`,
+  even after `money.Transactions.AddTransaction(t)`.** `Transaction.MyMoney`'s getter walks
+  `this.Parent as Transactions` → `parent.Parent as MyMoney`, and `Parent` is only set by
+  `PersistentObject(PersistentContainer container)` — the constructor
+  `Transaction(Transactions container) : base(container)` — never by `AddTransaction`, which
+  just inserts into the internal dictionary (`this.transactions[t.Id] = t`) without touching
+  `Parent`. Any business-layer code that reads `t.MyMoney` (e.g. `AutoCategorization.
+  AutoCategoryMatch`, which calls `t.MyMoney.Transactions.GetTransactionsFrom(...)`) throws
+  `NullReferenceException` on a transaction built the parameterless way, even one already added
+  via `AddTransaction`. Fix: always construct test transactions via
+  `new Transaction(money.Transactions)` (matching production's own `Transactions.NewTransaction
+  (Account a)`, which does exactly this), not `new Transaction()`. Discovered 2026-09-19 writing
+  `AutoCategorizationTests.cs` — confirmed by reading `AutoCategoryMatch`'s real logic rather
+  than patching around the symptom, per this migration's own "characterization testing, don't
+  silently fix code to match a guessed test" rule.
+
+- **`Transactions.ExecuteQuery` and `QuickFilterParser`/`Filter<T>` gotchas, found writing
+  `QuickSearchQueryTests.cs`:**
+  - `ExecuteQuery(QueryRow[])` lives on `MyMoney.Transactions` (`money.Transactions.ExecuteQuery(...)`),
+    not on `MyMoney` itself, despite how it reads in passing references.
+  - `QueryRow.Matches(decimal)`'s `Operation.GreaterThan` case is implemented as `value >=
+    TryParseDecimal(...)` (i.e. inclusive, same as `GreaterThanEquals`) — read `Query.cs` before
+    assuming a `>` query excludes the boundary value.
+  - `Transaction.Matches(QueryRow)`'s `Field.Payment` case returns `q.Matches(-this.Amount)` only
+    when `Amount <= 0` (and `false` otherwise) — Payment is always compared as a positive number.
+  - The only concrete `FilteredObservableCollection<Transaction>` subclass is `TransactionCollection`
+    in `MyMoney/Views/TransactionsView.xaml.cs` (WPF project, not `MyMoney.Business` — `UnitTests`
+    already references `MyMoney.csproj` directly, so this is fine to use from a test). Its
+    constructor takes an already-materialized `IEnumerable<Transaction>` — passing the raw
+    `Transactions` container itself throws `NotImplementedException` from
+    `Transactions.CopyTo(Transaction[], int)`, an unimplemented `ICollection<Transaction>` member
+    that `ObservableCollection<T>`'s constructor calls when its source is an `ICollection<T>`. No
+    production code path hits this since every real call site already passes a materialized list
+    (e.g. `GetSelectedTransactions()`); use `money.Transactions.GetTransactionsFrom(account)` (or
+    similar) in tests instead of the container.
+  - `ExecuteQuery`'s split-row branch (`Transaction(Transaction t, Split s)`, the synthetic
+    read-only proxy transaction returned when a query matches a split but not its parent) proxies
+    `Category`/`Amount`/`Memo`/`Payee` from the `Split`, not the parent `Transaction`, and
+    `IsReadOnly` is always `true`. `Split.Matches(QueryRow)` explicitly does NOT support
+    `Field.Payment`/`Field.Deposit` ("too confusing if we match amount on splits", per its own
+    comment) — only Category/Memo/Payee.
+
+- **`Alias.OnChanged` (fired by both the `Pattern` and `AliasType` setters) eagerly constructs
+  `new Regex(this.pattern)` whenever `AliasType == Regex` and `Pattern` is non-null** - NOT
+  lazily on first `Matches()` call, despite `Matches()`'s own `if (this.regex == null)` guard
+  looking like lazy init (that guard is usually a no-op since `OnChanged` already built it). A
+  malformed pattern throws `RegexParseException` (an `ArgumentException`) synchronously at
+  whichever property assignment completes the `Regex`+malformed-pattern combination - e.g.
+  `alias.Pattern = "[unclosed"; alias.AliasType = AliasType.Regex;` throws on the *second* line,
+  not later when actually matching. **This means `RenamePayeeDialog.CheckConflicts()`
+  (`new Alias() { Pattern = this.Pattern, AliasType = atype }`) would throw an unhandled exception
+  if a user checks "Use regular expressions" with an already-malformed pattern typed** - a real,
+  live robustness gap in the dialog, found but deliberately not fixed (out of scope for a
+  test-writing pass) - flagging here in case it's picked up later.
+
+- **`Transactions.AddTransaction(Transaction)` throws** (`"Failed to add transaction with
+  duplicate Id=..."`) if given an explicit (non -1) `Id` that already exists - the `XmlStore.Load`
+  replay path's collision guard.
+
+- **`Transactions.FindPotentialDuplicate(t, tc, range)` is NOT a "scan `tc` for anything matching
+  `t`" API**, despite reading like one. It requires `t` itself to already be an element of `tc`
+  (`int i = tc.IndexOf(t); if (i > 0) { ... }` — silently returns `null` otherwise, even with an
+  exact duplicate present in the list) and only then checks `t`'s immediate list-neighbors
+  (index `i-1`, `i+1`, `i-2`, `i+2`, ...) for a match, closest first. It's designed to be called
+  with `t` sitting inside the same ordered/materialized list you're searching, not with an
+  arbitrary "here's my incoming transaction, here's a pool of candidates" pair. The plan's
+  original example test built exactly that second (broken) shape and would have silently gotten
+  `null` back, not the intended match. Discovered 2026-09-19 writing
+  `MergingDuplicateTransactionsTests.cs`.
+  - `Transaction.Merge(Transaction t)` throws `ApplicationException("Cannot merge when both
+    transactions are transferred to a different place")` when both sides are already transfers
+    but to *different* target accounts — a real, unresolvable-conflict exception, not a silent
+    pick-one.
+  - `Merge` also has an early silent-no-op guard: if the incoming duplicate's `Category` is the
+    synthetic "Xfer to/from Deleted Account" placeholder (assigned elsewhere when a transfer's
+    target account was deleted), it returns `false` immediately without merging any field at all,
+    even ones the survivor is missing.
+
+- **`Transaction.HasAttachment` (the grid's paperclip icon) is driven by `AttachmentWatcher`'s
+  background scan, dispatched via `Dispatcher.BeginInvoke(..., DispatcherPriority.Background)`,
+  and can lag well behind the file actually being written.** `AttachmentDialog.Transaction`'s
+  setter (`LoadAttachments`) does its own synchronous `AttachmentManager.GetAttachments(t)`
+  directory scan every time the dialog opens for a transaction, completely independent of
+  `HasAttachment` - so anything that needs to know "does the app see this attachment" should open
+  the dialog directly rather than poll the icon. Relevant beyond testing: this is the same
+  `AttachmentManager` flagged for WPF-free extraction in
+  [markabrandjord/MyMoney.Net#44](https://github.com/markabrandjord/MyMoney.Net/issues/44).
+
+- **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
+  - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
+    split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an
+    empty method, and `Splits.AddSplit`'s `InsertItem` only fires property-changed notifications,
+    never `Rebalance()`. A direct business-layer caller must call `Splits.Rebalance()` explicitly;
+    real UI code only works because WPF's grid plumbing happens to trigger it eventually.
+  - **`MyMoney.RemoveTransfer(Transaction t)` does NOT remove both sides of a transfer** - read
+    `RemoveTransfer(Transfer t)`'s real logic: it only calls `RemoveTransaction` on the *other*
+    side (the transfer's linked `Transaction`, called "target" in the source); the side you called
+    it on just has its own `Transfer` link cleared (`t.Transfer = null`) and survives as an
+    ordinary, non-transfer transaction. Don't assume symmetric deletion.
+  - Removing a transfer whose *other* side is `TransactionStatus.Reconciled` throws
+    `MoneyException("Transfer is reconciled on the other side and cannot be modified outside of
+    balancing the target account.")` (found in `RemoveTransfer(Transfer t)`) - a real exception,
+    not a bool result or silent no-op, and it's checked before either side is touched.
+
+- **`Category`/`Categories` deletion mechanics, found writing `CategoriesTests.cs`:**
+  - `Category.OnDelete()` (base `PersistentObject.OnDelete()`) is a **soft delete** - it only
+    flips `ChangeType` to `Deleted`, firing a change event. It does **not** remove the category
+    from `Categories`'s internal dictionary/`Count`; that's what `Categories.RemoveCategory(c)`
+    does, and even that only removes it immediately when `c.IsInserted` is true (a category
+    that's never been saved) - otherwise it's removed on the next save. `Categories.GetCategories()`
+    is the collection's "live" view and explicitly filters out `IsDeleted` categories - that's
+    what the UI tree actually binds to, so "removed immediately" is true from the UI's perspective
+    even though raw `Count` doesn't change. Critically, **`OnDelete()` has no guard against a
+    category that still has transactions** - only the UI layer (`CategoriesControl.Delete()`)
+    checks `GetTransactionsByCategory(c, null).Count > 0` and redirects to `MergeCategoryDialog`;
+    calling `OnDelete()` directly (e.g. a script, or a future code path) silently leaves
+    transactions pointing at a now-`IsDeleted` category, no exception, no warning.
+  - `Transaction.ReCategorize(Category oldCategory, Category newCategory)` is a per-`Transaction`
+    instance method - there is no bulk "recategorize all transactions on this category" API.
+    The real production pattern (`CategoriesControl.xaml.cs`'s category-merge handler) is
+    `Transactions.GetTransactionsByCategory(oldCategory, null)` then call `t.ReCategorize(...)`
+    on each result. It reads `this.MyMoney.Categories.ReParent(...)`, so it needs a properly
+    parented `Transaction` (see the `new Transaction()` gotcha above).
+  - `Categories.RemoveCategory`/`Currencies.RemoveCurrency`'s `forceRemoveAfterSave` branch
+    (immediate removal of an already-persisted, non-`IsInserted` item) is a different code path
+    from the plain `IsInserted` (never-saved) immediate-removal one - simulate "already persisted"
+    in a test via `entity.OnUpdated()` (flips `ChangeType` back to `None`), matching what a real
+    load/save cycle does.
+
+- **A FlaUI test's UI assertions can all pass while the real app has crashed in the background -
+  nothing was watching for it until Task 15.** Writing `SampleDataFlaUiTests.cs`, cancelling the
+  "Add Sample Data" dialog on an empty database threw a real, unhandled `NullReferenceException`
+  in production code (`AccountsControl.SelectedAccount`'s setter, called with a `null` `Account`
+  from `MainWindow.OnCommandAddSampleData` - filed as
+  [markabrandjord/MyMoney.Net#45](https://github.com/markabrandjord/MyMoney.Net/issues/45)).
+  `App.xaml.cs`'s `OnUnhandledException` caught it, logged it, and reported it via a
+  `MessageBoxEx` dialog - but `MessageBoxEx.Show` displays via `UiDispatcher.BeginInvoke` (posted,
+  not blocking), so the crash didn't halt anything the test was doing, and UIA tree reads work
+  fine alongside an unrelated modal regardless. Both tests in that run reported "Passed" in
+  `dotnet test` output; only a human watching the actual screen live noticed the crash dialog.
+  **Fix: `AppCrashGuard.cs`** (`Source/WPF/UITests/Basics/`) - every Basics FlaUI test's shared
+  `BasicsTestSetup.CleanUpDatabase` (called from every fixture's `[TearDown]`) now asserts the
+  app's own log file (`%TEMP%\MyMoney\Logs\MyMoney_<date>_log.txt`, per `Utilities/Logger.cs`)
+  gained no new `"APP ERROR: Unhandled"` line during the test, and proactively dismisses a
+  lingering "Unhandled Exception"/"Crash Report" dialog if one is still open (the same
+  leftover-modal session-corruption risk documented in
+  `docs/dev/flaui-basics-test-notes.md`). This check is deliberately NOT wrapped in a try/catch -
+  unlike the best-effort registry/file cleanup next to it, a real crash must fail the test, not be
+  silently absorbed. A test that knowingly reproduces
+  a real, filed bug (like the Cancel scenario above) is marked `[Ignore("...")]` referencing the
+  issue, rather than left to fail every run or having its assertions weakened to tolerate the
+  crash. Discovered and fixed 2026-09-19.

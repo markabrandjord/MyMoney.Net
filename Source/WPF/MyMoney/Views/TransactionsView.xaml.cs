@@ -2559,7 +2559,7 @@ namespace Walkabout.Views
 
             try
             {
-                Exporters e = new Exporters();
+                Exporters e = new Exporters(new WpfBusinessLayerUiCallback(this.ServiceProvider));
 
                 string xml = e.ExportString(action, new object[] { this.activeAccount, selected });
 
@@ -2600,7 +2600,7 @@ namespace Walkabout.Views
 
                     Transaction selected = this.SelectedTransaction;
                     StringReader sr = new StringReader(xml);
-                    XmlImporter importer = new XmlImporter(this.myMoney, this.site);
+                    XmlImporter importer = new XmlImporter(this.myMoney, new WpfBusinessLayerUiCallback(this.site));
                     using (XmlReader r = XmlReader.Create(sr))
                     {
                         Transaction first = null;
@@ -4493,7 +4493,7 @@ namespace Walkabout.Views
 
         private void OnCommandViewExport(object sender, ExecutedRoutedEventArgs e)
         {
-            Exporters exporter = new Exporters();
+            Exporters exporter = new Exporters(new WpfBusinessLayerUiCallback(this.ServiceProvider));
             List<object> list = new List<object>();
             foreach (object o in this.Rows)
             {

@@ -108,5 +108,36 @@ namespace Walkabout.Tests
 
             Assert.That(Math.Round(totalTax, 0) == Math.Round(tax), "Incremental doesn't match single shot");
         }
+
+        [Test]
+        public void TestStateTaxes_UnknownAbbreviation_ReturnsNull()
+        {
+            var stateTaxes = StateTaxes.Load();
+            var unknown = (from s in stateTaxes.Data where s.Abbreviation == "ZZ" select s).FirstOrDefault();
+            Assert.That(unknown, Is.Null, "Expected no state tax data for a made-up abbreviation");
+        }
+
+        // Investigated (not guessed) by reading StateTaxes.GetCapitalGainsTax directly: unlike
+        // FederalTaxes.GetCapitalGainsTax (which explicitly returns 0 for gains < 0) and both
+        // GetIncomeTax methods (which explicitly return 0 for paycheck < 0), StateTaxes'
+        // fixed-rate capital gains path (used by WA) has no such guard. When accumulated
+        // baseGains already exceeds the state's deduction amount, a negative "gains" argument
+        // flows straight into `gains * fixedRate / 100` and comes back out as a genuine
+        // negative tax value rather than being clamped to zero. This pins that real,
+        // observed asymmetry as a regression check.
+        [Test]
+        public void TestStateCapitalGainsTax_NegativeGains_ReturnsNegativeTax()
+        {
+            var stateTaxes = StateTaxes.Load();
+            var wa = (from s in stateTaxes.Data where s.Abbreviation == "WA" select s).FirstOrDefault();
+            Assert.That(wa, Is.Not.Null, "Could not find WA tax data");
+
+            // WA capital gains: fixedRate 7.0%, deductionAmount 278000 (verified in StateTaxes.json).
+            // baseGains (400000) already exceeds the deduction, so totalGain stays positive even
+            // though the incremental "gains" argument here is negative.
+            var tax = wa.GetCapitalGainsTax(TaxFilingStatus.Single, 0, 400000, -50000);
+
+            Assert.That(tax, Is.EqualTo(-3500.0M), "StateTaxes.GetCapitalGainsTax does not clamp negative gains to zero once baseGains exceeds the deduction amount");
+        }
     }
 }
