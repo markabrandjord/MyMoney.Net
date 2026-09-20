@@ -489,7 +489,16 @@ reflected in any individual screen's visuals — expected to look visually incon
 migrated and unmigrated screens once Task 6 lands, until the deferred follow-up plan finishes
 Phase 2/3. Record this explicitly as a known, intentional transitional state, not a bug.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the full Basics FlaUI suite as a regression checkpoint**
+
+The app is functionally unchanged from a user's perspective at this point (still rendering via
+`ModernWpfUI` everywhere — only the `App.xaml`/`.csproj` plumbing changed) — this is a cheap
+checkpoint before Task 6's real visual changes, not expected to find anything.
+
+Run: `dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~Walkabout.UITests.Basics"`
+Expected: 14/14 passing (same baseline as before this plan started).
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney/App.xaml
