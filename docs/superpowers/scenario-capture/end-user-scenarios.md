@@ -20,7 +20,7 @@ user-facing.
 | 3 | Views | `Views/` + `View Selectors/` — the grids, trees and panes the user works in | **Done** |
 | 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | **Done** |
 | 5 | Reports + charts | `Reports/`, `Charts/` (+ `Views/GraphGenerators.cs` and `FlowDocumentView`'s report-hosting path, deferred here by Phase 3) | **Done** |
-| 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | Not started |
+| 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | **Done** |
 | 7 | Taxes | `Taxes/` | Not started |
 | 8 | Cross-cutting | Online banking, attachments, printing, settings | Not started |
 
@@ -5256,3 +5256,985 @@ obvious from the code — and, where noted, because they look like real defects.
     strings, the history chart has `HistoryRange` (the same three members, different
     semantics), and the trend graph has `CalendarRange` (ten members). A redesign that
     wants "choose a period" to mean one thing has four definitions to reconcile.
+
+---
+
+# Phase 6: Import/Export
+
+**Source examined (in full):** every file in `Source/WPF/MyMoney.Business/Importers/`
+(10 files, ~2,600 lines) and `Source/WPF/MyMoney.Business/Ofx/` (8 code files plus 7
+data/resource files, ~10,000 lines of code), plus the one OFX file that stayed behind
+in the WPF project, `Source/WPF/MyMoney/Ofx/OfxDownloadController.cs`.
+
+> **Path correction — `CLAUDE.md` and this catalogue's own phase table are both stale.**
+> Neither `Importers/` nor the bulk of `Ofx/` lives under `Source/WPF/MyMoney/` any more.
+> `Importers/` is now `Source/WPF/MyMoney.Business/Importers/`, and `Ofx/` is
+> `Source/WPF/MyMoney.Business/Ofx/` — **except** `OfxDownloadController.cs`, which is
+> the only file left in `Source/WPF/MyMoney/Ofx/` because it owns WPF dialogs. A `Glob`
+> for `Source/WPF/MyMoney/Importers/*` returns nothing at all. This is the same
+> `MyMoney.Business` extraction Phase 1 flagged for `Money.cs`, carried further.
+
+| File(s) | Lines |
+|---|---|
+| `Importers/Importer.cs` (abstract base + transfer matching) | 147 |
+| `Importers/CsvImporter.cs` (`CsvMap`, `CsvTransactionImporter`, `TransactionCache`) | 613 |
+| `Importers/CsvImportController.cs` | 140 |
+| `Importers/CsvDocument.cs` (the delimited-file parser, namespace `Walkabout.Utilities`) | 193 |
+| `Importers/CsvTransactionFormat.cs` (namespace `Walkabout.Data`) | 151 |
+| `Importers/QifImporter.cs` | 451 |
+| `Importers/XmlImporter.cs` | 289 |
+| `Importers/Exporters.cs` | 343 |
+| `Importers/DownloadData.cs` (`DownloadData`, `DownloadEventArgs`) | 243 |
+| `Importers/IImportProgressReporter.cs` | 18 |
+| `Ofx/Ofx.cs` (`OfxThread`, `OfxRequest`, `OfxException`, `OfxMfaChallengeRequest`) | 3,744 |
+| `Ofx/OfxObjectModel.cs` (the deserialised profile/sign-on/MFA model) | 781 |
+| `Ofx/OfxInstitutionInfo.cs` (the bank directory) | 713 |
+| `Ofx/OfxErrorCode.cs` | 105 |
+| `Ofx/OfxStrings.Designer.cs` + `.resx` (96 user-facing OFX error messages) | 891 |
+| `Ofx/SgmlParser.cs` + `Ofx/SgmlReader.cs` (`Walkabout.Sgml`) | 1,801 + 1,964 |
+| `Ofx/HtmlResponseException.cs` | 20 |
+| `Ofx/` data: `OfxProviderList.xml`, `MfaPhrases.xml`, `OfxErrorTemplate.htm`, `ofx160.dtd`, `ofx201.dtd`, `OFX 2.1.1.pdf`, `ofx16.pdf` | — |
+| `MyMoney/Ofx/OfxDownloadController.cs` | 364 |
+
+**Supporting files read but owned elsewhere**, because a scenario here can't be written
+honestly without them: `MainWindow.xaml.cs`'s "Importing" region and its
+`OnCommandFileImport`/`ImportQif`/`ImportOfx`/`ImportXml`/`ImportCsv`/`ImportMoneyFile`/
+`ExportCsv`/`OnCommandFileExportAccountMap`/`DoSync`/`SyncAccount` members (Phase 2's
+P2-FILE-11, P2-CMD-11, P2-START-3); `Dialogs/MoneyFileImportDialog.xaml.cs`'s
+`ProcessFile`/`ImportMoneyFile`/`ImportAccount` (Phase 4's P4-IMPORT-1…6 captured the
+conversation, the matching is here); `Dialogs/CsvImportDialog.xaml.cs` and
+`WpfBusinessLayerUiCallback.cs` (Phase 4's P4-IMPORT-7…10); `MyMoney.Data/CsvStore.cs`
+(the "Save As .csv" destination and a second, dead CSV importer);
+`View Selectors/AccountsControl.xaml.cs`'s `Export`/`ExportList`/`Paste`;
+`Views/TransactionsView.xaml.cs`'s `CopySelection`/`PasteSelection`/`OnCommandViewExport`;
+`Views/LoansView.xaml.cs`'s export; `Controls/DownloadControl.xaml.cs` and
+`DownloadControlProgressReporter.cs` (Phase 2's P2-PANE-5);
+`Dialogs/SelectAccountDialog.xaml.cs`'s `AccountHelper.PickAccount`;
+`MyMoney.Business/Utilities/ProcessHelper.cs`'s `IsFileQIF`/`IsFileOFX`/
+`ImportFileListFolder`.
+
+> **Naming notes.**
+> - `Importers/CsvDocument.cs` declares its class in namespace **`Walkabout.Utilities`**,
+>   and `Importers/CsvTransactionFormat.cs` in **`Walkabout.Data`** — neither is in
+>   `Walkabout.Importers` like the rest of the folder.
+> - `Ofx/SgmlParser.cs` and `Ofx/SgmlReader.cs` are in namespace **`Walkabout.Sgml`** and
+>   are a vendored 2002 general-purpose SGML-to-XML reader ("An XmlReader implementation
+>   for loading HTML as if it was XHTML", Chris Lovett), not OFX code at all. They are
+>   3,765 of the 10,000 lines in `Ofx/`.
+> - `Controls/DownloadControl.xaml.cs` carries the doc comment *"Interaction logic for
+>   OfxDownloadControl.xaml"* — another copy-pasted `<summary>` naming a file that
+>   doesn't exist, the same trap Phases 3, 4 and 5 each hit.
+> - `Ofx/Ofx.cs` is a 3,744-line file holding four unrelated public classes; there is no
+>   `Ofx` type in it.
+
+**What this phase covers and deliberately does not.** This section catalogues *how data
+gets into and out of the product through files and the bank's own servers* — what
+real-world artefact each route connects to, what the user has to do, what matching and
+duplicate decisions they are given, and what happens when the data is wrong. The
+*dialogs* that collect the answers (account picker, column mapping, passwords, MFA
+questions, login) are Phase 4 and are referenced, not re-described; the *panel* that
+shows progress is Phase 2's P2-PANE-5. Report exports (CSV/HTML/chart) stayed with
+Phase 5 as report affordances, and the `.txf` TurboTax export is Phase 7 (see Open
+Question 22). Setting up an online account's credentials is Phase 4's P4-ONLINE-*; what
+happens to what comes back is here.
+
+---
+
+## 6.1 Deciding what to bring in
+
+### P6-ENTRY-1 — Hand the product a file and have it work out the rest
+The user picks one or more files of almost any supported kind in a single dialog — a
+bank's OFX or QFX download, a spreadsheet, a Quicken-style QIF export, the product's own
+XML interchange file, or another copy of their own data file — and each is routed to the
+right treatment without the user having to say which is which. Anything unrecognised is
+named back to them with the list of kinds that are understood.
+*(`MainWindow.OnCommandFileImport`, the per-extension switch; the file-type filters in
+`MyMoney.Business/Properties/Resources.resx`. **See Open Question 1 — selecting more
+than one file re-imports the earlier ones.**)*
+
+### P6-ENTRY-2 — Double-click a downloaded statement and have it land in the right place
+A statement file saved from a bank's website can be opened from the desktop and goes
+into the running copy of the product rather than starting a second one. The product
+watches a shared hand-off list for files queued this way and picks them up a moment
+later, so several files opened in quick succession arrive as one batch.
+*(`ProcessHelper.ImportFileListFolder`'s `imports.xml`, `MainWindow.importWatcher` →
+`LoadImportFiles`, the 250ms debounce; Phase 2's P2-START-3 covers the launch half.
+**Only `.qif`, `.ofx` and `.qfx` are recognised on this route** — `ProcessHelper.IsFileQIF`/
+`IsFileOFX`.)*
+
+### P6-ENTRY-3 — Make the product the default for statement files
+The user can ask once for statement files to open with this product from then on, and is
+told which kinds were claimed.
+*(`MainWindow.OnCommandFileExtensionAssociation` registering `.qif`, `.qfx`, `.ofx`,
+`.mmdb`)*
+
+### P6-ENTRY-4 — Watch each file or account arrive, and open what it brought
+Every import and every download reports itself as a row, one per file or per account,
+with a spinner while it is working, a tick when it succeeds, a count of what it added,
+and an error with a "Details…" link when it doesn't. Clicking a row that added anything
+jumps straight to exactly those entries.
+*(`DownloadData`/`DownloadEventArgs`, `IImportProgressReporter`, `DownloadControl`;
+the panel itself is Phase 2's P2-PANE-5)*
+
+### P6-ENTRY-5 — Read a full technical report of a failure they can pass on
+When an import or download fails, the "Details…" link opens a formatted page naming the
+institution, the address contacted, the message, the raw response and the HTTP headers —
+the thing a user is asked to attach to a bug report. Credentials are blanked out of the
+saved copies first.
+*(`OfxDownloadController.OnDetailsClicked` + `Ofx/OfxErrorTemplate.htm`;
+`OfxRequest.SaveLog` masking `USERID`/`USERPASS`/`USERKEY`/`SESSCOOKIE`/`USERCRED1`/
+`USERCRED2`/`MFAPHRASEA`/`ACCESSKEY`/`AUTHTOKEN`. **See Open Question 13 — account
+numbers are not masked.**)*
+
+---
+
+## 6.2 Fetching statements from the bank
+
+### P6-OFX-1 — Ask every connected institution for what's new, at once
+One command reaches out to every institution the user has finished setting up and
+fetches each one's statements in parallel, so a household with eight banks waits for the
+slowest rather than for the sum. Institutions that aren't fully configured are silently
+left out, and if none are ready the user is told where to go and set one up.
+*(`MainWindow.OnSynchronizeOnlineAccounts` requiring an address, user id and password;
+`OfxThread.Synchronize` starting one task per institution)*
+
+### P6-OFX-2 — Ask just one institution
+From the accounts panel the user can refresh a single account rather than everything.
+What is actually fetched is every account held at that same institution, because the
+conversation with a bank covers all of them at once.
+*(`MainWindow.SyncAccount` → `DoSync` with that account's online account;
+`OfxThread.SyncAccount` gathering every account attached to it)*
+
+### P6-OFX-3 — Only ask for what they don't already have
+Each account remembers when it was last refreshed and the product asks the bank only for
+the period since then, with ten days of overlap in case the bank posts something late. An
+account that has never been refreshed gets the last thirty days.
+*(`OfxRequest.GetStatementRequestRange`, `Account.LastSync`)*
+
+### P6-OFX-4 — Have everyday, card and investment accounts each asked for properly
+The product groups the accounts it is asking about by what kind they are and phrases a
+different request for each — one for chequing/savings/money-market/credit-line, one for
+credit cards, one for brokerage and retirement — so each institution is asked in the form
+it expects. Account kinds that no institution can serve statements for are refused up
+front with the kind named.
+*(`OfxRequest.GetRequestType`, `GetBankRequest`/`GetCreditRequest`/`GetInvestmentRequest`)*
+
+### P6-OFX-5 — Not be stopped by an institution on an older protocol
+If an institution rejects the request, the product silently retries in the other protocol
+generation before giving up, so a user who guessed wrong when setting the institution up
+still gets their statement.
+*(`OfxRequest.SendOfxRequest`'s version-flip retry, `OfxRequest.Signup`'s equivalent.
+**See Open Question 14 — the flip is kept even when the retry also fails.**)*
+
+### P6-OFX-6 — Be told, in words, why the bank refused
+Every refusal the standard defines has a plain-English explanation, so the user reads
+"your password has expired" rather than a number. Where the product can do something
+about it, the error row turns into an action: get an authorisation token, answer extra
+identity questions, change the password, or log in again — and once that is done, the row
+becomes "Try Download Again".
+*(96 messages in `Ofx/OfxStrings.resx` keyed by `OfxErrorCode`;
+`OfxDownloadController.OnDetailsClicked`'s four recoverable cases → `AuthTokenDialog`,
+`MfaChallengeDialog`, `ChangePasswordDialog`, `OfxLoginDialog` — all Phase 4)*
+
+### P6-OFX-7 — Have the machine answer the identity questions it can
+When an institution's extra identity questions are about the computer rather than the
+user — its name, address, operating system, the time — the product answers them itself and
+only puts the genuinely personal ones in front of the user.
+*(`OfxMfaChallengeRequest.HandleChallenge`'s built-in answers for MFA101…MFA107.
+**See Open Questions 15 and 16.**)*
+
+### P6-OFX-8 — Recognise the account even when the bank writes its number differently
+An incoming statement is matched to the user's account by the account number the bank
+quotes; if that doesn't match exactly, the product also tries the aliases it has been
+taught, and then tries matching a partly-masked number (`XXXX1234`) against the tail of
+the numbers it knows. Only if all of that fails is the user asked.
+*(`OfxRequest.FindAccountByOfxId`, `AccountIdFuzzyMatch`, `MyMoney.AccountAliases`;
+the ambiguity guard returns nothing rather than guessing)*
+
+### P6-OFX-9 — Be asked once about an account they don't recognise, and remembered
+If a statement names an account the product can't place, the user is shown the number and
+picks an existing account or creates a new one; an answer of "skip" is remembered for the
+rest of that import so they aren't asked again about the same number. Choosing a
+different account than the number suggests records an alias, so the question never comes
+back.
+*(`OfxRequest.CheckAccountId`, `skippedAccounts`, `AccountHelper.PickAccount` recording an
+`AccountAlias` — Phase 1's P1-ALIAS-8)*
+
+### P6-OFX-10 — Decide about every account before any of them are written
+All of the "is this the right account?" questions for one response are asked first and
+the statements are only applied afterwards, so a user who realises half-way through that
+something is wrong can cancel without having had part of the import already committed.
+*(the `pending` list in `ProcessBankResponse`/`ProcessCreditCardResponse`/
+`ProcessInvestmentResponse`, with the explicit comment saying why)*
+
+### P6-OFX-11 — Be stopped from pouring a statement into the wrong kind of account
+If the statement that comes back is for a credit card and the account it is aimed at is a
+chequing account (or vice versa), the import of that statement stops with both named
+rather than writing card transactions into a bank register.
+*(the account-type guards at the top of each `Process*Response`,
+`Properties.Resources.AccountTypeMismatch`)*
+
+### P6-OFX-12 — Have downloaded entries arrive already matched against what's recorded
+Each incoming entry is matched against what the account already holds before it is added,
+so a payment the user typed in by hand and the bank's own copy of it become one entry
+rather than two. Anything genuinely new arrives marked as unapproved and electronic, so
+the register shows at a glance what still needs looking at.
+*(`ProcessStatement` → `Transactions.Merge` — Phase 1's P1-IMPORT-1/2;
+`TransactionStatus.Electronic`, `Unaccepted`, `IsDownloaded`)*
+
+### P6-OFX-13 — Have the bank's messy payee text turned into the name they use
+Where a statement gives a payee name the user has already taught the product to rename,
+the rename is applied on the way in and the bank's original wording is kept in the memo
+instead of being lost. Bill-payment lines that bury the cheque number in the memo are
+unpicked into a payee and a number.
+*(`ProcessStatement`'s `Aliases.FindMatchingAlias` and its `"Bill Payment "` unpicking;
+`NAME`/`PAYEE`/`PAYEE2` and `MEMO`/`MEMO2` fallbacks; the `"N/A"` memo suppression)*
+
+### P6-OFX-14 — Not be shown the bank's own filler entries
+Zero-value entries on a credit-card statement — the checks some issuers post as
+placeholders — are dropped rather than cluttering the register.
+*(`ProcessStatement`'s `amount == 0 && Type == Credit` skip)*
+
+### P6-OFX-15 — Have the running balance recomputed when a statement lands
+Every account that received anything is rebalanced at the end of the import so the
+figures on screen are right immediately.
+*(`MyMoney.Rebalance` at the end of `ProcessStatement` and `ProcessInvestmentResponse`)*
+
+---
+
+## 6.3 Reading a statement file saved from the bank's website
+
+### P6-FILE-1 — Import a statement file without setting up a connection at all
+A `.ofx` or `.qfx` file downloaded by hand from a bank's website imports through exactly
+the same machinery as a live download — same account matching, same duplicate matching,
+same unapproved-entry marking — without the user ever configuring credentials.
+*(`OfxThread.LoadImports` reusing `OfxRequest.ProcessResponse`; `Account` resolved purely
+by the account number in the file, since there is no request to correlate against)*
+
+### P6-FILE-2 — Have a badly-formed statement file read anyway
+Statement files in the wild break the rules constantly, and the product tries hard before
+giving up: it reads the file's own declared character set, salvages a file whose opening
+tag isn't on its own line, patches a known malformation from one large broker, falls back
+from strict XML to a lenient reader, and can be told globally to just treat every
+statement file as modern text when a bank mislabels its own encoding.
+*(`OfxRequest.ParseOfxResponse`, the `"?<OFX>"` fix, the `SgmlReader` fallback against the
+bundled `ofx160.dtd`/`ofx201.dtd`, `Settings.ImportOFXAsUTF8` — Phase 2's P2-PREF-*.
+**See Open Question 11 — the declared-encoding read never actually looks at the file.**)*
+
+### P6-FILE-3 — Be told plainly when the "statement" is really a web page
+When a bank's server answers with a login page or an error page instead of a statement —
+the most common failure of the whole feature — the product recognises it as such and
+shows the page it got back, rather than reporting a parse error.
+*(`HtmlResponseException` raised on `<html>`/`<!DOCTYPE html`, rendered by
+`OfxDownloadController`'s details page)*
+
+### P6-FILE-4 — Be told plainly when a statement file is a kind that isn't supported
+A file that announces a protocol generation, a data format, a security scheme or a
+compression the product doesn't implement is refused by name rather than half-read.
+*(`ParseOfxResponse`'s `OFXHEADER`/`DATA`/`VERSION`/`SECURITY`/`COMPRESSION` header checks)*
+
+### P6-FILE-5 — Keep a copy of every conversation for when something goes wrong
+Every request sent and every response received is written to a log folder beside the
+program, with credentials blanked, and the details page links to it. A statement file
+imported from disk gets the same treatment, so the user always has something to hand over.
+*(`OfxRequest.SaveLog`, `OfxRequest.OfxLogPath`, the per-institution unique log names)*
+
+---
+
+## 6.4 Investment statements
+
+### P6-INV-1 — Have trades arrive as trades, not as unexplained amounts
+A brokerage statement's purchases, sales, transfers in and out, income, expenses, margin
+interest and cash movements each become the corresponding kind of entry with its own
+holding, quantity, unit price, commission, fees, taxes and load filled in, and an
+investment category chosen to match what was traded — shares, funds, bonds, options or
+other.
+*(`ProcessInvestmentTransactionList` and its per-element handlers; `InvestmentType`,
+`InvestmentTradeType`, the `Categories.Investment*` set)*
+
+### P6-INV-2 — Have a reinvested dividend recorded as both halves
+When income is reinvested, the product records both the purchase and the matching cash
+receipt, so the holding grows and the income still shows up as income.
+*(`ProcessInvestmentTransactionList`'s `REINVEST` case creating a second, paired entry)*
+
+### P6-INV-3 — Have holdings named the way the user names them
+Securities in a statement are matched to the ones already held by ticker first, then by
+the institution's own identifier, then by name, and a holding the user has never seen
+before is created. Where the security's name is one the user has taught the product to
+rename, the rename applies to the holding itself and not just to that one entry.
+*(`ReadSecurityInfo`, `ProcessSecId`, the alias handling in
+`ProcessInvestmentTransactionList` — Phase 1's P1-ALIAS-* reused for securities)*
+
+### P6-INV-4 — Get today's prices out of the statement too
+The prices and holdings the institution reports alongside the statement update the
+product's own record of what each security is worth and when that price was struck, and a
+trade that arrives without a price borrows the one the statement just supplied.
+*(`ProcessInvestmentPositions`, `ReadSecurityInfo`'s `UNITPRICE`, the price back-fill in
+`ProcessInvestmentTransactionList`)*
+
+### P6-INV-5 — Not be given entries that mean nothing
+An entry that neither moves cash nor changes a holding is dropped rather than added as a
+zero row.
+*(`ProcessInvestmentTransactionList`'s `Amount == 0 && Units == 0` skip)*
+
+### P6-INV-6 — Have a purchase count as money out whichever way the broker writes it
+Institutions disagree about the sign of a purchase total; the product forces a buy to
+reduce cash and a sale to increase it regardless of how the statement expressed it.
+*(`ProcessInvestmentBuy`'s forced negative, with the two contradictory real-world examples
+recorded in the code)*
+
+---
+
+## 6.5 Spreadsheets and CSV statements
+
+### P6-CSV-1 — Import a spreadsheet the bank produced, whatever its columns are called
+A delimited file exported from a bank or a spreadsheet program can be imported without
+the user editing it first: they are shown their own file's column headings and say which
+piece of a transaction each one is, once, and the answer is remembered for that account.
+*(`CsvImportController`, `CsvTransactionImporter`, `CsvMap` saved as one file per account
+under a `CsvMaps` folder beside the data file; the mapping conversation is Phase 4's
+P4-IMPORT-7…10)*
+
+### P6-CSV-2 — Be asked again only when the file's shape changes
+The remembered mapping is reused silently as long as the incoming file's headings still
+match it exactly; the moment a bank changes its export format the user is asked to
+re-map, rather than the import quietly landing in the wrong fields.
+*(`CsvTransactionImporter.HeadersMatch` comparing heading-for-heading in order)*
+
+### P6-CSV-3 — Import a file covering several accounts at once
+A spreadsheet that names an account per row — the usual shape of a brokerage's
+whole-portfolio export — is split by account, each group matched to one of the user's
+accounts by number, and each imported separately with its own result row. The mapping
+worked out for the first group is offered to the rest, so the user answers once.
+*(`CsvTransactionImporter.GroupCsvByAccount`, `CsvImportController.ImportCsv`'s
+`"Account Number"` branch. **See Open Questions 2 and 3.**)*
+
+### P6-CSV-4 — Bring in trades from a broker's spreadsheet
+For a brokerage or retirement account the mapping offers the extra columns a trade needs —
+the symbol, the quantity, the unit price and the kind of trade — and the product works out
+whether each row is a purchase, a sale, a transfer of shares in or out, a dividend or
+interest from the amounts and the wording. A row that gives only two of quantity, price
+and total has the third worked out for it.
+*(`CsvTransactionImporter.BrokerageAccountFields`, `AddInvestmentInfo`, the
+quantity/price back-calculation in `ImportRow`)*
+
+### P6-CSV-5 — Have a missing trade price filled in from market history
+When a spreadsheet gives a quantity but no price, the product looks up what the security
+was worth on that date and fills it in, so the holding's cost isn't left at zero.
+*(`CsvTransactionImporter.LookupUnitPrice` → `StockQuoteCache.GetSecurityMarketPrice`)*
+
+### P6-CSV-6 — Not get a second copy of everything on every import
+Spreadsheets rarely carry a stable identifier for a transaction, so the product matches
+each incoming row against what the account already holds on the same date with the same
+party, amount and holding, and updates the existing entry rather than adding a duplicate.
+That is what makes re-importing an overlapping export safe.
+*(`CsvTransactionImporter.TransactionCache`, indexed by date for speed;
+`FindMatch`/`IsMatch`)*
+
+### P6-CSV-7 — Have the sign flipped for a bank that records spending as positive
+One toggle in the mapping handles the common case of a file whose amounts run the
+opposite way round from the product's convention.
+*(`CsvMap.Negate` — Phase 4's P4-IMPORT-9.
+**See Open Question 4 — bracketed negatives are read as positive regardless.**)*
+
+### P6-CSV-8 — Have the file's rubbish rows ignored
+Rows that are just a disclaimer line, rows the bank posted before they have a date
+(pending transactions), and the trailing notes banks tack onto their exports are skipped
+rather than becoming entries.
+*(`ImportRow`'s single-value and `Date == MinValue` guards)*
+
+### P6-CSV-9 — Have quoted, comma-bearing and escaped fields read correctly
+The file's own quoting is honoured, including doubled quotes inside a quoted field and
+whitespace around delimiters, so a payee with a comma in its name survives the import.
+*(`CsvDocument.ReadRecord`)*
+
+### P6-CSV-10 — Be told when the file has nothing in it
+An empty or header-only file is refused with a plain message rather than reporting a
+successful import of nothing.
+*(`CsvDocument.Read`'s `".csv file is empty"`)*
+
+---
+
+## 6.6 Quicken and Microsoft Money exports (QIF)
+
+### P6-QIF-1 — Bring in a history exported from the product they're leaving
+A QIF file exported from Quicken or Microsoft Money imports with its dates, amounts,
+cheque numbers, payees, memos, categories, cleared marks and itemised breakdowns intact —
+the route by which years of history move into this product.
+*(`QifImporter.ImportQif`'s field handling; the two format references cited in the code)*
+
+### P6-QIF-2 — Have the account created, or be asked which one to merge into
+The product proposes an account named after the file and offers to create it; if the user
+declines, or an account of that name already exists with entries in it, they are asked
+whether to merge the file into the account they currently have open instead.
+*(`QifImporter.Import`'s create/merge prompts. **See Open Question 5 — the prompt has a
+typo, and the caller has already asked the same question.**)*
+
+### P6-QIF-3 — Have the account's kind taken from the file
+For a brand new account, what kind of account it is — everyday, savings, cash, credit card
+or brokerage — is read out of the file rather than having to be set by hand afterwards.
+*(the `!Type:` header mapping, including Microsoft Money's "Other" being treated as
+everyday. **See Open Question 6 — the same check refuses correct merges and permits
+wrong ones.**)*
+
+### P6-QIF-4 — Have transfers between accounts reconnected on the way in
+Where the file records a movement to another account, the product looks for the other half
+among what it already has — matching on the same day, the same party and the opposite
+amount, including inside itemised breakdowns — and links the two into a single transfer
+rather than two unrelated entries. The account on the other end is created if it isn't
+there yet.
+*(`Importer.FindMatchingTransfer`/`FindSplitTransfer`/`FindMatchingSplitTransfer`, the
+`'L'` and `'S'` handling in `ImportQif`)*
+
+### P6-QIF-5 — Have the starting balance recognised as a starting balance
+A file's opening-balance line becomes the account's opening balance rather than a
+transaction on day one.
+*(`ImportQif`'s self-transfer + "Opening Balance" payee case setting `Account.OpeningBalance`)*
+
+### P6-QIF-6 — Have voided entries come in as voided
+An entry the source system marked void arrives void, with its payee intact.
+*(the `'P'` handler's `VOID` prefix)*
+
+### P6-QIF-7 — Not inherit the old product's reconciliation state
+Entries the source marked reconciled arrive merely cleared, deliberately, so that
+balancing an account against a statement starts from a clean slate in this product rather
+than inheriting the other product's idea of what was reconciled.
+*(the `'C'` handler's explicit comment; `TransactionStatus.Cleared`)*
+
+### P6-QIF-8 — Import into an account that already has entries without duplicating them
+When the destination already holds transactions, each incoming entry is matched against
+them first and merged where it matches, and everything that arrives is marked unapproved
+so the user reviews it.
+*(`ImportQif`'s `merge` mode → `Transactions.Merge`, `t.Unaccepted = true`.
+**See Open Question 7 — a first-time import marks nothing unapproved.**)*
+
+---
+
+## 6.7 Merging another copy of the same books
+
+### P6-MERGE-1 — Fold a second copy of their own data back into the main one
+A user who has been working in a copy of their data file elsewhere — a laptop, a second
+machine — can merge that copy back in. The product works through it account by account and,
+for each entry, either updates the one already there with whatever the copy knows and it
+doesn't, or adds it as new.
+*(`MoneyFileImportDialog.ImportAccount`, `Transaction.Merge` — Phase 4's P4-IMPORT-1…6
+covers what the user sees)*
+
+### P6-MERGE-2 — Be warned that this only works between copies of the same file
+Before anything happens the user is told, in so many words, that merging only works if
+both files started from the same state — because entries are paired by the internal
+identity they were given when first recorded, not by looking anything like each other.
+*(`MainWindow.ImportMoneyFile`'s confirmation;
+`MoneyFileImportDialog.ImportAccount`'s `FindTransactionById(t.Id)` — that identity match
+is the reason for the warning)*
+
+### P6-MERGE-3 — Bring the paperwork and the statements across with the entries
+Attachments belonging to the incoming entries and the statement documents belonging to
+the incoming accounts are copied across alongside the transactions.
+*(`AttachmentManager.ImportAttachments`, `StatementManager.ImportStatements`;
+Phase 4's P4-IMPORT-6 and its Open Question 14, now filed as
+[markabrandjord/MyMoney.Net#54](https://github.com/markabrandjord/MyMoney.Net/issues/54) —
+the attachments are filed against the incoming entry rather than the surviving one)*
+
+### P6-MERGE-4 — Open a protected copy
+If the incoming file is password-protected the user is prompted for its credentials, with
+the prompt worded for the file being imported rather than for their own.
+*(`MoneyFileImportDialog.ProcessFile`; only SQLite data files are accepted — anything else
+is refused with *"Import only supports sqllite money files"*)*
+
+---
+
+## 6.8 Copying, pasting and the product's own interchange format
+
+### P6-XML-1 — Copy entries out and paste them back somewhere else
+A transaction, an itemised line or a whole row can be copied and pasted into another
+account, carrying its party, category, amount, memo, holding and breakdown with it. The
+pasted copy is a genuinely new entry — it gets its own identity, loses the original's
+cleared and reconciled state, and loses any "these are not duplicates" mark, so the
+destination account's balancing history isn't contaminated by the copy.
+*(`TransactionsView.CopySelection`/`PasteSelection`, `Exporters.ExportString`,
+`XmlImporter.ImportObjects`/`AddTransaction`)*
+
+### P6-XML-2 — Move an entry to a different account rather than copying it
+Cutting rather than copying moves the original entry — with its paperwork — to the
+destination instead of duplicating it, and refuses to move one that has already been
+reconciled.
+*(`XmlImporter.ImportObjects`'s `"cut"` action, `IBusinessLayerUiCallback.MoveAttachments`)*
+
+### P6-XML-3 — Copy an account definition and paste it back
+An account's own settings can be copied to the clipboard and pasted in as a new account,
+matched by name so pasting an account that already exists doesn't create a second one.
+*(`AccountsControl.Copy`/`Paste`, `Account.Serialize`, `XmlImporter.ImportAccount` →
+`MergeAccount`. **See Open Question 8 — a successful paste always reports failure.**)*
+
+### P6-XML-4 — Write an account out as a file and read it back
+A single account and its entries can be written out as the product's own XML interchange
+file and imported into another copy of the product, which recreates the account if it
+isn't there and adds the entries to it.
+*(`AccountsControl.Export` → `Exporters.Export`'s `.xml` branch;
+`MainWindow.ImportXml` → `XmlImporter.ImportXml`)*
+
+### P6-XML-5 — Be stopped before entries land in nowhere
+An interchange file whose entries name an account that neither exists nor is described in
+the file itself is refused with an explanation, rather than the entries being dropped
+silently.
+*(`XmlImporter.AddTransaction`'s *"Cannot add transactions before we find account
+information in the imported xml file"*; `Exporters.ExportToXml` writing the referenced
+accounts — including both ends of a transfer — ahead of the entries for exactly this reason)*
+
+---
+
+## 6.9 Sending data back out
+
+### P6-OUT-1 — Take whatever is on screen away as a spreadsheet
+Whatever list the user is looking at — a filtered register, a search result, a loan's
+payment schedule — can be written out as a delimited file and opens in their spreadsheet
+program straight away. The columns adapt to the content: trade details appear only if
+there are trades in the list, sales tax only if any row has it, and a currency column only
+if the rows span more than one currency.
+*(`TransactionsView.OnCommandViewExport`, `LoansView`'s export, `Exporters.ExportPrompt`/
+`ExportToCsv`, `CsvTransactionFormat`. **See Open Questions 9 and 10 — the amounts are
+written in a form the product's own importer reads back with the wrong sign, and XML is
+never offered here.**)*
+
+### P6-OUT-2 — Take one account away in full
+A single account can be written out with all its entries, in the product's own interchange
+format or — for a brokerage account — in a tax-software format.
+*(`AccountsControl.OnExportAccount` → `Export`; the `.txf` branch is Phase 7's
+`TxfExporter`, see Open Question 22)*
+
+### P6-OUT-3 — Take the list of accounts away
+The accounts themselves — kind, name, whether closed, currency, balance and when it was
+last balanced — can be written out as a spreadsheet and opened.
+*(`AccountsControl.OnExportAccountList`/`ExportList`; internal category-fund accounts are
+left out. **See Open Question 10 for the amount formatting.**)*
+
+### P6-OUT-4 — Save the whole file in a different format
+The user can save their entire data file as a different kind of file — a different
+database engine, a plain-text or compact XML file, or a spreadsheet — which is how they
+change storage choice or take a readable snapshot away.
+*(`MainWindow.OnCommandFileSaveAs`'s per-extension switch; Phase 4's P4-DATA-* owns the
+conversation. **See Open Question 12 — the spreadsheet choice saves the current view, not
+the file.**)*
+
+### P6-OUT-5 — See a picture of how money moves between their accounts
+The user can produce a diagram of their accounts with an arrow between any two that money
+has been transferred between, labelled with the total moved and colour-coded by account
+kind, and it opens in whatever program handles that kind of diagram.
+*(`Exporters.ExportDgmlAccountMap`, `MainWindow.OnCommandFileExportAccountMap`;
+`SimpleGraph`. **See Open Question 17.**)*
+
+---
+
+## 6.10 Finding the institution to download from
+
+### P6-BANKS-1 — Pick their bank from a list rather than typing its address
+When setting up a download the user searches a directory of thousands of institutions and
+picks theirs, and the address, organisation identifier, broker identifier and protocol
+generation are filled in for them.
+*(`OfxInstitutionInfo.GetCachedBankList` seeded from the bundled `Ofx/OfxProviderList.xml`
+(~4,400 lines); `OnlineAccountDialog` is Phase 4's P4-ONLINE-*)*
+
+### P6-BANKS-2 — Have that list stay current without an upgrade
+The directory is refreshed from a public registry in the background and merged with both
+the copy that shipped with the product and the user's own local copy, with the most
+recently-changed value for each field winning — so a user's own hand-typed correction
+isn't overwritten by stale registry data, and vice versa.
+*(`GetRemoteBankList`, `MergeProviderList`, `OfxInstitutionInfo.Merge`/`SetIfNewer`,
+`ChangeTrackedField`. **See Open Questions 18 and 19.**)*
+
+### P6-BANKS-3 — Have the product learn what an institution actually supports
+Before downloading, the product asks the institution itself what it can do and what it
+needs — which identity fields it wants, whether it requires a device identifier, whether a
+password must be changed first, whether it asks extra identity questions — and caches the
+answer so it doesn't have to ask again. If the institution can't be reached the cached
+answer is used.
+*(`OfxRequest.GetProfile`/`LoadCachedProfile`/`GetSignonInfo`, `OfxObjectModel`'s
+`OfxSignOnInfo`; the "profile unchanged" fast path)*
+
+---
+
+## 6.11 What every import does the same way
+
+### P6-ALL-1 — Have a whole import land as one change, not hundreds
+Everything an import writes is treated as a single update, so lists don't churn, totals
+don't flicker part-way through, and one undo-sized change appears rather than a row per
+entry.
+*(`MyMoney.BeginUpdate`/`EndUpdate` around `ProcessStatement`,
+`ProcessResponse`'s per-message-set scope, `CsvTransactionImporter.Commit`,
+`XmlImporter.ImportObjects`. **See Open Question 20 — the QIF importer is the exception.**)*
+
+### P6-ALL-2 — Have what arrived marked so it can be reviewed
+Everything an import or download adds is flagged as freshly downloaded, so the register
+can show the user exactly this batch and they can approve it entry by entry or all at once
+afterwards.
+*(`Transaction.IsDownloaded`, `DownloadData.AddItem` — Phase 1's P1-TXN-10, Phase 3's
+P3-REG-11)*
+
+### P6-ALL-3 — Have the party names cleaned up on the way in, by the same rules everywhere
+The rename rules the user has built are applied by every route in — bank download,
+spreadsheet, investment statement — and where a rule fires, the source's original wording
+is preserved in the memo rather than discarded.
+*(`Aliases.FindMatchingAlias` in `ProcessStatement`,
+`ProcessInvestmentBankTransaction`, `ProcessInvestmentTransactionList` and
+`CsvTransactionImporter.MapField` — Phase 1's P1-ALIAS-*)*
+
+### P6-ALL-4 — Carry on after one file, or one account, goes wrong
+A failure reading one file, or one account inside one file, is reported against that row
+and the rest of the batch continues, rather than the whole import stopping.
+*(the per-file `try`/`catch` in `OfxThread.LoadImports` and `MainWindow.ImportQif`, the
+per-statement `continue`s in `Process*Response`, the per-transaction `try`/`catch` in
+`MoneyFileImportDialog.ImportAccount`)*
+
+### P6-ALL-5 — Stop an import that's taking too long or going wrong
+A download in progress can be cancelled, which stops every institution's request at once
+and clears the results panel.
+*(`OfxDownloadController.Cancel`, `OfxThread.Stop`, `OfxRequest.Cancel`'s cancellation
+token; `UserCanceledException` unwinding a CSV import quietly)*
+
+---
+
+## Phase 6 coverage checklist
+
+Every file in `MyMoney.Business/Importers/` and `MyMoney.Business/Ofx/`, plus
+`MyMoney/Ofx/`. "Not user-facing" entries are plumbing, vendored libraries or dead code
+the user never perceives.
+
+### `Importers/`
+
+| File | Type | Status |
+|---|---|---|
+| `Importer.cs` | `Importer` (abstract) | P6-QIF-4 — the transfer-reconnection helpers; the base `Import(string)` returns 0 and is overridden only by `XmlImporter` |
+| `CsvImporter.cs` | `CsvTransactionImporter` | P6-CSV-1…P6-CSV-8, P6-ALL-1, P6-ALL-3 — see Open Questions 2, 3, 4 |
+| `CsvImporter.cs` | `CsvMap`, `CsvFieldMap` | P6-CSV-1, P6-CSV-2, P6-CSV-7 — the remembered per-account column mapping, stored as XML in a `CsvMaps` folder |
+| `CsvImporter.cs` | `TransactionCache` (nested) | P6-CSV-6 — the date-indexed duplicate check that makes re-importing an overlapping export safe |
+| `CsvImporter.cs` | `TBag` (nested) | **Not user-facing** — one parsed row before it becomes a transaction |
+| `CsvImporter.cs` | `UserCanceledException` | P6-ALL-5 — how cancelling the column-mapping dialog unwinds a CSV import without an error |
+| `CsvImportController.cs` | `CsvImportController` | P6-CSV-1, P6-CSV-3, P6-CSV-5 — see Open Question 3 |
+| `CsvDocument.cs` | `CsvDocument` (namespace `Walkabout.Utilities`) | P6-CSV-9, P6-CSV-10 — the delimited-file parser |
+| `CsvTransactionFormat.cs` | `CsvTransactionFormat` (namespace `Walkabout.Data`) | P6-OUT-1, P6-OUT-3 — the shared row/column writer; also used by `MyMoney.Data`'s `CsvStore.Save`. See Open Question 9 |
+| `QifImporter.cs` | `QifImporter` | P6-QIF-1…P6-QIF-8 — see Open Questions 5, 6, 7, 20 |
+| `XmlImporter.cs` | `XmlImporter` | P6-XML-1…P6-XML-5 — see Open Question 8 |
+| `Exporters.cs` | `Exporters` | P6-OUT-1, P6-OUT-2, P6-OUT-5, P6-XML-1, P6-XML-4 — see Open Questions 9, 10, 17, 21 |
+| `DownloadData.cs` | `DownloadData` | P6-ENTRY-4, P6-OFX-6 — one row of the results panel, thread-safe so background downloads can update it; its `OfxError` setter is what turns an error row into an action link |
+| `DownloadData.cs` | `DownloadEventArgs` | P6-ENTRY-4 — the collection of those rows a download or import publishes |
+| `DownloadData.cs` | `DownloadProgress` (delegate) | **Not user-facing** — the progress callback shape |
+| `IImportProgressReporter.cs` | `IImportProgressReporter` | **Not user-facing** — the seam that lets the QIF and CSV importers live in the business layer while the WPF project supplies the panel |
+
+### `MyMoney.Business/Ofx/`
+
+| File | Type | Status |
+|---|---|---|
+| `Ofx.cs` | `OfxThread` | P6-OFX-1, P6-OFX-2, P6-FILE-1, P6-ALL-4, P6-ALL-5 — the parallel download/import driver |
+| `Ofx.cs` | `OfxRequest` | P6-OFX-3…P6-OFX-15, P6-FILE-1…P6-FILE-5, P6-INV-1…P6-INV-6, P6-BANKS-3, P6-ALL-1…P6-ALL-4 — see Open Questions 11, 13, 14, 16, 23 |
+| `Ofx.cs` | `OfxMfaChallengeRequest` | P6-OFX-7 — see Open Questions 15, 16 |
+| `Ofx.cs` | `OfxException` | P6-ENTRY-5, P6-OFX-6 — carries the code, raw response and headers the details page prints |
+| `Ofx.cs` | `LogFileInfo` (internal) | P6-FILE-5 — remembers which log file a parsed response came from so the details page can link it |
+| `OfxObjectModel.cs` | `OFX` + ~40 response types | P6-BANKS-3, P6-OFX-6, P6-OFX-7 — the deserialised sign-on, profile, sign-up and MFA responses. Individually **not user-facing**; what they enable is captured above |
+| `OfxErrorCode.cs` | `OfxErrorCode` | P6-OFX-6 — the codes the 96 messages are keyed by |
+| `OfxStrings.resx` + `.Designer.cs` | `OfxStrings` | P6-OFX-6 — the plain-English text for every refusal the standard defines |
+| `OfxInstitutionInfo.cs` | `OfxInstitutionInfo` | P6-BANKS-1, P6-BANKS-2 — see Open Questions 18, 19 |
+| `OfxInstitutionInfo.cs` | `ChangeTrackedField` | P6-BANKS-2 — the per-field "when was this last changed" stamp the merge decides on |
+| `OfxInstitutionInfo.cs` | `LoadProviderList` | **Dead** — never called; `MergeProviderList` is what actually loads a directory document |
+| `OfxInstitutionInfo.cs` | `ParseMoneyDancePythonScript` | **Dead** — a one-off scraper for another product's institution list, reachable from no UI or command. See Open Question 19 |
+| `HtmlResponseException.cs` | `HtmlResponseException` | P6-FILE-3 |
+| `SgmlParser.cs`, `SgmlReader.cs` | `Walkabout.Sgml.*` | **Not user-facing** — a vendored 2002 general-purpose SGML-to-XML reader, used only as the lenient fallback behind P6-FILE-2. 3,765 of the folder's ~10,000 lines |
+| `ofx160.dtd`, `ofx201.dtd` | — | P6-FILE-2 — the grammars that lenient fallback reads against |
+| `OfxProviderList.xml` | — | P6-BANKS-1 — the ~4,400-line institution directory that ships with the product |
+| `MfaPhrases.xml` | — | P6-OFX-7 — the standard's identity-question wordings, read by Phase 4's `MfaChallengeDialog` |
+| `OfxErrorTemplate.htm` | — | P6-ENTRY-5 — the failure report's layout |
+| `OFX 2.1.1.pdf`, `ofx16.pdf` | — | **Not user-facing** — the protocol specifications, checked in as developer reference |
+
+### `MyMoney/Ofx/`
+
+| File | Type | Status |
+|---|---|---|
+| `OfxDownloadController.cs` | `OfxDownloadController` | P6-OFX-1, P6-OFX-2, P6-OFX-6, P6-ENTRY-5, P6-ALL-5 — the bridge between the results panel and the four recovery dialogs |
+
+### Supporting files owned by other phases
+
+| File / member | Status |
+|---|---|
+| `MainWindow.xaml.cs` import/export region | Phase 2's P2-FILE-11 / P2-START-3 / P2-CMD-11; the behaviour is P6-ENTRY-1…3, P6-OFX-1/2, P6-OUT-4/5. **See Open Questions 1 and 12** |
+| `Dialogs/MoneyFileImportDialog.xaml.cs` | Phase 4's P4-IMPORT-1…6 for the conversation; the matching and writing is P6-MERGE-1…4 |
+| `Dialogs/CsvImportDialog.xaml.cs` | Phase 4's P4-IMPORT-7…10; what the mapping is then used for is P6-CSV-1/2 |
+| `WpfBusinessLayerUiCallback.cs` / `IBusinessLayerUiCallback.cs` | **Not user-facing** — the seam through which the business-layer importers reach dialogs, file pickers and the shell |
+| `Controls/DownloadControl.xaml.cs` + `DownloadControlProgressReporter.cs` | Phase 2's P2-PANE-5; what it shows is P6-ENTRY-4. **See Open Question 24** |
+| `Dialogs/SelectAccountDialog.xaml.cs` (`AccountHelper.PickAccount`) | Phase 4's account picker; P6-OFX-9 and P6-CSV-3 are what it is asked for here |
+| `MyMoney.Data/CsvStore.cs` — `Save` | P6-OUT-4 — the "Save As .csv" destination. See Open Question 12 |
+| `MyMoney.Data/CsvStore.cs` — `ImportCsv` (static) | **Dead** — a second, stricter CSV importer demanding exactly three ISO-dated columns, called from nowhere. See Open Question 21 |
+| `MyMoney.Data/XmlStore.cs`, `BinaryXmlStore` | Phase 4's P4-DATA-* / Phase 8 — whole-file storage formats rather than interchange; referenced by P6-OUT-4 only |
+| `MyMoney.Business/Utilities/ProcessHelper.cs` | **Not user-facing** — where the hand-off list and the log folder live; P6-ENTRY-2 |
+| `Taxes/TxfExporter` | **Phase 7** — read only far enough to say an account can be exported that way (P6-OUT-2). See Open Question 22 |
+| `Transactions.Merge`, `Transaction.Merge`, `FindPotentialDuplicate` | **Phase 1** (P1-IMPORT-1…6) — the matching rules every route here relies on |
+
+---
+
+## Open questions from Phase 6
+
+Things a human should double-check, because the call was a judgement rather than obvious
+from the code — and, where noted, because they look like real defects.
+
+1. **Importing more than one file at a time imports the earlier ones repeatedly.**
+   `MainWindow.OnCommandFileImport` builds four accumulating lists (`qifFiles`,
+   `ofxFiles`, `csvFiles`, `moneyFiles`) *outside* its `foreach (string file in
+   openFileDialog1.FileNames)` loop but drains them *inside* it, and never clears them.
+   Select three `.qif` files and the first is imported three times, the second twice, the
+   third once — six imports for three files. The same applies to `.ofx`, `.csv` and
+   `.mmdb`: three data files selected together means the "merging only works if both
+   started with the same state" warning and the merge window appear six times. The account
+   picker is re-prompted on each repeat, and the "Loaded N transactions" total is wrong.
+   Duplicate matching absorbs most of the damage for OFX (stable identifiers) and CSV
+   (date/payee/amount), and QIF merge mode absorbs some, but a *first* QIF import into an
+   empty account is not in merge mode (Open Question 7) and so genuinely doubles. The file
+   dialog sets `Multiselect = true` deliberately, so this is a supported path, not an edge
+   case. Moving the four drains after the loop is the whole fix.
+
+2. **A multi-account spreadsheet strips the wrong columns off every row but the first.**
+   `CsvTransactionImporter.GroupCsvByAccount` removes the "Account Number" and "Account"
+   columns from each row as it groups, and adjusts `accountNameIndex` to account for the
+   first removal — but `accountNameIndex` is declared outside the row loop, so the
+   adjustment happens again on every row and walks the index down until it collides with
+   `accountNumberIndex`. It happens to be harmless when the two columns are adjacent
+   (which is the common layout, and presumably why it has survived), but with any column
+   between them every row after the first has an innocent column deleted instead of the
+   account name, shifting everything to its right by one. P6-CSV-3 describes the intent.
+
+3. **Rows in a multi-account spreadsheet that don't name an account are silently
+   dropped**, and **cancelling the account picker crashes the import.** In
+   `GroupCsvByAccount`, a row whose account-number cell is empty falls off the end of the
+   `if (!string.IsNullOrEmpty(accountNumber))` with no `else` — no count, no warning, no
+   error row; the user just gets fewer transactions than the file had. Separately, in
+   `CsvImportController.ImportCsvForAccount`, the account the user picked is dereferenced
+   (`acct.Type`) with no null check, while the caller three lines later writes
+   `if (count > 0 && acct != null)` — so cancelling the picker (which
+   `AccountHelper.PickAccount` signals by returning null) throws a `NullReferenceException`
+   that the outer `catch (Exception)` reports to the user as *"Object reference not set to
+   an instance of an object"* under the title "Import Error".
+
+4. **Accounting-style negative amounts import as positive.**
+   `CsvTransactionImporter.MapField`'s amount case matches `([+-]?[\d,.]+)` and parses the
+   captured group, so `($1,234.56)` — the form many banks and every `ToString("C2")` in
+   this codebase produce for a negative — yields `1234.56`, positive. The `Negate` toggle
+   (P6-CSV-7) is per-file, not per-row, so it can't rescue a file that mixes both. This
+   compounds with Open Question 9: the product's own CSV export cannot be re-imported
+   without every expense flipping sign.
+
+5. **The QIF importer's own account prompt is misspelled, and it is the second time the
+   user has been asked.** `QifImporter.Import` shows *"The following account does not
+   currently exit"* (for "exist"). More substantially, `MainWindow.ImportQif` has already
+   shown a full account picker for the same file immediately before calling the importer,
+   so the user picks an account and is then asked whether to create a *different* account
+   named after the file, and then — if they say no — asked a third time whether to merge
+   into the one they already picked. Three questions for one file. The importer also
+   decides everyday-vs-savings for a "Bank" file by testing whether the *file path*
+   contains the word "Checking", which is not something a user could be expected to know.
+
+6. **The QIF account-type check refuses correct merges and permits wrong ones.**
+   `QifImporter.ImportQif` computes `bool accountTypeMismatch = at != a.Type;` **before**
+   the `switch` that works out what `at` should be, while `at` is still its initialiser,
+   `AccountType.Checking`. So for every file type except `!Type:Invst` (which recomputes
+   the flag correctly) the comparison is against Checking rather than against the file's
+   real type. Merging a credit-card QIF into a credit-card account therefore throws
+   *"Account type Credit in QIF doesn't match selected account type Credit"* — a message
+   that contradicts itself — while merging that same credit-card QIF into a *chequing*
+   account passes the check and proceeds. One statement, two lines too early. P6-QIF-3
+   describes the intent. The `default:` arm of the same `switch` also reports the
+   destination account's type (`a.Type`) in its "not supported" message instead of the
+   unsupported type read from the file, so the user is told their own account type is
+   unsupported.
+
+7. **A first-time QIF import marks nothing for review.** `ImportQif` sets
+   `t.Unaccepted = true` only inside `if (merge)`, i.e. only when the destination account
+   already had transactions. Importing years of history into a fresh account therefore
+   lands it all pre-approved, while importing the same file into an account with one
+   transaction in it lands it all needing approval. Every other route in — OFX, CSV,
+   investment — marks what it adds unapproved unconditionally. P6-QIF-8 and P6-ALL-2
+   describe the convention; QIF is the exception.
+
+8. **Pasting an account always reports that it failed.** `AccountsControl.Paste` calls
+   `XmlImporter.ImportAccount(xml)` and then tests `importer.LastAccount == null` to
+   decide whether to show *"Clipboard doesn't seem to contain valid account information"*.
+   But `LastAccount` is only ever assigned by `ImportXml` (the file path);
+   `ImportAccount` returns the account and never touches the field, and the importer is
+   freshly constructed on the line above. So the field is unconditionally null and the
+   error dialog fires on every paste, successful or not — the account *is* created, and
+   the user is told it wasn't. Phase 3's P3-ACCT-12 recorded the intended behaviour;
+   this is what runs.
+
+9. **The product's own CSV export cannot be read back by the product's own CSV importer.**
+   `CsvTransactionFormat.WriteTransaction` formats every amount with `ToString("C2")`,
+   which on a typical en-US machine writes negatives as `($1,234.56)`. Combined with
+   Open Question 4, every expense round-trips as income. It also means the exported file
+   carries the *machine's* currency symbol rather than the transaction's own, even though
+   the writer has a dedicated Currency column for exactly that (the same class of bug
+   Phase 5 recorded as its Open Question 7 for the account-summary report). Dates are
+   written with `ToShortDateString()`, i.e. in the machine's own format, so the file is
+   not portable between locales either. P6-OUT-1 records that an export exists without
+   claiming it round-trips.
+
+10. **`AccountsControl.ExportList` formats balances with `ToString("C3")`** — a currency
+    symbol and *three* decimal places — while printing the account's real currency in a
+    separate column right beside it, so a euro account reads `$1,234.000  EUR`. Three
+    decimals appears nowhere else in the product. Same shape as Open Question 9 and as
+    Phase 5's Open Question 7.
+
+11. **The statement parser never reads the encoding the file declares.**
+    `OfxRequest.ParseOfxResponse`'s XML branch builds a regular expression for the
+    `encoding=` attribute and then runs it against a **hard-coded sample string**,
+    `string test = "<?xml version='1.0' encoding='utf-8'?>";`, instead of against
+    `content`. The match always succeeds and always yields `utf-8`, so an OFX 2.x
+    statement declaring `windows-1252` or any other encoding is decoded as UTF-8 and any
+    accented payee name is mangled. One identifier. The existence of the
+    `ImportOFXAsUTF8` preference (Phase 2's P2-PREF-*) suggests this class of problem has
+    been worked around from the outside rather than diagnosed. P6-FILE-2 describes the
+    intent.
+
+12. **"Save As" a spreadsheet does not save the file; it saves whatever list is on
+    screen.** `MainWindow.OnCommandFileSaveAs`'s `.csv` case calls
+    `ExportCsv` → `new CsvStore(filename, this.TransactionView.Rows)`, which writes the
+    current transaction view's rows and nothing else — no accounts, no categories, no
+    payees, no securities, and none of the transactions in accounts the user isn't looking
+    at. It sits in the same menu, and the same switch statement, as three choices
+    (`.sdf`, `.mmdb`, `.xml`/`.bxml`) that genuinely do save the whole file. A user who
+    picks it as a way of taking a copy away gets a fraction of their data with no
+    indication. P6-OUT-4 describes the choice; P6-OUT-1 is what it actually does.
+
+13. **Saved conversation logs mask credentials but not account numbers.**
+    `OfxRequest.SaveLog` blanks nine credential-bearing elements, which is the hard part
+    done — but the `BANKID`, `ACCTID` and `BROKERID` values (and every transaction in the
+    response) are written to `OfxLogs\` in the clear, and P6-ENTRY-5's whole purpose is to
+    get the user to hand that file to someone else. Worth a decision about what the
+    details page should offer to share. (The same method also assigns
+    `string value = e.Value;` and never uses it.)
+
+14. **A failed protocol-version retry leaves the institution mis-configured.**
+    `OfxRequest.SendOfxRequest(XDocument)` flips `onlineAccount.OfxVersion` between "1"
+    and "2" before retrying and never restores it if the retry also fails — so an
+    institution that was correctly set to version 2 and had a transient outage is left
+    recorded as version 1, and the next download starts from the wrong guess.
+    `OfxRequest.Signup`, five hundred lines away, does the same retry and *does* restore
+    the original on failure, with a comment saying why. Two copies of one pattern, one of
+    them fixed. P6-OFX-5 describes the intent.
+
+15. **An institution that asks only machine-identifying questions fails the download.**
+    `OfxMfaChallengeRequest.HandleChallenge` answers the seven standard machine questions
+    itself and then, if *no* questions were left for the user (`userChallenges.Count > 0`
+    is false), falls straight through to
+    `OnError(new OfxException("Server returned unexpected response from MFA Challenge
+    Request"))` — discarding the answers it just worked out. The successful case is only
+    reachable when at least one question needs a human. P6-OFX-7 describes the intent;
+    `OfxDownloadController.OnChallengeCompleted` has a matching `else` branch for
+    "built-in answers only" that can therefore never be reached.
+
+16. **One of the built-in identity answers is in 12-hour time.** The same method answers
+    the standard's "current date and time, formatted YYYYMMDDHHMMSS" question with
+    `DateTime.Now.ToString("yyyyMMddhhmmss")` — lowercase `hh`, which is 12-hour and drops
+    the AM/PM. Every answer given after midday is off by twelve hours. An institution
+    that validates the value will reject the sign-on for a reason nothing in the product
+    can explain.
+
+17. **The account-relationship diagram only draws one direction and silently skips
+    accounts.** `Exporters.ExportDgmlAccountMap` adds a link only where
+    `t.TransferTo != null && t.Amount < 0`, so each transfer pair contributes one arrow
+    (which is arguably the point), but it also iterates *every* transaction in the file
+    including deleted ones, dereferences `t.Account.Type` with no null guard, and wraps
+    the label formatting in a bare `catch {}` that swallows any failure — so a link whose
+    total can't be converted keeps whatever raw value it had. It is also the only export
+    in the product with no error handling around the file write at all: a failure here
+    propagates out of `OnCommandFileExportAccountMap` unhandled. P6-OUT-5 describes the
+    feature.
+
+18. **The institution directory is fetched over plain HTTP.** Both
+    `OfxHomeProviderList` (`http://www.ofxhome.com/api.php?all=yes`) and
+    `OfxHomeProviderInfo` (`http://www.ofxhome.com/api.php?lookup={0}`) are `http://`, not
+    `https://`. What comes back includes the URL the product will subsequently post the
+    user's banking credentials to, and it is merged into the user's local directory and
+    saved. `OfxRequest.SendOfxRequest` does upgrade a bare institution address to `https://`
+    before posting, which limits the damage, but an institution entry whose stored URL
+    already begins `http://` is left alone. This is the most security-relevant thing in
+    the phase and deserves a deliberate decision rather than inheritance.
+
+19. **The directory merge can fold two institutions into one, and re-saves on every
+    read.** `UpdateCachedProfile` matches an institution against the cached list with
+    `string.Compare(item.MoneyDanceId, profile.MoneyDanceId) == 0 ||
+    string.Compare(item.OfxHomeId, profile.OfxHomeId) == 0`, which is **true when both
+    sides are empty** — so a profile with no identifiers merges into the first cached
+    entry that also has none. The file has a helper written for exactly this,
+    `IsMergable`, which returns "not enough information" for the empty case and is used by
+    `MergeProviderList` two hundred lines away, but not here. Separately,
+    `GetCachedBankList` calls `SaveList` unconditionally, so simply *reading* the
+    directory rewrites the ~4,400-entry file on disk — a get with a visible side effect,
+    the same pattern Phase 5 raised as its Open Question 29. And `SetValue`'s
+    change-detection compares `object` references (`if (field.Value != value)`), so equal
+    non-interned strings register as changes and bump the "last changed" stamp the whole
+    merge policy depends on. Also in this file: `ParseMoneyDancePythonScript`, a scraper
+    for a competitor's institution list, is dead code reachable from no command.
+
+20. **The QIF importer has no update scope and no rollback.** Every other route in wraps
+    its writes in `BeginUpdate`/`EndUpdate` (P6-ALL-1); `QifImporter.ImportQif` does not.
+    Combined with its own design — it `throw`s on the *first* field code it doesn't
+    recognise (`"Unknown format '{0}' on line {1}"`), on a malformed status line, on a
+    split without an amount, and on an illegal self-transfer — a file that is 90% valid
+    leaves 90% of its transactions committed, no way to tell which, and a message box
+    naming a line number. Every list churns a row at a time while it runs. `QIF` also has
+    no notion of the "!Account"/"!Type:Cat"/"!Type:Class" sections real exports contain, so
+    a whole-file Microsoft Money export fails on its first line with *"Account type Cat not
+    supported"*. Whether QIF import is worth keeping at all is a redesign question; if it
+    is, this is where to start.
+
+21. **Two dead CSV importers and an export format nobody can reach.**
+    `MyMoney.Data/CsvStore.ImportCsv` is a complete second CSV importer — stricter,
+    demanding exactly three ISO-dated `Date,Payee,Amount` columns — called from nowhere;
+    it reads as the ancestor of the mapping-based one. And `Exporters.SupportXml`, the
+    flag that decides whether the export file dialog offers XML alongside CSV, is assigned
+    in exactly one place in the codebase (`LoansView`, to `false`) and never to `true`, so
+    `ExportPrompt` always offers CSV only. XML export is reachable only through
+    `AccountsControl`'s own save dialog, which bypasses `ExportPrompt` and passes a
+    filename directly. `Exporters.ExportAccount` also dedupes against an instance field
+    (`this.accounts`) that is never cleared, so reusing one `Exporters` for two exports
+    would silently omit the accounts from the second — currently unreachable because every
+    call site constructs a fresh one, but a trap of the same shape as Phase 5's Open
+    Question 21.
+
+22. **Where the Phase 7 line was drawn.** The brief asked whether `.txf` *file-writing
+    mechanics* belong here. They don't, on the evidence: `TxfExporter` lives in `Taxes/`,
+    not in `Importers/` or `Ofx/`, nothing in either of this phase's folders writes or
+    reads `.txf`, and the format is a tax-data serialisation rather than a general
+    interchange format — the record layout and what goes in each field *is* the tax
+    semantics. Phase 6 therefore records only that an account can be exported that way
+    (P6-OUT-2) and that the export is gated by a date-range dialog; everything inside
+    `TxfExporter` is Phase 7's, consistent with Phase 5's Open Question 30. The same line
+    means Phase 6 does not describe what `ExportCapitalGains` classifies as short- or
+    long-term.
+
+23. **Nothing checks the currency of anything that is downloaded.** There are two guards
+    for this and neither runs. `OfxRequest.CheckUSD` — called before every bank, card and
+    investment statement is applied — has its entire body commented out and
+    `return true;` left behind, so the statement's declared currency is read and
+    discarded. `ProcessCurrency`, which compares a *transaction's* currency against the
+    account's, is written as
+    `if (this.currencyErrors.Contains(symbol)) { …AddError…; this.currencyErrors.Add(symbol); }`
+    — the guard is inverted, testing the "already reported this one" set for presence
+    instead of absence and adding to it inside the branch that can therefore never run. A
+    set that starts empty and is only added to inside a branch gated on it being non-empty
+    stays empty forever, so a foreign-currency transaction is booked into a
+    local-currency account with no error row, no log line and no warning. (It is also
+    only wired into the investment path, never the bank or card ones.) For a product that
+    models currencies as thoroughly as Phase 1's P1-CUR-* describes, the import side
+    knows nothing about them. Nearby in the same file, `ProcessSecId` reads
+    `if (string.IsNullOrEmpty(uniqueId)) { idType = "CUSIP"; }` — testing `uniqueId`
+    where `idType` was obviously meant, on a local that is then never used at all.
+
+24. **Where the Phase 8 line was drawn, and one loop that never ends.** Attachments and
+    statement documents are brought across by a data-file merge (P6-MERGE-3), and the
+    stock-price cache is consulted by the CSV importer (P6-CSV-5) — both are captured here
+    only as far as "the import brings them", with the managers themselves left to Phase 8.
+    The results panel is Phase 2's. One thing found in it worth noting regardless:
+    `DownloadControl.SelectEntry` re-posts itself every 100ms until it finds a tree item
+    for the entry it was given, with no attempt limit and no timeout, so an entry that
+    never appears in the tree leaves a timer firing for the life of the session. Also in
+    `MainWindow`: `DoSync` sets `isSynchronizing = true` and clears it in a `finally` that
+    runs before the download it started has done anything, so
+    `CanSynchronizeOnlineAccounts`'s guard against starting a second download never
+    engages — the same is true of the `MenuSync.IsEnabled` pair around it.
