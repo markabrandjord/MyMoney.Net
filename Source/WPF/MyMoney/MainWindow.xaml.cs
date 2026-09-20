@@ -2630,6 +2630,11 @@ namespace Walkabout
             this.Save();
         }
 
+        private void OnPendingChangeDropDownToggleClick(object sender, RoutedEventArgs e)
+        {
+            this.pendingChangeFlyout.IsOpen = !this.pendingChangeFlyout.IsOpen;
+        }
+
         #endregion
 
         #region Balancing

@@ -251,28 +251,45 @@
 
         <Separator Visibility="Hidden" Width="10"/>
 
-        <ui:SplitButton x:Name="PendingChangeDropDown" VerticalAlignment="Center" Click="PendingChangeClicked">
-
+        <!--
+          Was a single ui:SplitButton with its .Flyout set to a ui:Flyout. Found (2026-09-20,
+          via reflection on the real installed Wpf.Ui.dll) that SplitButton.Flyout is typed
+          `object` (so that markup compiled) but SplitButton's internal click handler only ever
+          acts when the assigned value casts to System.Windows.Controls.ContextMenu - a
+          Wpf.Ui.Controls.Flyout is not a ContextMenu, so the cast silently fails and clicking
+          the dropdown chevron did nothing at all (no error, no popup) - a real, confirmed API
+          mismatch, not a test-tooling artifact (reproduced both via automated FlaUI/in-process
+          checks and manual click). Fixed by not routing through SplitButton.Flyout at all: two
+          plain ui:Button elements (main Save action + a small chevron toggle we control
+          directly) and the ui:Flyout as a plain sibling we open/close ourselves via its own
+          IsOpen property, which is confirmed to work.
+        -->
+        <Grid VerticalAlignment="Center">
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Save24}" Margin="0,0,4,0"/>
-            <TextBlock Text="Save"/>
+            <Button x:Name="PendingChangeDropDown" Click="PendingChangeClicked">
+              <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Save24}" Margin="0,0,4,0"/>
+                <TextBlock Text="Save"/>
+              </StackPanel>
+            </Button>
+            <Button x:Name="PendingChangeDropDownToggle" Click="OnPendingChangeDropDownToggleClick" Margin="1,0,0,0" Padding="4,0">
+              <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.ChevronDown16}"/>
+            </Button>
           </StackPanel>
 
-          <ui:SplitButton.Flyout>
-            <ui:Flyout x:Name="pendingChangeFlyout" Opened="OnOpeningPendingChangeFlyout">
-              <Border>
-                <Grid >
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                  </Grid.RowDefinitions>
-                  <StackPanel x:Name="pendingStack" Grid.Row="0"></StackPanel>
-                  <Button Grid.Row="1" Command="p:AppCommands.CommandRevertChanges" HorizontalAlignment="Right" Margin="3">Revert Changes</Button>
-                </Grid>
-              </Border>
-            </ui:Flyout>
-          </ui:SplitButton.Flyout>
-        </ui:SplitButton>
+          <ui:Flyout x:Name="pendingChangeFlyout" Placement="Bottom" Opened="OnOpeningPendingChangeFlyout">
+            <Border>
+              <Grid >
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="pendingStack" Grid.Row="0"></StackPanel>
+                <Button Grid.Row="1" Command="p:AppCommands.CommandRevertChanges" HorizontalAlignment="Right" Margin="3">Revert Changes</Button>
+              </Grid>
+            </Border>
+          </ui:Flyout>
+        </Grid>
 
         <Separator Visibility="Hidden" Width="10"/>
 
