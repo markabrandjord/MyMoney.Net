@@ -1674,13 +1674,29 @@ namespace Walkabout
         {
             if (!File.Exists(this.settings.ConfigFile) || this.noSettings)
             {
-                Rect bounds = SystemParameters.WorkArea;
-                if (bounds.Width != 0 && bounds.Height != 0)
+                if (this.noSettings)
                 {
-                    this.Top = bounds.Top;
-                    this.Left = bounds.Left;
-                    this.Width = bounds.Width;
-                    this.Height = bounds.Height;
+                    // /nosettings is the launch flag FlaUI tests and manual dev/diagnostic runs
+                    // use (to avoid touching the developer's real settings file) - not a genuine
+                    // first-run-for-a-real-user scenario, which stays full-workarea below. A
+                    // smaller, windowed default here lets a person watch a test run live
+                    // alongside a terminal instead of the app covering the whole screen.
+                    Rect workArea = SystemParameters.WorkArea;
+                    this.Width = Math.Min(1400, workArea.Width);
+                    this.Height = Math.Min(900, workArea.Height);
+                    // Left/Top deliberately left alone - WPF's own default placement, not a
+                    // forced position, so the window opens wherever it naturally would.
+                }
+                else
+                {
+                    Rect bounds = SystemParameters.WorkArea;
+                    if (bounds.Width != 0 && bounds.Height != 0)
+                    {
+                        this.Top = bounds.Top;
+                        this.Left = bounds.Left;
+                        this.Width = bounds.Width;
+                        this.Height = bounds.Height;
+                    }
                 }
                 this.TransactionView.ViewAllSplits = false;
                 this.TransactionView.OneLineView = false;
