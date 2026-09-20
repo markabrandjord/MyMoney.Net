@@ -5,4 +5,4 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-[assembly: SuppressMessage("Assertion", "NUnit2005:Consider using Assert.That(actual, Is.EqualTo(expected)) instead of Assert.AreEqual(expected, actual)", Justification = "<Pending>", Scope = "namespaceanddescendants", Target = "Walkabout.Tests")]
+[assembly: SuppressMessage("Assertion", "NUnit2005:Consider using Assert.That(actual, Is.EqualTo(expected)) instead of Assert.AreEqual(expected, actual)", Justification = "114 existing Assert.AreEqual/AreNotEqual/AreSame call sites across Walkabout.Tests as of 2026-09-19 - converting them to the constraint model would be a large, purely mechanical rewrite with no behavior change, not a warning-noise fix. Deliberately deferred rather than done piecemeal; revisit as a dedicated batch conversion if ever prioritized.", Scope = "namespaceanddescendants", Target = "Walkabout.Tests")]

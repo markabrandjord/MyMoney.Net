@@ -173,6 +173,15 @@ namespace Walkabout.Views.Controls
             get { return (this.listBox1.SelectedItem is AccountItemViewModel m) ? m.Account : null; }
             set
             {
+                if (value == null)
+                {
+                    // Defensive: a null Account means "nothing to select" (e.g. an empty
+                    // Accounts collection), not an error - just clear the current selection
+                    // instead of falling through to the IsDeleted check below.
+                    this.Selected = null;
+                    return;
+                }
+
                 var item = this.GetViewModel(value);
                 if (item == null)
                 {

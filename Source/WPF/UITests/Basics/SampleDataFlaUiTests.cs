@@ -104,12 +104,6 @@ namespace Walkabout.UITests.Basics
         }
 
         [Test]
-        [Ignore("Known app bug (#45): cancelling the Sample Database Options dialog on an empty " +
-            "database crashes the app with a NullReferenceException in " +
-            "AccountsControl.SelectedAccount (MainWindow.OnCommandAddSampleData passes the null " +
-            "GetFirstAccount() result unconditionally, even when Create() returned early). " +
-            "AppCrashGuard's TearDown check correctly fails this test as long as the bug is " +
-            "unfixed - un-ignore once #45 is fixed.")]
         public void CancelPopulateSampleDataDialog_LeavesEmptyDatabaseUnchanged()
         {
             Window mainWindow = BasicsAppSession.MainWindow;

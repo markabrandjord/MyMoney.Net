@@ -4,17 +4,6 @@
     <TargetFramework>net10.0-windows7.0</TargetFramework>
     <RootNamespace>Walkabout</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <!--
-      Transaction.amount/Split.amount are public fields alongside public
-      Amount properties - a real CLS-compliance violation (case-only
-      identifier collision), but the field is read directly from 15+ call
-      sites spanning this project and MyMoney.csproj (chart tallying,
-      transaction search). Hiding it would be a real cross-assembly
-      refactor, not a warning-noise fix; out of scope for #9. Suppressing
-      just this code, not the CS300x family that Properties/AssemblyInfo.cs's
-      [assembly: CLSCompliant(true)] already resolves properly.
-    -->
-    <NoWarn>$(NoWarn);CS3005</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
