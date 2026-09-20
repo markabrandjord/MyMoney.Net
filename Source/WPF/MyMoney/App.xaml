@@ -15,6 +15,7 @@
                 <mwpf:IntellisenseResources/>
                 <ui:ThemesDictionary Theme="Light" />
                 <ui:ControlsDictionary />
+                <ResourceDictionary Source="Themes/DialogResources.xaml"/>
                 <ResourceDictionary Source="Themes/generic.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
