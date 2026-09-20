@@ -4625,12 +4625,17 @@ namespace Walkabout
             SampleDatabase sample = new SampleDatabase(this.myMoney, this.quotes, stockQuotes);
             sample.Create();
 
-            this.toolBox.Selected = this.accountsControl;
+            // Create() returns early with no accounts added if the Sample Database Options
+            // dialog was cancelled - only touch the Accounts panel/selection if it actually ran.
             Account a = this.myMoney.Accounts.GetFirstAccount();
-            this.accountsControl.OnAccountsChanged(this, new ChangeEventArgs(a, null, ChangeType.Inserted)); // trigger early rebind so we can select it
-            this.accountsControl.SelectedAccount = a;
-            this.OnSelectionChangeFor_Account(this, EventArgs.Empty);
-            this.UpdateCharts();
+            if (a != null)
+            {
+                this.toolBox.Selected = this.accountsControl;
+                this.accountsControl.OnAccountsChanged(this, new ChangeEventArgs(a, null, ChangeType.Inserted)); // trigger early rebind so we can select it
+                this.accountsControl.SelectedAccount = a;
+                this.OnSelectionChangeFor_Account(this, EventArgs.Empty);
+                this.UpdateCharts();
+            }
         }
 
         private void MenuExportSampleData_Click(object sender, RoutedEventArgs e)
