@@ -17,7 +17,7 @@ user-facing.
 |---|-------|-------|--------|
 | 1 | Core domain model | `Money.cs` (+ its `MyMoney` partial in `Money_Loans.cs`) — the persistent object graph and the operations it supports | **Done** |
 | 2 | Navigation & shell | Main window, view selectors, command routing | **Done** |
-| 3 | Views | `Views/` — the grids, trees and panes the user works in | Not started |
+| 3 | Views | `Views/` + `View Selectors/` — the grids, trees and panes the user works in | **Done** |
 | 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | Not started |
 | 5 | Reports + charts | `Reports/`, `Charts/` | Not started |
 | 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | Not started |
@@ -1886,3 +1886,1242 @@ obvious from the code:
    many `ShowMessage` calls suggest. Flagged because a redesign that reworks the
    status area could easily reintroduce the message storm these guards exist to
    prevent.
+
+---
+
+# Phase 3: Views
+
+**Source examined (in full):**
+
+| File | Lines |
+|---|---|
+| `Source/WPF/MyMoney/Views/TransactionsView.xaml` | 929 |
+| `Source/WPF/MyMoney/Views/TransactionsView.xaml.cs` | 7,907 |
+| `Source/WPF/MyMoney/Views/SecuritiesView.xaml` + `.xaml.cs` | 586 + 982 |
+| `Source/WPF/MyMoney/Views/CurrenciesView.xaml` + `.xaml.cs` | 257 + 641 |
+| `Source/WPF/MyMoney/Views/AliasesView.xaml` + `.xaml.cs` | 173 + 391 |
+| `Source/WPF/MyMoney/Views/LoansView.xaml` + `.xaml.cs` | 247 + 458 |
+| `Source/WPF/MyMoney/Views/RentSummaryView.xaml` + `.xaml.cs` | 128 + 239 |
+| `Source/WPF/MyMoney/Views/RentPayementsView.xaml` + `.xaml.cs` | 113 + 174 |
+| `Source/WPF/MyMoney/Views/FlowDocumentView.xaml` + `.xaml.cs` | 126 + 385 |
+| `Source/WPF/MyMoney/Views/TransactionSelectors.cs` | 451 |
+| `Source/WPF/MyMoney/Views/GraphGenerators.cs` | 425 |
+| `Source/WPF/MyMoney/Views/ChangeTracker.cs` | 541 |
+| `Source/WPF/MyMoney/Views/FindManager.cs` | 217 |
+| `Source/WPF/MyMoney/Views/IView.cs`, `ViewState.cs`, `TransactionPropertyChangeSubscription.cs` | 51 + 13 + 41 |
+| `Source/WPF/MyMoney/View Selectors/AccountsControl.xaml` + `.xaml.cs` | 136 + 1,540 |
+| `Source/WPF/MyMoney/View Selectors/CategoriesControl.xaml` + `.xaml.cs` | 141 + 1,167 |
+| `Source/WPF/MyMoney/View Selectors/PayeesControl.xaml` + `.xaml.cs` | 64 + 397 |
+| `Source/WPF/MyMoney/View Selectors/SecuritiesControl.xaml` + `.xaml.cs` | 83 + 401 |
+| `Source/WPF/MyMoney/View Selectors/RentsControl.xaml` + `.xaml.cs` | 91 + 257 |
+| `Source/WPF/MyMoney/View Selectors/BalanceControl.xaml` + `.xaml.cs` | 228 + 747 |
+| `Source/WPF/MyMoney/View Selectors/ReportsControl.xaml` + `.xaml.cs` | 138 + 214 |
+| `Source/WPF/MyMoney/View Selectors/RetirementControl.xaml` + `.xaml.cs` | 263 + 494 |
+
+Also read in full because Phase 2 explicitly deferred it here:
+`Source/WPF/MyMoney/Controls/QueryViewControl.xaml` + `.xaml.cs` (155 + 398) — the
+advanced-search form hosted inside `TransactionsView`.
+
+> **Path note.** Phase 2's warning holds and is confirmed: the left-navigation panels
+> are in **`Source/WPF/MyMoney/View Selectors/`** — with a space — and a `Views/` glob
+> misses all eight of them. Two further naming traps found here: the file
+> `Views/RentPayementsView.xaml` (note the misspelling) declares a class named
+> `RentInputControl`, and `Views/LoansView.xaml.cs` carries a copy-pasted
+> `<summary>Interaction logic for RentInputControl1.xaml</summary>` comment. Neither
+> file name matches its class name, so searching by class name alone will miss them.
+
+**What this phase covers and deliberately does not.** This section catalogs what a
+user can *do inside* a working surface once they've arrived at it: reading the data,
+ordering and narrowing it, editing it in place, and the operations reachable from
+right-click, keyboard and drag-and-drop. *Getting* to a surface is Phase 2. Anything
+that opens a modal window is captured here only as the affordance ("the user can open
+X from here"); what that window then does is Phase 4. The content of reports and
+charts is Phase 5 and the mechanics of reading or writing a file are Phase 6, even
+where the button that starts them lives on one of these surfaces.
+
+---
+
+## 3.1 The transaction register
+
+### P3-REG-1 — Work through one account's entries in a single scrolling list
+The user's main working surface is a list of transactions, one per row, that they read
+top to bottom and edit directly. Everything else in this phase either changes what
+that list contains, changes how much of each entry it shows, or acts on the entry
+they have selected.
+*(`TransactionsView`, `TheGrid_BankTransactionDetails`, `TransactionCollection`)*
+
+### P3-REG-2 — Get the columns that suit what they're looking at
+The list shows different information depending on what the user asked for: an account
+register shows a cheque number, date, party, status, sales tax, payment, deposit and
+running balance; a cross-account list adds which account and currency each entry
+belongs to; an investment account's register adds the kind of activity, the holding,
+units and unit price; and a single holding's history adds unit counts restated for
+splits, a running holding total and a running value.
+*(four `MoneyDataGrid`s: `TheGrid_BankTransactionDetails`, `TheGrid_TransactionFromDetails`,
+`TheGrid_InvestmentActivity`, `TheGrid_BySecurity`; `SwitchLayout`)*
+
+### P3-REG-3 — Choose between a compact and a detailed row
+Each entry can be shown as a single line, or as three stacked lines that also show its
+category and its note. The user toggles between the two with a button or a keystroke,
+and the choice is remembered.
+*(`OneLineView`, `CommandViewToggleOneLineView` (Ctrl+T), `ToggleShowLines`,
+`TransactionPayeeCategoryMemoField`)*
+
+### P3-REG-4 — Order the list by any column, with ties broken predictably
+The user sorts by clicking a column heading. Entries that tie on the sorted column
+fall back to date, then to amount, then to entry order, so a re-sort never shuffles
+same-day entries into a different arrangement.
+*(`MoneyDataGrid.SecondarySortOrder="Date,NegativeAmount,Id"`)*
+
+### P3-REG-5 — Read an entry's state from how the row looks
+Without opening anything, the user can tell which entries still need their approval
+(bold), which just arrived from the bank, which are being reconciled right now, which
+have been cut ready to move, which can't be edited, and which category each belongs to
+(a colour swatch that a category inherits from its parent).
+*(`TransactionCell`'s background/foreground/weight logic,
+`TransactionCategoryColorColumn`, `ListItemForegroundUnacceptedBrush`,
+`ListItemDownloadedBackgroundBrush`, `ListItemReconcilingBackgroundBrush`,
+`ListItemCuttingBackgroundBrush`)*
+
+### P3-REG-6 — See the balance after every entry, kept current as they edit
+The account's running balance appears against each row and is recalculated when an
+amount, a holding's units, a unit price or an activity type changes, without the user
+asking for a refresh.
+*(`TransactionNumericColumn` "Balance"/"RunningBalance", `Rebalance`,
+`RefreshVisibleColumns`, `fieldsAffectingBalance`)*
+
+### P3-REG-7 — Jump down a long list by typing
+Typing jumps the selection to the first entry whose value in the currently sorted
+column starts with what was typed, and a short pause starts a fresh search.
+*(`TypeToFind`/`TransactionTypeToFind`, disabled while editing)*
+
+### P3-REG-8 — Know what the listed entries add up to
+Whatever is currently listed — an account, a category, a search result — the user is
+told how many entries that is and what they total, with sales tax and investment value
+called out separately when they apply.
+*(`ShowBalance` → `Transactions.GetBalance`, `AccountBalanceInfo`, status line)*
+
+### P3-REG-9 — Be told when they're not looking at everything
+When a filter, a search or a query means the list is a subset, a watermark appears so
+the user doesn't mistake a filtered list for the whole account.
+*(`UpdateUX`, `FilterWatermark`)*
+
+### P3-REG-10 — Change an entry's status by clicking it
+The status of an entry is a button in its row: clicking cycles it between nothing and
+cleared in normal use, and marks it off against the statement while balancing. Hovering
+explains what each status means.
+*(`TransactionStatusButton`, `ToggleTransactionStateReconciled`, status tooltips)*
+
+### P3-REG-11 — Approve downloaded entries one at a time or all at once
+The user marks the selected entry as reviewed with a keystroke, or clears the whole
+current list of "needs review" in one action.
+*(`CommandAccept` (Ctrl+Space), `CommandAcceptAll`, `ToggleTransactionStateAccept`)*
+
+### P3-REG-12 — Void an entry from the list
+The user can neutralise the selected entry without deleting it, and un-void it the same
+way. Reconciled entries are left alone.
+*(`CommandVoid`, `OnCommandVoid`)*
+
+### P3-REG-13 — Delete an entry, with a confirmation and a guard
+Deleting asks first — unless the user holds Shift — and refuses outright for a
+reconciled entry that carries an amount.
+*(`TransactionCollection.RemoveItem`, `ConfirmDelete`, `Prompt`, `QuietDelete`)*
+
+### P3-REG-14 — Add a new entry in the right place
+The user starts a new entry either at the end of the list or immediately after the one
+they've selected, and lands straight in the party field ready to type.
+*(`InsertNewTransaction` (Insert key), `EditModeSetToColumn("Payee")`,
+`CanUserAddRows` on the bank register)*
+
+### P3-REG-15 — Move an entry to a different account
+The user can transfer the selected entry wholesale into another account, taking its
+paperwork with it. A reconciled entry can't be moved.
+*(`CommandMove`, `OnMoveTransaction`, `AccountHelper.PickAccount`,
+`AttachmentManager.MoveAttachments`)*
+
+### P3-REG-16 — Give an entry a tax date of its own
+From the list the user can set — or clear — a separate tax date for the selected entry
+when its calendar date and its tax treatment disagree.
+*(`CommandSetTaxDate`, `OnSetTaxDate`, `TransactionExtras`; the picker is Phase 4)*
+
+### P3-REG-17 — Recategorize everything currently listed in one step
+Having narrowed the list to the entries they care about, the user can move all of them
+to a different category at once.
+*(`CommandRecategorize`, `OnRecategorizeAll` over `ViewModel`; the dialog is Phase 4)*
+
+### P3-REG-18 — Cut, copy and paste entries
+The user can copy the selected entry (or one itemised line of it) and paste it into an
+account, with a cut entry visibly marked as pending until it's pasted or the clipboard
+moves on.
+*(`Cut`/`Copy`/`Paste`/`Delete`, `IsCutting`, `ClearCutState`, `OnClipboardChanged`)*
+
+### P3-REG-19 — Take what's listed out of the product
+Whatever is currently listed can be written out to a file for use elsewhere.
+*(`CommandViewExport` → `Exporters.ExportPrompt`; formats are Phase 6)*
+
+### P3-REG-20 — Be offered an account when entering the very first transaction
+A user with no accounts yet who starts typing a transaction is asked to set up an
+account there and then, rather than being blocked or silently losing the entry.
+*(`OnCustomBeginEdit` creating an `AccountDialog` when `t.Account == null`)*
+
+### P3-REG-21 — Look up who a party actually is
+The user can search the web for the party on the selected entry, which is often the
+quickest way to decode an unfamiliar name from a bank feed.
+*(`CommandLookupPayee` (F3), `OnCommandLookupPayee`)*
+
+### P3-REG-22 — Open the statement an entry was reconciled on
+For an entry that was balanced against a saved statement, the user can open that
+statement document straight from the list.
+*(`CommandGotoStatement`, `OpenStatement`, `StatementManager.GetStatementFullPath`)*
+
+### P3-REG-23 — Pivot from one entry to everything like it
+From any entry the user can jump to everything in the same account, the same category,
+with the same party, or in the same holding — and can open the properties of the
+category or the holding it names.
+*(`CommandViewTransactionsByAccount` (F8) / `ByCategory` (F7) / `ByPayee` (F6) /
+`BySecurity` (F5), `CommandViewSecurity`, `CommandViewCategory`)*
+
+---
+
+## 3.2 Entering and editing an entry in place
+
+### P3-EDIT-1 — Edit the exact field they clicked on
+Because a row packs party, category and note into one column, clicking directly on the
+note puts the cursor in the note rather than in the party — the user doesn't have to
+click once to select the row and again to reach the field they wanted.
+*(`OnCustomBeginEdit` → `GetHitFieldName` hit test → `OnStartEdit` matching
+`EditorFor<FieldName>`)*
+
+### P3-EDIT-2 — Move through the fields of an entry with the keyboard
+Tab and Shift-Tab step forward and back through just the editable fields of the row,
+skipping the read-only ones.
+*(`MoveFocusToNextEditableField` / `MoveFocusToPreviousEditableField`)*
+
+### P3-EDIT-3 — Type money into payment or deposit and have the other clear itself
+Entering an amount in one money column empties the other, and if the entry is a
+transfer its wording flips to match the direction the user just chose.
+*(`TransactionAmountControl.SetEditFieldEmpty`, `GetOpposingField`,
+`SwitchTransferCaption`)*
+
+### P3-EDIT-4 — Pick a party, category or holding by typing part of it
+Each of these fields narrows a long list as the user types, matching anywhere in the
+name — and for holdings, in the ticker as well.
+*(`FilteringComboBox` with `ComboBoxForPayee_FilterChanged`,
+`ComboBoxForCategory_FilterChanged`, `ComboBoxForSymbols_FilterChanged`)*
+
+### P3-EDIT-5 — Create a category on the spot when the one they want doesn't exist
+Typing a category that isn't there yet offers to create it rather than silently
+discarding what was typed, and the new category is filled in when they're done.
+*(`ComboBoxForCategory_PreviewLostKeyboardFocus` → `EnterNewCategoryAsync`)*
+
+### P3-EDIT-6 — Have the classification filled in from what they did last time
+When the user enters a party they've dealt with before and hasn't chosen a category
+yet, the product fills in the category — or the whole itemisation — from the previous
+similar entry.
+*(`AutoPopulateCategory` → `AutoCategorization.AutoCategoryMatch`,
+`MyMoney.CopyCategory`)*
+
+### P3-EDIT-7 — Hop between the two fields they use most
+While editing, one keystroke moves between the party field and the amount field
+without tabbing through everything in between.
+*(Ctrl+P toggles, Ctrl+PageUp → Payee, Ctrl+PageDown → Payment)*
+
+### P3-EDIT-8 — Finish an entry and move on in one keystroke
+One keystroke fills in a category if one can be inferred, marks the entry as reviewed,
+and moves to the next row ready for the next entry.
+*(Ctrl+Enter branch in `OnDataGridPreviewKeyDown`)*
+
+### P3-EDIT-9 — Do arithmetic inside a money field
+Where an amount is entered, the user can work the number out in place rather than
+reaching for a calculator.
+*(`NumericTextBoxStyle` with `CalculatorPopup.CalculatorEnabled` — used by the
+transaction, securities, currencies, balancing and retirement surfaces)*
+
+### P3-EDIT-10 — Be told when a value won't be accepted, without losing the row
+A value the model rejects marks the row with a warning that explains why on hover, and
+the row stays in edit so the user can correct it rather than losing what they typed.
+*(`RowValidationErrorTemplate`, `ValidationErrorGetErrorMessageConverter`,
+`TransactionNumericColumn.CommitCellEdit`, `TransactionAmountControl.OnValidationError`)*
+
+### P3-EDIT-11 — Not be able to edit rows that aren't really entries
+The synthetic rows that represent one line of an itemised transaction inside a
+by-category or by-payee list are read-only, and are shown greyed out.
+*(`OnBeginEdit` cancelling for `t.IsReadOnly`, `UpdateForeground`'s disabled brush)*
+
+### P3-EDIT-12 — Have a newly named holding pick up its price from the trade
+When the user records a trade in a holding the product has no price for, the trade's
+own unit price becomes that holding's price, and its price history starts downloading.
+*(`OnDataGridCommit` seeding `Security.Price`, `pending` → `BeginUpdateHistory`)*
+
+---
+
+## 3.3 Breaking an entry into parts, in the list
+
+### P3-SPLIT-1 — Turn the selected entry into an itemised one
+The user chooses to itemise an entry and is given a first line pre-filled with the
+entry's whole amount and category, ready to be broken up.
+*(`CommandSplits`, `OnCommandSplits`)*
+
+### P3-SPLIT-2 — Open and close the itemisation from a marker on the amount
+An itemised entry carries a small marker on its amount showing how many lines it has;
+clicking it opens the lines beneath the row and clicking again closes them. The marker
+changes colour when the lines don't add up.
+*(`ButtonStyleSplitAmount` bound to `Splits.Count` and `Splits.HasUnassigned`,
+`OnButtonSplitClicked` → `ToggleSplitDetails`)*
+
+### P3-SPLIT-3 — Edit the lines without leaving the list
+The lines appear as their own small grid beneath the entry, each with its own party,
+category, payment, deposit and note, all editable in place.
+*(`myDataGridDetailView`, `TheGridForAmountSplit`)*
+
+### P3-SPLIT-4 — See what's left to allocate and assign it with one key
+While itemising, the user sees in plain language how much of the total hasn't been
+allocated, and one keystroke pushes that remainder into the line they're on.
+*(`NonNullSplits.SplitsBalanceMessage`, F6 handler in `OnDataGrid_KeyDown`,
+`Splits.Rebalance`)*
+
+### P3-SPLIT-5 — See every itemisation at once rather than opening each
+The user can switch the whole list into a mode where every itemised entry shows its
+lines inline, read-only, with any unallocated remainder called out.
+*(`ViewAllSplits`, `CommandViewToggleAllSplits` (Alt+T), `myDataGridDetailMiniView`)*
+
+### P3-SPLIT-6 — Insert a line in the middle of an itemisation
+Pressing Insert while on a line adds a new one directly after it, inheriting the
+entry's category, rather than only ever appending at the end.
+*(`InsertNewSplit`)*
+
+### P3-SPLIT-7 — Copy a whole itemisation onto another entry
+The breakdown built on one entry can be copied and pasted onto another, and individual
+lines can be copied, pasted and deleted on their own.
+*(`CommandCopySplits`/`CommandPasteSplits`, `SplitViewContextMenu`,
+`Splits.Serialize`/`DeserializeInto`)*
+
+### P3-SPLIT-8 — Not be left with the empty line they started
+Closing an itemisation cleans away lines that were begun and left blank.
+*(`RestoreSplitViewMode` → `Splits.RemoveEmptySplits`)*
+
+### P3-SPLIT-9 — Have sales tax kept out of what the lines must total
+When an itemised entry also records sales tax, the lines are balanced against the
+amount excluding that tax, so the user isn't asked to account for tax twice.
+*(`OnDataGridCellEditEnding` computing `NonNullSplits.AmountMinusSalesTax`)*
+
+---
+
+## 3.4 Transfers, from inside the list
+
+### P3-XFER-1 — Make a transfer by naming one of their own accounts
+The party field offers the user's own accounts alongside their payees, phrased as
+transfers, so recording a movement between accounts is the same gesture as recording a
+payment.
+*(`PayeesAndTransferNames` combining `Payees` with `Transaction.GetTransferCaption`
+both ways)*
+
+### P3-XFER-2 — Have the wording follow the direction they entered
+Whether the transfer reads as money going to or coming from the other account follows
+which money column the amount was typed into.
+*(`TransactionAmountControl.SwitchTransferCaption`)*
+
+### P3-XFER-3 — Jump to the other side of a transfer
+One keystroke takes the user to the matching entry in the other account, whether the
+link is on the entry itself or on one of its itemised lines.
+*(`CommandGotoRelatedTransaction` (F12), `GotoRelated`, `IViewNavigator.NavigateToTransaction`)*
+
+### P3-XFER-4 — Be offered a match when an entry looks like half a transfer
+Asking to go to the related entry of something that isn't yet a transfer makes the
+product hunt for an opposite-signed entry of the same amount in another account within
+a few days, show the user what it found, and offer to link the two. If nothing is
+found the user is offered a progressively wider search; if several match, they're shown
+the candidates rather than having one picked for them.
+*(`AttemptToMatchAndConvertPossibleTransfer`, `Settings.TransferSearchDays`,
+`TransformTwoTransactionIntoTransfer`)*
+
+### P3-XFER-5 — Be told why both sides of a transfer can't be itemised
+Trying to make an itemised line transfer to an account whose entry is itself already
+transferring from an itemised line gets a plain explanation and an offer to undo the
+other side rather than a failure.
+*(`ComboBoxForPayee_PreviewLostKeyboardFocus` split-transfer branch)*
+
+### P3-XFER-6 — Review and repair transfers with a missing other half
+When the product finds transfers whose other side has gone, the user is asked whether
+to fix them and, if so, is shown exactly those entries in date order as their own list
+to work through.
+*(`CheckTransfers`, `ShowDanglingTransfers`, `TransactionFixedSelector`)*
+
+---
+
+## 3.5 Spotting and combining duplicates
+
+### P3-DUP-1 — Be shown a likely duplicate as a visible link between the two rows
+When the selected entry looks like a duplicate of a nearby one, a bracket is drawn in
+the margin joining the two rows, so the user can see at a glance which pair is being
+suggested — and it stays correct as they scroll, including when one end is off screen.
+*(`TransactionConnector`, `TransactionConnectorAdorner`, `TransactionAnchor`,
+`Transactions.FindPotentialDuplicate`, `Settings.DuplicateRange`)*
+
+### P3-DUP-2 — Combine the pair with one click
+The bracket carries a button that merges the two entries into one.
+*(`TransactionConnectorAdorner.MergeButton` → `OnMergeButtonClick` → `Merge`)*
+
+### P3-DUP-3 — Say they're not duplicates and stop being asked
+Dismissing the suggestion records that these two really are separate events, so the
+pair isn't flagged again.
+*(`OnConnectorClosed` setting `NotDuplicate` on both)*
+
+### P3-DUP-4 — Combine two entries by dragging one onto the other
+The user can drag an entry onto another of the same amount to merge them; rows that
+aren't a valid target don't accept the drop, and investment entries only accept a drop
+from a matching kind of trade in the same holding for the same number of units.
+*(`OnDataGridRowDragEnter`/`DragDrop`, `InvestmentsCanMerge`, `TransactionDropTarget`
+highlight)*
+
+### P3-DUP-5 — Have the better record kept automatically
+When two entries are merged the product decides which one survives — preferring the
+reconciled one, then the one that's part of a transfer, then the one with investment
+detail, then the already-approved one — and moves any paperwork onto the survivor.
+*(`Merge`'s swap logic, `AttachmentManager.MoveAttachments`)*
+
+---
+
+## 3.6 Paperwork attached to an entry
+
+### P3-ATT-1 — See at a glance which entries have paperwork
+A column at the left of the list shows a marker on every entry that has a document
+filed against it.
+*(`TransactionAttachmentColumn`, `TransactionAttachmentIcon`)*
+
+### P3-ATT-2 — File a document by dropping it on the entry
+The user drags files from their desktop straight onto a row; the row highlights as a
+valid target and anything that fails is reported rather than silently dropped.
+*(`OnDataGridRowDragDrop` file branch, `AttachmentDropTarget` border,
+`AttachmentManager.GetUniqueFileName`)*
+
+### P3-ATT-3 — Paste a picture straight onto an entry
+An image on the clipboard is filed against the selected entry, and is animated shrinking
+into that entry's paperclip so the user can see where it went.
+*(`PasteAttachment`, the `MatrixAnimationUsingPath` storyboard)*
+
+### P3-ATT-4 — Open the paperwork for an entry from its own row
+The marker column doubles as a button that opens the attachment workspace for that
+entry.
+*(`TransactionAttachmentColumn.GenerateEditingElement` → `CommandScanAttachment` →
+`AttachmentDialog.ScanAttachments`; the dialog itself is Phase 4/8)*
+
+---
+
+## 3.7 Narrowing what the list shows
+
+### P3-FIND-1 — Narrow the current list by typing
+A search box above the list filters it down as the user types, matching across the
+party, category, note, reference, amounts and — for investment lists — the holding's
+name, ticker and price, including inside itemised lines.
+*(`QuickFilterControl`, `TransactionCollection.IsMatch`,
+`Transactions.IsAnyFieldsMatching`/`IsSplitsMatching`)*
+
+### P3-FIND-2 — Search beyond the current account with one character
+Starting the search with an asterisk widens it from the current list to every
+transaction the user has.
+*(`QuickFilter` setter's `*` branch → `ViewTransactions(myMoney.Transactions.Items)`)*
+
+### P3-FIND-3 — Limit the list to entries in a particular state
+A single picker limits the list to everything, or only reconciled, only unreconciled,
+only reviewed, only awaiting review, only classified, or only unclassified entries.
+While balancing, the reconciled/unreconciled choices keep the current statement's
+entries visible so they can still be unticked.
+*(`TransactionViewMode` combo, `TransactionFilter`, `TransactionFilterSelector.
+GetTransactionIncludePredicate`)*
+
+### P3-FIND-4 — Build a precise search row by row
+The user opens a form beneath the list and builds up conditions — a field, a
+comparison and a value — combined with "and"/"or", adding and deleting rows, then runs
+it. Incomplete rows are ignored, the conditions can be copied and pasted, and the form
+stays filled in so the search can be re-run or adjusted.
+*(`QueryViewControl`, `ListOfFields`/`ListOfOperations`/`ListOfConjunctions`,
+`GetQuery`, `TransactionQuerySelector`; the Search button and the panel's show/hide is
+P2-CMD-7)*
+
+### P3-FIND-5 — Stack one narrowing on top of another
+Narrowings compose: the user can be looking at one account, then narrow to a category,
+then to a date range, then to a state, and each is applied on top of the last rather
+than replacing it.
+*(`TransactionSelector` chain — `TransactionAccountSelector`, `...PayeeSelector`,
+`...CategorySelector`, `...SecuritySelector`, `...RangeSelector`, `...QuerySelector`,
+`...FilterSelector`, `...RentalSelector`, `...FixedSelector`; `AddCategoryFilter`,
+`AddHistoryFilter` used by the chart drill-down of P2-PANE-2)*
+
+### P3-FIND-6 — Come back to the same list after a restart
+The account, category, party, holding or property being viewed, the state filter, the
+search text, the row/compact setting, the selected row and the whole chain of
+narrowings are all remembered and restored.
+*(`TransactionViewState`, `TransactionSelector` XML serialization, `UpdateView`)*
+
+---
+
+## 3.8 Investment surfaces
+
+### P3-INV-1 — Switch an investment account between its activity and its holdings
+An investment account offers two views of itself: the list of trades and cash activity,
+and a portfolio showing what is currently held. The user switches between them with
+tabs, and non-investment accounts don't show the tabs at all.
+*(`InvestmentAccountTabs`, `SetActiveAccount`, `CashTab`/`PortfolioTab`)*
+
+### P3-INV-2 — Record a trade in the same list as everything else
+In an investment account the user records the kind of activity, which holding, how many
+units and at what price alongside the ordinary date, party and amount, rather than in a
+separate screen. Typing an unknown ticker creates the holding.
+*(`myTemplateActivityEdit`, `myTemplateSymbolEdit`, `Activities`, `Securities`,
+`ComboBoxSymbol_PreviewLostKeyboardFocus`)*
+
+### P3-INV-3 — Follow one holding across every account
+Looking at a single holding, the user sees every trade in it in date order with the
+units as entered, the units restated for any stock splits, the running number held, the
+price as entered and restated, the running value, and a visual indication of which
+purchase each sale drew down.
+*(`TheGrid_BySecurity`, `Transactions.UpdateStockUnitsAndRoutingPath`, `RoutingLines`
+converter, `CurrentUnitStyle`/`RunningUnitStyle`)*
+
+### P3-INV-4 — Expand or collapse the portfolio's detail
+The portfolio can be read as headline groups or expanded to show every position, from
+a single toggle.
+*(`ToggleExpandAll`, `PortfolioReport.ExpandAll`/`CollapseAll`)*
+
+### P3-INV-5 — Drill into a group of holdings
+Clicking through a group in the portfolio replaces it with a report for just that
+group.
+*(`OnReportDrillDown`, `PortfolioReport.SelectedGroup`; report content is Phase 5)*
+
+### P3-INV-6 — Reconcile what was held as at the statement date
+While balancing an investment account, the portfolio is shown as at the statement date
+rather than today, so holdings can be checked against the statement.
+*(`GetReconciledExclusiveEndDate`, `CreatePortfolioReport`'s `reportDate`)*
+
+---
+
+## 3.9 Balancing an account against a statement
+
+### P3-RECON-1 — Work through a statement beside the entries it covers
+Starting to balance an account puts a panel beside the register showing which account,
+the previous statement, the new statement's date and balance, the current reconciled
+balance and how far off it is — while the register itself switches to compact rows and
+to the unreconciled entries for that period.
+*(`BalanceControl.Reconcile`, `TransactionsView.OnStartReconcile`,
+`SetReconcileDateRange`)*
+
+### P3-RECON-2 — Have the next statement's date and balance guessed for them
+Opening a new statement proposes the month after the last one — handling month-end
+correctly — and proposes the balance the account is expected to have on that date,
+unless a balance was already saved for it.
+*(`GetNextStatementDate`, `MyMoney.EstimatedBalance`,
+`StatementManager.GetStatementBalance`)*
+
+### P3-RECON-3 — Tick entries off, and untick them
+Marking an entry as appearing on the statement records both that it's reconciled and
+which statement it was cleared in; unticking puts it back to whatever it was before.
+Optionally it is also treated as reviewed at the same time.
+*(`ReconcileThisTransaction`, `ToggleTransactionStateReconciled`, Ctrl+Space,
+`Settings.AcceptReconciled`)*
+
+### P3-RECON-4 — Know exactly when they're done
+The panel shows the difference between the statement and the account continuously and
+only enables "done" when it reaches zero, with a large visual confirmation when it
+does.
+*(`CheckDone`, `Delta`, `CongratsButton`, `Done.IsEnabled`)*
+
+### P3-RECON-5 — Be caught out by a sign error rather than hunting for it
+If the balance is right but entered with the wrong sign, the user is offered a one-click
+fix instead of being left with a mysterious doubled discrepancy.
+*(`CheckDone`'s `YourNewBalance == -NewBalance` branch, `ValueSign` button)*
+
+### P3-RECON-6 — Add the month's interest without leaving the panel
+Typing the interest earned creates the matching transaction in the account (or updates
+the one already there), and clearing it back to zero removes the one the panel added.
+*(`TextBoxInterestEarned_LostFocus`, `FindInterestTransaction`, `interestCategory`)*
+
+### P3-RECON-7 — Go back and fix an earlier statement
+The user can select a previous statement date and see exactly the entries reconciled in
+it, so a mistake in an old reconciliation can be found and corrected — including
+swapping out a reconciled entry for another of the same amount, which is otherwise
+blocked.
+*(`ComboBoxPreviousReconcileDates`, `ShowReconciledState`, `IsLatestStatement`)*
+
+### P3-RECON-8 — Keep the statement document with the statement
+The user can point the panel at the statement file they balanced against, browse for
+it, and have it saved with the account so any entry from that statement can open it
+later.
+*(`StatementFileName`, `OnBrowseStatement`, `StatementManager.AddStatement`/
+`UpdateStatement`, `SetHasStatement`; see P3-REG-22)*
+
+### P3-RECON-9 — Back out of balancing without damage
+Cancelling — by button or by pressing Escape in either of the panel's main fields —
+puts every entry touched during the session back to the status it had, and the register
+back to the view the user was in before.
+*(`Cancel_Click`, `ChildKeyDown`, `OnEndReconcile`, `SetReconciledState(cancelled)`,
+`beforeState`)*
+
+### P3-RECON-10 — Understand each field as they reach it
+Moving through the panel shows an explanation of the field the user is on, and each
+explanation can also be pinned by clicking its information button.
+*(`TooltipTracker`, `TextBlockMessage`, the three `*Help_Click` handlers)*
+
+---
+
+## 3.10 The accounts panel
+
+### P3-ACCT-1 — See all their accounts grouped by what kind they are
+Accounts are listed under headings — everyday banking, credit, brokerage, retirement,
+assets, loans — each heading carrying that group's total, with the user's overall net
+worth on the panel's own header.
+*(`AccountsControl.Rebind`, `BundleAccount`, `AccountSectionHeader`,
+`IContainerStatus.SetTextBlock`; the header figure itself is P2-NAV-4)*
+
+### P3-ACCT-2 — Spot the accounts that need attention
+An account with entries awaiting review is shown in bold and in a distinct colour, and
+an account that hasn't been balanced for longer than the user allowed carries a warning
+whose explanation says how many months it's been.
+*(`AccountItemViewModel.FontWeight`/`NameForeground`, `WarningIconVisibility`,
+`WarningIconTooltip`, `Account.ReconcileWarning`)*
+
+### P3-ACCT-3 — See a foreign-currency account for what it is
+An account held in another currency shows that currency's flag and code beside it, and
+its balance in the conventions of that currency — and the whole display can be switched
+on or off from preferences.
+*(`CountryFlag`, `CurrencyNormalized`, `ShowCurrency`, `DatabaseSettings.ShowCurrency`)*
+
+### P3-ACCT-4 — Show or hide accounts they've closed
+Closed accounts are hidden by default and can be brought back into the list; the menu
+item says which way it will go. Selecting a closed account from elsewhere makes them
+visible automatically so the selection isn't lost.
+*(`DisplayClosedAccounts`, `CommandToggleClosedAccounts`, `UpdateContextMenuView`,
+`SelectedAccount` setter)*
+
+### P3-ACCT-5 — Set up and maintain accounts from the list
+From the list the user opens an account's settings, creates a new account, creates a
+loan, or sets up a new download connection.
+*(`CommandFileImport` ("Properties"), `CommandNewAccount`, `CommandAddNewLoanAccount`,
+`CommandDownloadAccounts`; the dialogs are Phase 4)*
+
+### P3-ACCT-6 — Delete an account and land somewhere sensible
+Deleting asks for confirmation, warns that it can't be undone, and then selects the
+neighbouring account so the user isn't left staring at an empty screen.
+*(`DeleteAccount`, `RaiseSelectionEvent(force: true)`)*
+
+### P3-ACCT-7 — Start balancing an account from the list
+Balancing is one keystroke or one menu item away from the account itself.
+*(`CommandBalance` (Ctrl+B), `BalanceAccount` event → `MainWindow.BalanceAccount`)*
+
+### P3-ACCT-8 — Fetch an account's statements from the list
+Accounts that are linked to an institution can be synchronised from here; accounts that
+aren't don't offer it.
+*(`CommandSynchronize`, `CanSynchronizeAccount` requiring `OnlineAccount`; the download
+itself is Phase 8)*
+
+### P3-ACCT-9 — See what moved into an account from elsewhere
+The user can list every transfer whose other side lands in the selected account.
+*(`CommandViewTransfers` → `ShowTransfers` → `TransactionsView.ViewTransfers`)*
+
+### P3-ACCT-10 — Take an account, or the whole list, out of the product
+One account can be written out with its entries — including in a tax-software format
+for capital gains — and the list of accounts itself can be written out as a
+spreadsheet and opened.
+*(`CommandExportAccount`, `Export`, `TxfExporter.ExportCapitalGains`,
+`CommandExportList`, `ExportList`; formats are Phase 6/7)*
+
+### P3-ACCT-11 — Bring a spreadsheet into one account and teach it the columns
+The user can import a spreadsheet into the selected account, is shown the progress, and
+can review or change the mapping from that file's columns to the product's fields; the
+mapping is remembered per account. A file that names accounts of its own is rejected
+with an explanation pointing at the general import instead.
+*(`CommandImportCsv`, `ImportCsv`, `CommandEditCsvMapping`, `CsvMap` saved per account;
+the importer is Phase 6)*
+
+### P3-ACCT-12 — Copy an account and paste it back
+An account can be copied to the clipboard and pasted in, with a plain message if the
+clipboard doesn't hold one.
+*(`IClipboardClient` on `AccountsControl`, `Account.Serialize`,
+`XmlImporter.ImportAccount`)*
+
+### P3-ACCT-13 — Get back to the whole account by clicking it again
+Clicking the account the user is already on clears any filtering or custom list they'd
+arrived at from a report, returning them to the plain register.
+*(`listBox1_PreviewMouseDown` → delayed `OnShowAllTransactions` →
+`RaiseSelectionEvent(force: true)`)*
+
+### P3-ACCT-14 — Get from a group of investment accounts to the report about them
+Clicking the brokerage or retirement heading opens the investment report for them.
+*(`AccountSectionHeader.Clicked` → `AppCommands.CommandReportInvestment`; the report is
+Phase 5)*
+
+---
+
+## 3.11 The categories panel
+
+### P3-CAT-1 — Browse categories as a tree, grouped by what kind of flow they are
+Categories appear beneath four headings — income, expense, investments and
+unclassified — each expandable into the full hierarchy the user built.
+*(`CategoriesControl.UpdateRoots`, `CategoryGroup`, `CategoryBalance`)*
+
+### P3-CAT-2 — Find a category by typing, without losing where it sits
+Typing narrows the tree to the branches that contain a match, keeping the parents so
+the user can still see where the matching category lives.
+*(`Filter`, `GetDeepFilteredRootCategories`, `AddRootIfOneOrMoreChildMatchFilder`)*
+
+### P3-CAT-3 — Rename a category in place
+The user renames a category by editing its name directly in the tree; Enter keeps the
+change, Escape abandons it, clicking away keeps it, and a name that would collide with
+an existing sibling is refused with an explanation.
+*(F2 / `CommandRenameCategory`, `Category.IsEditing` swapping the template,
+`OnRenameNode_CommitAndStopEditing`)*
+
+### P3-CAT-4 — Re-home a category by dragging it
+Dragging a category onto another makes it a subcategory of that one, and dragging it
+out to the top level promotes it — with everything filed under it following.
+*(`DragAndDrop` with `DragDropEffects.Move` → `MoveCategory` → `Merge`)*
+
+### P3-CAT-5 — Fold one category into another
+The user merges a category into another either by dragging with the copy gesture or by
+choosing merge from the menu; every transaction and itemised line filed under the old
+one is moved and the old one disappears.
+*(`CommandMergeCategory`, `OnDragDropSourceOnTarget` copy branch, `Merge` →
+`Transaction.ReCategorize`; the picker dialog is Phase 4)*
+
+### P3-CAT-6 — Delete a category, and be made to say where its history goes
+Deleting a category that nothing uses simply removes it. Deleting one that still has
+transactions doesn't silently orphan them — the user is made to choose a category to
+move them to first.
+*(`CategoriesControl.Delete`, `GetTransactionsByCategory` count check,
+`MergeCategoryDialog`)*
+
+### P3-CAT-7 — Add a category, or edit what one means
+New categories are created from the tree, pre-filled as a child of whatever was
+selected, and any category's full settings can be opened from here.
+*(`CommandAddCategory`, `CommandCategoryProperties` → `CategoryDialog`; the dialog is
+Phase 4)*
+
+### P3-CAT-8 — Open out or fold up the whole tree
+The user expands or collapses everything at once rather than clicking through levels.
+*(`CommandExpandAll`, `CommandCollapseAll`, `ExpandAll`)*
+
+### P3-CAT-9 — See each category's colour where they manage them
+Every category shows the colour it uses in charts, inherited from its parent unless it
+has one of its own — and that colour travels with the drag image while re-homing.
+*(`InheritedColor` + `CategoryToBrush`, `CreateDragVisual`)*
+
+### P3-CAT-10 — Copy a category out
+A category can be copied to the clipboard.
+*(`CategoriesControl.Copy` → `Category.Serialize`)*
+
+---
+
+## 3.12 The payees panel
+
+### P3-PAYEE-1 — Browse and search everyone they deal with
+Payees are listed alphabetically and narrowed by typing; those with entries still
+awaiting review or still unclassified are shown in bold.
+*(`PayeesControl.GetAllPayees`, `Filter`, `NonzeroToFontBoldConverter` on `Payee.Flags`)*
+
+### P3-PAYEE-2 — Rename a party from the list
+Renaming opens the rename flow for that party, and if nothing refers to the old name
+afterwards it disappears from the list immediately.
+*(`OnMenuItem_Rename` → `Rename` → `RenamePayeeDialog`, `GetUsedPayees` cleanup; the
+dialog is Phase 4)*
+
+### P3-PAYEE-3 — Fold two parties together by dragging
+Dragging one party onto another opens the rename flow pre-filled to merge the first
+into the second.
+*(`DragAndDrop` → `OnDropSourceOnTarget` → `Rename(from, to)`)*
+
+### P3-PAYEE-4 — Delete a party, safely
+Deleting a party nothing uses removes it; deleting one still in use redirects to the
+rename flow so its history is re-pointed rather than orphaned.
+*(`DeletePayee`)*
+
+### P3-PAYEE-5 — Copy and paste parties
+A party can be cut or copied out and pasted back, and pasting a name that already
+exists offers to select the existing one instead of creating a second.
+*(`IClipboardClient` on `PayeesControl`, `Payee.Serialize`/`Deserialize`)*
+
+### P3-PAYEE-6 — Use the mouse's own back and forward buttons
+The side buttons on a mouse move back and forward through the user's navigation while
+they're in this panel.
+*(`OnMouseUp` → `MouseButtonBackwardChanged`/`MouseButtonForwardChanged`; the history
+itself is P2-HIST-1)*
+
+---
+
+## 3.13 The holdings panel and the holdings list
+
+### P3-SEC-1 — Browse and search holdings from the navigation
+The holdings panel lists each holding with its ticker beside it, narrowed by typing
+against either, with the full identifiers on hover.
+*(`SecuritiesControl`, `Securities.GetSecuritiesAsList(filter)`)*
+
+### P3-SEC-2 — Fold two holdings together by dragging
+Dragging one holding onto another asks for confirmation and then moves every trade from
+the first to the second and removes the first.
+*(`SecuritiesControl.OnDropSourceOnTarget` → `Rename` → `MyMoney.SwitchSecurities`)*
+
+### P3-SEC-3 — Delete a holding, unless it's in use
+Pressing Delete removes a holding nothing refers to, and tells the user how many trades
+are in the way when it can't.
+*(`CommandDeleteSecurity` (Del), `DeleteSecurity`)*
+
+### P3-SEC-4 — Maintain the full details of every holding in one table
+A dedicated list shows each holding's name, ticker, identifier, kind, whether its income
+is taxable, its current and previous price, the change between them and the date of the
+price — all editable in place and sortable by any of them.
+*(`SecuritiesView`, `SecuritiesDataGrid`, `SecurityTypes`, `TaxableTypes`)*
+
+### P3-SEC-5 — Narrow to what they still hold
+A toggle switches between every holding ever traded and just the ones with a position
+still open.
+*(`ViewAllSecurities`, `ToggleShowAllSecurities`, `MyMoney.GetOwnedSecurities`)*
+
+### P3-SEC-6 — Record a holding's stock splits inline
+Each holding opens out into its own small grid of splits — date, and the ratio as two
+numbers — added and edited in place, with empty rows cleaned up on close.
+*(`StockSplitDetailView`, `myTemplateSplitButton`, `OnButtonSplitClicked`,
+`RestoreSplitViewMode` → `RemoveEmptySplits`)*
+
+### P3-SEC-7 — See every holding's splits at once
+A toggle shows a compact read-only summary of each holding's splits inline for the
+whole list.
+*(`ViewAllSplits`, `CommandToggleAllSplits` (Alt+T), `StockSplitMiniView`)*
+
+### P3-SEC-8 — Be stopped from entering a ticker that can't work
+A ticker containing spaces is refused with an explanation and the cell stays in edit.
+*(`OnDataGridCellEditEnding` → `ValidateSymbol`)*
+
+### P3-SEC-9 — Fetch prices and splits for a holding, or for all of them
+The user can ask for one holding's price history, or for the stock splits of every
+equity they hold, from this list.
+*(`CommandUpdateHistory` (F5), `CommandUpdateStockSplits`, `StockQuoteManager`; the
+fetching is Phase 8)*
+
+### P3-SEC-10 — Jump from a holding to its trades
+One keystroke takes the user from a holding to every transaction involving it.
+*(`CommandShowRelatedTransactions` (F12) → `SecurityNavigated` →
+`IViewNavigator.ViewTransactionsBySecurity`)*
+
+### P3-SEC-11 — Be warned before deleting a holding that's in use
+Removing a row whose holding still has trades asks whether to go and look at them
+instead of deleting.
+*(`SecurityCollection.RemoveItem`)*
+
+### P3-SEC-12 — Come back to the same holding, filter and sort
+The selected holding, the held-only toggle, the show-all-splits toggle and the sorted
+column are remembered across sessions.
+*(`SecuritiesViewState`)*
+
+---
+
+## 3.14 Rental property
+
+### P3-RENT-1 — Browse properties, years and cost classes as one tree
+Each property shows its total profit; opening it shows each year with that year's
+profit, income and expense; opening a year shows each class of cost with its total.
+*(`RentsControl` hierarchical templates over `RentBuilding` → `RentalBuildingSingleYear`
+→ `RentalBuildingSingleYearSingleDepartment`)*
+
+### P3-RENT-2 — Drill from a number to the transactions behind it
+Selecting a cost class for a year lists exactly the transactions that make it up.
+*(`SelectionChanged` → `TransactionsView.ViewTransactionRentalBuildingSingleYearDepartment`,
+`TransactionRentalSelector`)*
+
+### P3-RENT-3 — Add, edit and remove properties and years
+A new property is created and its details filled in before it's added; an existing
+property's details can be reopened; a property or a single year can be deleted after
+confirmation; and the tree can be rebuilt on demand.
+*(`OnMenuNewRental_Click`, `OnMenuItem_Edit` → `RentalDialog`, `OnMenuItem_Delete`,
+`OnMenuRefresh_Click`; the dialog is Phase 4)*
+
+### P3-RENT-4 — Read a property's profitability at a glance
+A summary screen shows a property's — or one year's — income, each class of expense,
+the resulting profit, and each owner's share of that profit by their percentage.
+*(`RentSummaryView`, `SetViewToRentBuilding`, `SetViewToRentalBuildingSingleYear`)*
+
+---
+
+## 3.15 Rename rules
+
+### P3-ALIAS-1 — See and edit every rename rule in one table
+The rules are listed as pattern, kind of match and the party they rename to, each
+editable in place, sortable, and with the party picked from a filtered list of existing
+parties or typed in to create a new one.
+*(`AliasesView`, `AliasDataGrid`, `AliasTypes`, `PayeeList`,
+`ComboBoxForPayee_PreviewLostKeyboardFocus`)*
+
+### P3-ALIAS-2 — Have redundant rules cleaned up as they go
+Finishing a rule that makes narrower existing rules pointless removes those narrower
+ones rather than leaving overlapping rules behind.
+*(`AliasDataGrid_RowEditEnding` → delayed `FindConflicts` → `MyMoney.FindSubsumedAliases`)*
+
+### P3-ALIAS-3 — See which rules are on their way out
+A rule marked for deletion is shown struck through with an explanation, until the work
+is saved.
+*(`StrikeThroughConverter`, `DeletedAliasToolTipConverter`, `GetAliases(true)`)*
+
+### P3-ALIAS-4 — Search the rules
+Typing narrows the list against the pattern, the kind of match and the party.
+*(`AliasCollection.IsMatch`, `QuickFilterControl`)*
+
+---
+
+## 3.16 Currencies
+
+### P3-CUR-1 — Maintain the currencies they deal in as a table
+Each currency is a row with its three-letter code, full name, regional formatting, its
+current rate and the previous one, all editable in place and sortable.
+*(`CurrenciesView`, `CurrenciesDataGrid`, `CurrencyCollection`)*
+
+### P3-CUR-2 — Pick a real currency rather than typing one
+Code, name and regional formatting are each chosen from a list of real world currencies
+showing the symbol, the name, the country's flag and the locale code, searchable by any
+of them.
+*(`CulturePickerComboStyle`, `CultureHelpers.CurrencyCultures`, `CulturePickerConverter`)*
+
+### P3-CUR-3 — Have the rest of the row filled in from the code
+Once a currency code is entered, the name and regional formatting lists narrow to what
+actually matches it and are pre-filled with the obvious answer.
+*(`ComboBoxForName_GotFocus`, `ComboBoxForCultureCode_GotFocus` using the uncommitted
+symbol)*
+
+### P3-CUR-4 — Get the current exchange rate without looking it up
+Entering a currency code fetches that currency's current rate and fills it in.
+*(`ComboBoxForSymbol_LostFocus` → `ExchangeRateService.CreateOrUpdate`; the service is
+Phase 8)*
+
+---
+
+## 3.17 A loan's payment schedule
+
+### P3-LOAN-1 — See a loan as a schedule of payments
+A loan account is shown as its payments in date order, each with where it came from,
+the payment, the principal, the interest, the implied rate and the balance still owed
+afterwards. Amounts that are zero are dimmed so the eye goes to what matters.
+*(`LoansView`, `Loan.Payments`, `LoanPaymentAggregation`, `ZeroToOpacityConverter`)*
+
+### P3-LOAN-2 — Add a payment that isn't in any account
+The user adds rows by hand for payments made outside the accounts they track; a new row
+is dated a month after the one before it.
+*(`TheDataGrid_InitializingNewItem`, `LoanPayementManualEntry`)*
+
+### P3-LOAN-3 — Edit one part of a payment and have the rest follow
+Changing the principal works out the interest, changing the interest works out the
+principal, and changing the rate re-derives both — for that payment and every one after
+it. The balance owed is then recalculated down the whole schedule.
+*(`TheDataGrid_RowEditEnding` → `Rebalance`, `Loan.Rebalance`)*
+
+### P3-LOAN-4 — Jump to the transaction a payment came from
+For a payment derived from a real transaction, one keystroke takes the user to it in
+its own account.
+*(`CommandGotoRelatedTransaction` (F12), `IViewNavigator.NavigateToTransaction`)*
+
+### P3-LOAN-5 — Delete only the rows that are really theirs to delete
+Deleting a hand-entered payment asks for confirmation; rows derived from real
+transactions can't be deleted from here.
+*(`TheDataGrid_PreviewExecuted`, `TheDataGrid_KeyDown`, `LoanPaymentAggregation.IsReadOnly`)*
+
+### P3-LOAN-6 — Take the schedule out of the product
+The whole schedule can be written out to a file.
+*(`CommandViewExport` → `Exporters.ExportPrompt`; formats are Phase 6)*
+
+### P3-LOAN-7 — Know how many payments they're looking at
+The status line reports the number of payments in the schedule.
+*(`CreateStatusText`)*
+
+---
+
+## 3.18 Task panels beside the working area
+
+### P3-PANEL-1 — Adjust a report's terms beside the report itself
+A report can put its own controls in the navigation panel — the date, a start and end
+date, a financial year, the currency to express everything in, the kind of report and
+the interval to group by — and the report redraws as each is changed. Only the controls
+that apply to the current report are shown.
+*(`ReportsControl`, its `Show*`/`Hide*` methods and per-control change events; which
+report uses which is Phase 5)*
+
+### P3-PANEL-2 — Take a report out as a spreadsheet
+Where a report supports it, a button beside it writes it out for use in a spreadsheet.
+*(`ExportButton`, `ReportExport` event; format is Phase 6)*
+
+### P3-PANEL-3 — Enter the assumptions behind a retirement plan
+Beside the retirement projection the user enters their age and their spouse's, the age
+they plan to retire and the age to plan to, their tax filing status and state,
+inflation, how tax brackets move, the return they expect, the income they want, how
+they intend to draw down tax-deferred savings and over how long, and what social
+security they and their spouse expect and from what age — and can switch the projection
+between stacked and side-by-side bars.
+*(`RetirementControl` and its per-field committed events; the projection is Phase 5)*
+
+### P3-PANEL-4 — Not be asked questions that don't apply to them
+A user filing singly isn't asked about a spouse, and the detail of a draw-down strategy
+only appears once a strategy other than "none" is chosen.
+*(`RetirementControl.UpdateVisibility`)*
+
+---
+
+## 3.19 What every working surface does the same way
+
+### P3-VIEW-1 — Always know which surface they're on
+Each working surface names itself, and the window's title says which one is showing.
+*(`IView.Caption`; the window title is P2-WORK-4 — but see Open Question 3)*
+
+### P3-VIEW-2 — Return to a surface as they left it
+Each surface remembers its own settings — which row was selected, how it was sorted,
+which toggles were on — and restores them when the user comes back, within the session
+and across restarts.
+*(`IView.ViewState`/`DeserializeViewState`, `TransactionViewState`,
+`SecuritiesViewState`, `CurrenciesViewState`, `ViewStateForLoan` — but see Open
+Question 2)*
+
+### P3-VIEW-3 — Reach a surface's own actions by right-click or by keyboard
+Everything a surface can do is on its own context menu, and the ones used most carry a
+keyboard shortcut shown next to them.
+*(each view's `ContextMenu` + `CommandBindings` + `InputBindings`)*
+
+### P3-VIEW-4 — Get help about the surface they're on, not the product in general
+Help is tied to the surface and even to what's selected within it — a credit card
+account, a bank account, an investment account, an asset, a loan, the splits grid, the
+portfolio — so the page that opens is about what the user is actually doing.
+*(`HelpService.HelpKeyword` on each view, `SwitchLayout`'s per-layout keyword,
+`AccountsControl.SetHelpKeywordForSelectedItem`)*
+
+### P3-VIEW-5 — Not lose a half-finished edit by navigating away
+Leaving a surface, switching what it shows or running a command commits whatever was
+being edited first.
+*(`IView.Commit`, the `Commit()` calls at the head of every `View*` method and
+`SwitchLayout`)*
+
+### P3-VIEW-6 — Have lists keep up with change without losing their place
+When data changes underneath a list — a download arriving, a category renamed, an
+account deleted — the list catches up, keeping the user's selection and scroll position
+and coalescing a storm of changes into one update rather than redrawing repeatedly.
+*(`OnMoneyChanged` → `pendingUpdates` → delayed `HandleChanges`, `InvalidateDisplay`,
+`DelayedActions` in every panel)*
+
+### P3-VIEW-7 — Search from any surface with the same keystroke
+Every surface that can be searched puts the cursor in its own search box on the same
+keystroke, and a surface that can't simply does nothing.
+*(`IView.FocusQuickFilter`; Ctrl+F is P2-CMD-6 — but see Open Question 4)*
+
+---
+
+## Phase 3 coverage checklist
+
+Every file and top-level type in `Views/` and `View Selectors/`, plus
+`Controls/QueryViewControl.*` which Phase 2 deferred here. "Not user-facing" entries
+are plumbing, performance workarounds or dead code the user never perceives.
+
+### `Views/` — files
+
+| File | Status |
+|---|---|
+| `TransactionsView.xaml` + `.xaml.cs` | P3-REG-*, P3-EDIT-*, P3-SPLIT-*, P3-XFER-*, P3-DUP-*, P3-ATT-*, P3-FIND-*, P3-INV-1…P3-INV-6 |
+| `SecuritiesView.xaml` + `.xaml.cs` | P3-SEC-4…P3-SEC-12 |
+| `CurrenciesView.xaml` + `.xaml.cs` | P3-CUR-1…P3-CUR-4 — see Open Questions 3 and 4 |
+| `AliasesView.xaml` + `.xaml.cs` | P3-ALIAS-1…P3-ALIAS-4 |
+| `LoansView.xaml` + `.xaml.cs` | P3-LOAN-1…P3-LOAN-7 |
+| `RentSummaryView.xaml` + `.xaml.cs` | P3-RENT-4 |
+| `RentPayementsView.xaml` + `.xaml.cs` (class `RentInputControl`) | **Not user-facing** — never instantiated anywhere in the product; see Open Question 1 |
+| `FlowDocumentView.xaml` + `.xaml.cs` | P3-INV-4, P3-INV-5 as the portfolio host; otherwise the shell for every report (Phase 5). Its own affordances — copy, select all, find next, export HTML, expand/collapse detail, close — are P3-VIEW-3/P3-VIEW-7 and Phase 5 |
+| `TransactionSelectors.cs` | P3-FIND-5, P3-FIND-6 — the composable narrowings |
+| `GraphGenerators.cs` | **Not user-facing on its own** — computes the series behind the charts of P2-PANE-1; what is plotted is Phase 5 |
+| `ChangeTracker.cs` | P2-FILE-5 (already Phase 2); the `Changed*`/`Deleted*`/`Inserted*` accessors are **dead code** — see Open Question 6 |
+| `FindManager.cs` | P3-VIEW-7 — the text search inside a report document |
+| `IView.cs` (`IView`, `IViewNavigator`, `AfterViewStateChangedEventArgs`) | P3-VIEW-1, P3-VIEW-2, P3-VIEW-5, P3-VIEW-7; `IViewNavigator` is how a surface asks the shell to go elsewhere (P2-NAV-5) |
+| `ViewState.cs` | **Not user-facing** — an empty base class each view subclasses |
+| `TransactionPropertyChangeSubscription.cs` | **Not user-facing** — shared subscribe/unsubscribe bookkeeping so the hand-written cells update on the interface thread |
+
+### `TransactionsView.xaml.cs` — the types it defines
+
+| Type | Status |
+|---|---|
+| `TransactionsView` | the surface itself; see the groups above |
+| `TransactionFilter` (enum) | P3-FIND-3 |
+| `TransactionViewName` (enum) | P3-REG-2, P3-FIND-6 — which kind of list is showing |
+| `TransactionSelection` (enum) | **Not user-facing** — which row to land on after a list is rebuilt (first/last/same/specific); its *effect* is P3-FIND-6 |
+| `TransactionViewState` | P3-FIND-6, P3-VIEW-2 |
+| `TransactionCollection` | P3-REG-1, P3-REG-13, P3-FIND-1 — the live, filtered, editable list |
+| `TypeToFind` / `TransactionTypeToFind` | P3-REG-7 |
+| `TransactionCell` | P3-REG-5 — row appearance; a hand-written replacement for a template that was too slow |
+| `TransactionAttachmentIcon`, `TransactionAttachmentColumn` | P3-ATT-1, P3-ATT-4 |
+| `TransactionNumberColumn`, `TransactionDateColumn`, `TransactionNumericColumn` | P3-REG-2, P3-REG-6, P3-EDIT-10 |
+| `TransactionPayeeCategoryMemoColumn` / `...Field` | P3-REG-3, P3-EDIT-1 |
+| `TransactionCategoryColorColumn` | P3-REG-5 |
+| `TransactionStatusColumn` / `TransactionStatusButton` | P3-REG-10 |
+| `TransactionAmountColumn` / `TransactionAmountControl` | P3-EDIT-3, P3-SPLIT-2, P3-EDIT-10 |
+| `TransactionTextField` | **Not user-facing** — the read-only label behind each editable field; a performance workaround |
+| `TransactionAnchorColumn` / `TransactionAnchor` | **Not user-facing on its own** — the invisible spot the duplicate bracket attaches to (P3-DUP-1) |
+| `TransactionConnector` / `TransactionConnectorAdorner` | P3-DUP-1, P3-DUP-2, P3-DUP-3 |
+| `SymbolIconHackery` | **Not user-facing** — reaches a non-public font size on an icon control |
+| `TransactionFilterToBooleanConverter` | **Not user-facing** — declared but referenced by no XAML in the product |
+| `ValidationErrorGetErrorMessageConverter` | P3-EDIT-10 |
+| `ShowSplitForDebit` / `ShowSplitForCredit` | **Not user-facing** — superseded by `TransactionAmountControl.UpdateButton`; neither converter is referenced by any XAML |
+| `OnCommandViewSimilarTransactions` / `CommandViewSimilarTransactions` | **Not user-facing** — the handler is empty and its menu item is commented out; see Open Question 5 |
+| `CanExecute_Budgeted`, `CanExecute_AllTransactions`, `CanExecute_UnacceptedTransactions`, `CanExecute_UnreconciledTransactions`, `CanExecute_BudgetedTransactions`, `CanExecute_UncategorizedTransactions`, `CanExecute_DeleteThisTransaction` | **Not user-facing** — declared but bound to no command; leftovers from a previous menu structure |
+| `OnImageAnimationComplete`, `OnLostFocus`, `OnLostKeyboardFocus` | **Not user-facing** — empty overrides/handlers |
+
+### `TransactionSelectors.cs`
+
+| Type | Status |
+|---|---|
+| `TransactionSelectorContext` | **Not user-facing** — carries the balancing state a narrowing needs |
+| `TransactionSelector` (base) | P3-FIND-5 |
+| `TransactionAccountSelector` | P3-REG-1, P3-REG-23 |
+| `TransactionPayeeSelector` | P3-REG-23 |
+| `TransactionCategorySelector` | P3-REG-23, P3-FIND-5 |
+| `TransactionSecuritySelector` | P3-INV-3, P3-SEC-10 |
+| `TransactionRentalSelector` | P3-RENT-2 |
+| `TransactionRangeSelector` | P3-FIND-5 (the history-chart drill-down of P2-PANE-2) |
+| `TransactionQuerySelector` | P3-FIND-4 |
+| `TransactionFilterSelector` | P3-FIND-3, P3-RECON-1 |
+| `TransactionFixedSelector` | P3-XFER-6, P3-DUP-*, and the report drill-downs that can't be described any other way |
+
+### `View Selectors/` — panels
+
+| File | Status |
+|---|---|
+| `AccountsControl.xaml` + `.xaml.cs` | P3-ACCT-1…P3-ACCT-14 — but see Open Questions 7 and 8 |
+| `AccountViewModel` / `AccountItemViewModel` / `AccountSectionHeader` | P3-ACCT-1, P3-ACCT-2, P3-ACCT-3, P3-ACCT-14 |
+| `CategoriesControl.xaml` + `.xaml.cs` | P3-CAT-1…P3-CAT-10 |
+| `CategoryGroup` / `CategoryBalance` | P3-CAT-1 — but `CategoryBalance.Balance` is computed and never displayed; see Open Question 9 |
+| `PayeesControl.xaml` + `.xaml.cs` | P3-PAYEE-1…P3-PAYEE-6 |
+| `SecuritiesControl.xaml` + `.xaml.cs` | P3-SEC-1, P3-SEC-2, P3-SEC-3 |
+| `RentsControl.xaml` + `.xaml.cs` | P3-RENT-1, P3-RENT-2, P3-RENT-3 |
+| `BalanceControl.xaml` + `.xaml.cs` | P3-RECON-1…P3-RECON-10 |
+| `BalanceEventArgs` | **Not user-facing** — tells the shell whether balancing finished and whether a statement was filed |
+| `ReportsControl.xaml` + `.xaml.cs` | P3-PANEL-1, P3-PANEL-2 |
+| `RetirementControl.xaml` + `.xaml.cs` | P3-PANEL-3, P3-PANEL-4 |
+
+### Panel members that are not user-facing
+
+| Member | Reason |
+|---|---|
+| `AccountsControl.OnListBoxMouseDoubleClick` | Double-click-to-open-properties is **broken**: the hit-test result is discarded and the local it tests is always null, so the branch never runs. See Open Question 7 |
+| `AccountsControl.OnAddNewAccount` / `OnAddNewLoanAccount` "select the new account" step | **Broken**: assigns an `Account` to a list whose items are view models, so it selects nothing. See Open Question 8 |
+| `PayeesControl.OnBalanceChanged`, `SecuritiesControl.OnBalanceChanged` | Empty handlers marked "TODO" |
+| `SecuritiesControl.OnMenuItem_Rename`, `SecuritiesControl.Paste`, `SecuritiesControl.GetAllSecurities()` (no-arg) | Dead: the rename menu item is commented out in the XAML, paste is entirely commented out, and the overload is never called |
+| `CategoriesControl.menuItemRename_Click`, `ReverseTransfer`, `OnSelectedTransactionChanged` / `SelectedTransactionChanged` / `SelectedTransactions` | Dead: the rename handler was replaced by a command, `ReverseTransfer` is never called, and the transaction-selection event is never raised so nothing can consume it |
+| `CategoriesControl.Cut` / `Paste` | Deliberately empty — copy works, cut and paste don't |
+| `RentsControl.OnSelectionChanged`, `Cut`/`Copy`/`Delete`/`Paste` | Empty bodies marked "To Do"; clipboard is advertised as available but does nothing |
+| `RentsControl.Selected` setter | Records the value but the line that would actually select it is commented out |
+| `BalanceControl.TextBoxStatementBalance_KeyDown` | Empty handler |
+| `CurrenciesView.OnMoneyChanged`, `TearDownGrid`, `FindDataGridContainingFocus`, `SelectedRowId` | Empty or never called |
+| `SecuritiesView.FindDataGridContainingFocus` used via `IsKeyboardFocusInsideSplitsDataGrid` | Infrastructure — keeps the outer grid's keys from firing while editing a split |
+| `TransactionsView.SetupContextMenuBinding` | Declared, never called |
+
+### `Controls/QueryViewControl` (deferred here by Phase 2)
+
+| Member | Status |
+|---|---|
+| The four-column grid (And/Or, Field, Operation, Value) with add and delete rows | P3-FIND-4 |
+| `ListOfFields` | P3-FIND-4 — account, party, category, note, reference, date, payment, deposit, sales tax, status, accepted and budgeted. See Open Question 10 |
+| `ListOfOperations` | P3-FIND-4 — contains, equals, greater/less than (and or-equal), not contains, not equals, and a pattern match |
+| `OnDataGrid1_CurrentCellChanged` | P3-FIND-4 — one click starts editing a cell rather than two |
+| `GetQuery` | P3-FIND-4 — incomplete rows are ignored rather than rejected |
+| `Copy` / `Paste` | P3-FIND-4 — conditions can be copied between searches |
+| `Cut` | **Broken** — removes the selected rows but always writes an *empty* query to the clipboard. See Open Question 11 |
+| `ReadXml` / `WriteXml` | **Not user-facing** — the interface is implemented with empty bodies; the query is actually persisted through `TransactionViewState` |
+| `GetQueryRow(DataRow)` | **Not user-facing** — never called |
+
+---
+
+## Open questions from Phase 3
+
+Things a human should double-check, because the call was a judgement rather than
+obvious from the code — and, where noted, because they look like real defects.
+
+1. **A whole view exists that nothing can open.** `Views/RentPayementsView.xaml`
+   (class `RentInputControl`) is a complete, working surface for entering rent
+   received per unit per month, grouped by month with per-month totals — and it is
+   never constructed anywhere in the product. Rental tracking otherwise has no way to
+   record what each tenant actually paid. Treated as not user-facing and given no
+   scenario. A human should decide whether this is a half-finished feature to
+   complete or dead code to delete; if the redesign wants per-unit rent entry, the
+   intent is already written down here.
+2. **Most surfaces don't actually remember where the user was.** Only the transaction
+   register and the holdings list implement view state properly. The loan schedule
+   builds a state object but its `DeserializeViewState` returns a bare `ViewState`, so
+   the loan account is never restored. The rename-rules, rental-summary and
+   rent-input views return `null` from both. P3-VIEW-2 therefore describes the
+   *intent*; in practice it only holds for two of the surfaces. Worth confirming
+   before a redesign promises it everywhere.
+3. **The currencies list calls itself "Securities".** `CurrenciesView.Caption` returns
+   the string `"Securities"`, so the window title is wrong whenever the user is
+   looking at currencies. Its `ViewState` is also written entirely in terms of
+   `Security` — it saves `SelectedSecurity` and looks the row back up with
+   `Securities.FindSecurity` — against a grid whose rows are `Currency` objects, so
+   the selection is never restored. Both read as copy-paste from `SecuritiesView`.
+   Flagged as defects rather than capabilities.
+4. **The currencies list has no search box.** `CurrenciesView` implements a
+   `QuickFilter` property and its row collection implements matching, but there is no
+   `QuickFilterControl` in its XAML and `FocusQuickFilter()` is empty — so the
+   plumbing exists and nothing sets it. P3-VIEW-7 says a surface that can't be
+   searched does nothing, which is technically what happens; whether currencies
+   *should* be searchable is a design decision. (`LoansView`, `RentSummaryView` and
+   `RentInputControl` are in the same position.)
+5. **"View similar transactions" is built but switched off.** The command, its
+   can-execute handler and its binding all exist in `TransactionsView`; the execute
+   handler is empty and the menu item is commented out. Given no scenario. If the
+   redesign wants "show me everything like this", it is currently an empty shell, not
+   a feature to resurface.
+6. **`ChangeTracker`'s per-type accessors are dead and would crash if used.**
+   `ChangedAccounts`, `DeletedTransactions`, `ChangedSplits` and the rest are public
+   and referenced nowhere. Two of the three helpers they rely on are also wrong —
+   `GetChanged<T>` and `GetDeleted<T>` iterate a `HashSet<object>` of domain objects
+   as `foreach (ChangeList a in ...)`, which would throw an `InvalidCastException` on
+   the first element. Only the summary UI (P2-FILE-5) and the change count are live.
+   Flagged because anyone reusing this class in a redesign would hit it immediately.
+7. **Double-clicking an account does nothing.** `AccountsControl.
+   OnListBoxMouseDoubleClick` declares `object item = null`, calls
+   `GetElementFromPoint(...)` and throws the result away, then tests `item`, which is
+   always null — so the branch that opens the account's properties is unreachable.
+   Properties is still reachable from the context menu (P3-ACCT-5), so the capability
+   isn't lost, but the obvious gesture for it is broken.
+8. **A newly created account isn't selected.** Both `OnAddNewAccount` and
+   `OnAddNewLoanAccount` finish with `listBox1.SelectedItem = a` where `a` is an
+   `Account`, but the list's items are `AccountViewModel` objects — so nothing is
+   selected and the user has to find their new account themselves. P3-ACCT-5 describes
+   only the creation.
+9. **The categories tree computes a total it never shows.** `CategoryBalance` carries
+   a `Balance` that `UpdateRoots`/`UpdateBalance` keep current, but the data template
+   for it renders only the word "Total"; the same is true of each group heading, which
+   shows no figure. P3-CAT-1 therefore doesn't claim the user sees category totals in
+   the tree. Either the display was dropped or it was never finished — worth deciding,
+   since the accounts panel does show group totals (P3-ACCT-1) and the asymmetry is
+   visible to a user.
+10. **The advanced search offers a "budgeted" condition that the model can't answer
+    for a whole transaction.** `Field.Budgeted` is in the query builder's field list,
+    but Phase 1 Open Question 5 established that only an itemised *line* carries
+    budget participation. Captured under P3-FIND-4 as one of the offered fields
+    without claiming it works; a human should check whether searching on it returns
+    anything useful.
+11. **Cutting rows out of a search copies nothing.** `QueryViewControl.Cut` removes the
+    selected conditions but builds its clipboard payload from an `ArrayList` it never
+    adds to, and guards that with `if (qrows.Count >= 0)` — always true — so cutting
+    always overwrites the clipboard with an empty query. Copy works correctly. P3-FIND-4
+    describes copy and paste only.
+12. **The boundary with Phase 4 is "the door, not the room".** Fifteen or so modal
+    flows are reachable from these surfaces — account, loan, online-account, category,
+    merge-category, recategorize, rename-payee, rental, tax-report, pick-year and
+    attachment windows, plus the native file pickers. Each is captured here only as
+    the affordance that opens it. If Phase 4 finds a capability that only exists
+    inside one of those windows, it belongs there, not here.
+13. **The boundary with Phase 5 runs through `FlowDocumentView`.** That view is both
+    the host of the investment portfolio *inside* the transaction register (so its
+    expand/collapse and drill-down are P3-INV-4/P3-INV-5) and the host of every
+    standalone report (Phase 5). Its own controls — text search within the document,
+    copy, select-all, export as a web page, and the close box — are catalogued here
+    only in passing under P3-VIEW-3 and P3-VIEW-7; if Phase 5 would rather own the
+    report viewer's affordances as a whole, those are the ones to revisit.
+14. **`GraphGenerators.cs` lives in `Views/` but plots nothing itself.** It computes
+    the running-balance, brokerage-market-value and price-history series that the
+    chart strip draws. Classified as not user-facing here on the basis that Phase 5
+    owns what a chart says; flagging it because its location makes it easy to assume
+    Phase 3 covered it.
+15. **Duplicate detection is disabled while balancing.** The bracket of P3-DUP-1 is
+    only offered when the user is *not* reconciling (`!this.IsReconciling`). That is
+    probably deliberate — a statement legitimately contains repeated identical
+    charges — but it means the moment a user is most likely to notice a duplicate is
+    the moment the product stops pointing them out. Worth a deliberate decision rather
+    than inheriting it.
