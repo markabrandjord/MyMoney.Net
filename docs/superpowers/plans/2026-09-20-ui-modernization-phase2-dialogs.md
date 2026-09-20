@@ -1013,24 +1013,59 @@ git commit -m "feat: migrate AttachmentDialog's CommandBar/AppBarButton toolbar 
 
 ---
 
-### Task 6: Re-verification sweep of the remaining ~19 dialogs
+### Task 6: Re-verification sweep - extended to a whole-app non-standard-implementation audit
+
+**Scope extended 2026-09-20** (mid-session, with the app's owner) beyond the original ~19 dialogs.
+While implementing Tasks 1-5 above, live interactive testing found several real bugs that all
+trace back to the same underlying cause: hand-built, imperative UI construction (custom controls,
+manual layout math, code-behind-driven positioning) instead of standard, declarative WPF/XAML
+patterns the layout/windowing system can be trusted to handle correctly. Concrete instances found
+this session, kept here as worked examples for what this task is actually looking for:
+
+- **`Controls/Accordion.xaml`/`.xaml.cs`** - an entire "accordion" control built by hand in C#
+  (`new Grid()`, `new TextBlock()`, manual `ColumnDefinitions`), including a width-recalculation
+  method (`OnExpanderToAdd_SizeChanged`) that both hardcoded a wrong magic-number offset AND,
+  once that was removed, still needed an explicit `HorizontalAlignment="Stretch"` because the
+  imperative construction never triggers the standard stretch-propagation a declarative
+  `ToggleButton` in XAML would get automatically. Two rounds of real bugs from one non-standard
+  control.
+- **`Dialogs/AttachmentDialog.xaml`** - no `WindowStartupLocation` set at all (defaults to
+  `Manual`, landing whichever way the OS-level cascade decides, independent of `Owner`). Invisible
+  while `MainWindow` always opened fullscreen; became a real "dialog appears outside the app
+  window" bug the moment `MainWindow` opens windowed instead (this session's own dev-convenience
+  change - see `MainWindow.xaml.cs`'s `LoadConfig`).
+- **`Utilities/MessageBox/MessageBoxEx.xaml.cs`** - XAML declared `WindowStartupLocation="CenterOwner"`,
+  but the `Show()` method's code-behind explicitly overrode it to `CenterScreen`, silently ignoring
+  the `Owner` it had just set one line above - same "invisible until the window isn't fullscreen
+  anymore" bug, affecting every `MessageBoxEx.Show()` call site app-wide (e.g. the "Save Changes"
+  prompt).
+- **Modal/modeless inconsistency** - `AttachmentDialog` uses `Window.Show()` (non-modal by
+  design, confirmed intentional per its own FlaUI test's comments), while `CategoryDialog`/
+  `RenamePayeeDialog`/others use `ShowDialog()` (modal). Not necessarily wrong on its own, but
+  worth an explicit, deliberate audit rather than accumulated-by-accident inconsistency.
+- User-reported, not yet root-caused at plan-writing time: custom (non-stock) scrollbar rendering
+  observed in at least one view - add to this task's checklist below rather than a separate task,
+  since it's the same pattern class.
 
 **Files:**
 - Modify (verification only, changes only if a real issue is found): any of the ~19 dialogs in
   `Source/WPF/MyMoney/Dialogs/` not touched by Tasks 3-5 (i.e. everything except
   `AttachmentDialog`, `CategoryDialog`, `MoneyFileImportDialog`, `OnlineAccountDialog`,
-  `PasswordWindow`).
-- No new test files - this task runs existing coverage plus ad hoc manual checks; any dialog found
-  genuinely broken gets its own new task inserted here (not silently patched inline), per this
+  `PasswordWindow`), **plus**, per the scope extension above, any other file app-wide found to
+  exhibit the same pattern class during Step 4's checklist sweep.
+- No new test files planned up front - this task runs existing coverage plus ad hoc manual checks;
+  any issue found gets its own new task inserted here (not silently patched inline), per this
   plan's own discipline.
 
-**Interfaces:** none - this is a verification pass, not new functionality.
+**Interfaces:** none - this is primarily a verification/audit pass, not new functionality (though
+real bugs found, like the three above, do get fixed as part of it).
 
-These ~19 dialogs never referenced ModernWpf's `xmlns:ui=` directly - they only use stock WPF
-controls (`Button`, `TextBox`, `ComboBox`, etc.), which have already been inheriting WPF-UI's
+The original ~19 dialogs never referenced ModernWpf's `xmlns:ui=` directly - they only use stock
+WPF controls (`Button`, `TextBox`, `ComboBox`, etc.), which have already been inheriting WPF-UI's
 implicit styling since the Phase 1 `App.xaml` merge landed (the same mechanism the Phase 1 Finding
 documents restyled the whole app "silently"). This task confirms that inherited styling is
-actually correct for each one - not a blind sign-off.
+actually correct for each one - not a blind sign-off - **and**, per the extended scope, actively
+looks for the non-standard-implementation pattern class app-wide, not just within those 19 files.
 
 - [ ] **Step 1: List every dialog not covered by Tasks 3-5**
 
@@ -1069,19 +1104,48 @@ VisualGuard.AssertNotClipped(dialog);
 
 Run each affected test individually to confirm it still passes with the new assertion added.
 
-- [ ] **Step 4: Manual sweep of the remaining dialogs with no FlaUI coverage**
+- [ ] **Step 4: Manual sweep of the remaining dialogs with no FlaUI coverage, against an explicit
+      non-standard-implementation checklist**
 
 For each dialog not reached by Step 3 (expect: `AccountDialog`, `AddLoginDialog`,
 `FreeStyleQueryDialog`, `LoanDialog`, `NewSqliteDatabaseDialog`, `NewSqlServerDatabaseDialog`,
 `OpenDatabaseDialog`, `PickDateDialog`, `RecategorizeDialog` if not already covered,
 `RentalDialog`, `ReportRangeDialog`, `SelectAccountDialog`, and any others this task's Step 1
-listing turns up) - launch the app, trigger each one through its real UI entry point, and confirm:
-renders correctly in both Light and Dark theme (Ctrl+L), no clipped text, no blank/flat-color
-regions, standard controls (buttons, text boxes, combo boxes) are legible and interactive. This is
-the live-review artifact the design spec's testing strategy calls for - screenshot each one (light
-+ dark) to `docs/superpowers/plans/2026-09-20-ui-modernization-phase2-dialogs-artifacts/` (create
-the directory) as the reviewable record of this sweep, rather than relying on "someone happened to
-be watching."
+listing turns up) - launch the app, trigger each one through its real UI entry point, and check
+**both** the original visual-styling criteria **and** the extended checklist below:
+
+Original criteria: renders correctly in both Light and Dark theme (Ctrl+L), no clipped text, no
+blank/flat-color regions, standard controls (buttons, text boxes, combo boxes) are legible and
+interactive.
+
+Extended checklist (per this task's scope extension - check the dialog's own `.xaml`/`.xaml.cs`,
+not just its rendered appearance):
+- **Window positioning**: does it set `WindowStartupLocation="CenterOwner"` (or an equivalent,
+  deliberate positioning strategy) and actually set `Owner`? Test by moving `MainWindow` away from
+  its default position, then triggering the dialog - it should open centered on `MainWindow`, not
+  at a fixed screen position or wherever the OS cascade happens to put it.
+- **Modal vs. modeless**: is `ShowDialog()` vs `Show()` a deliberate choice for this specific
+  dialog (does the app's flow actually require blocking interaction with `MainWindow` while it's
+  open, or not)? Flag inconsistencies for a decision, don't silently "fix" either way.
+- **Imperative vs. declarative construction**: is the dialog's content built in XAML (standard,
+  layout-engine-trusted) or constructed/positioned via C# (`new Grid()`, manual `.Width`/`.Height`
+  assignment, hardcoded pixel offsets)? Flag any hand-built layout logic, especially anything
+  computing a size/position from another element's `ActualWidth`/`ActualHeight` via arithmetic
+  rather than letting Grid/Dock/Stack panels do it declaratively.
+- **Custom (non-stock) controls**: does this dialog use or reveal any custom-drawn control (e.g. a
+  hand-rendered scrollbar rather than the stock `ScrollBar`/`ScrollViewer`) instead of a standard
+  WPF control? A user report during this session flagged at least one custom scrollbar
+  encountered live - find and record which view(s) exhibit this, even outside the Dialogs folder
+  if that's where it's used.
+- **Shared resource-key gaps**: same class of check as Task 1's `BaseDialog` fix - does this
+  dialog's own `.xaml` reference any ModernWpf-only resource key directly (grep for
+  `SystemControlPage*`/other `System*` prefixed keys not confirmed present in `Wpf.Ui.dll`)?
+
+This is the live-review artifact the design spec's testing strategy calls for - screenshot each
+one (light + dark) to `docs/superpowers/plans/2026-09-20-ui-modernization-phase2-dialogs-artifacts/`
+(create the directory), and record checklist results (a simple table: dialog name x each checklist
+item x pass/fail/N-A) in the same directory, as the reviewable record of this sweep, rather than
+relying on "someone happened to be watching."
 
 - [ ] **Step 5: Triage any real issue found**
 
