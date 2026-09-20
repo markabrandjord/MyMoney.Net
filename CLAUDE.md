@@ -419,3 +419,26 @@ scenario tests, project dependency diagram). Quick reference:
     effect; `Categories.GetCategories()` is the collection's "live" view, and explicitly filters
     out `IsDeleted` categories - that's what the UI tree actually binds to, so "removed
     immediately" is true from the UI's perspective even though raw `Count` doesn't change.
+
+- **A FlaUI test's UI assertions can all pass while the real app has crashed in the background -
+  nothing was watching for it until Task 15.** Writing `SampleDataFlaUiTests.cs`, cancelling the
+  "Add Sample Data" dialog on an empty database threw a real, unhandled `NullReferenceException`
+  in production code (`AccountsControl.SelectedAccount`'s setter, called with a `null` `Account`
+  from `MainWindow.OnCommandAddSampleData` - filed as
+  [markabrandjord/MyMoney.Net#45](https://github.com/markabrandjord/MyMoney.Net/issues/45)).
+  `App.xaml.cs`'s `OnUnhandledException` caught it, logged it, and reported it via a
+  `MessageBoxEx` dialog - but `MessageBoxEx.Show` displays via `UiDispatcher.BeginInvoke` (posted,
+  not blocking), so the crash didn't halt anything the test was doing, and UIA tree reads work
+  fine alongside an unrelated modal regardless. Both tests in that run reported "Passed" in
+  `dotnet test` output; only a human watching the actual screen live noticed the crash dialog.
+  **Fix: `AppCrashGuard.cs`** (`Source/WPF/UITests/Basics/`) - every Basics FlaUI test's shared
+  `BasicsTestSetup.CleanUpDatabase` (called from every fixture's `[TearDown]`) now asserts the
+  app's own log file (`%TEMP%\MyMoney\Logs\MyMoney_<date>_log.txt`, per `Utilities/Logger.cs`)
+  gained no new `"APP ERROR: Unhandled"` line during the test, and proactively dismisses a
+  lingering "Unhandled Exception"/"Crash Report" dialog if one is still open (the same
+  session-corruption risk as the Categories collision-dialog gotcha above). This check is
+  deliberately NOT wrapped in a try/catch - unlike the best-effort registry/file cleanup next to
+  it, a real crash must fail the test, not be silently absorbed. A test that knowingly reproduces
+  a real, filed bug (like the Cancel scenario above) is marked `[Ignore("...")]` referencing the
+  issue, rather than left to fail every run or having its assertions weakened to tolerate the
+  crash. Discovered and fixed 2026-09-19.

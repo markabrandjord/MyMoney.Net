@@ -22,12 +22,20 @@ namespace Walkabout.UITests.Basics
         internal static UIA3Automation Automation { get; private set; }
         internal static FlaUI.Core.AutomationElements.Window MainWindow { get; private set; }
 
+        /// <summary>
+        /// Byte offset into the app's own log file already accounted for - see AppCrashGuard.
+        /// Not a property: AppCrashGuard.AssertNoCrashOccurred takes it by ref so it can advance
+        /// the baseline after each test's check.
+        /// </summary>
+        internal static long LastCheckedLogLength;
+
         [OneTimeSetUp]
         public void LaunchApp()
         {
             App = Application.Launch(LaunchSmokeTests.MyMoneyExePath, "/nosettings");
             Automation = new UIA3Automation();
             MainWindow = App.GetMainWindow(Automation, TimeSpan.FromSeconds(10));
+            LastCheckedLogLength = AppCrashGuard.SnapshotLogLength();
         }
 
         [OneTimeTearDown]
@@ -59,6 +67,34 @@ namespace Walkabout.UITests.Basics
             string scratchPath = Path.Combine(Path.GetTempPath(), $"BasicsScratch-{Guid.NewGuid():N}.mmdb");
 
             MyMoney money = BasicsFixtureBuilder.Build();
+            var db = new SqliteDatabase();
+            db.DatabasePath = scratchPath;
+            db.Create();
+            db.Save(money);
+
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = scratchPath,
+                TestDatabase = true
+            };
+            registry.Save();
+
+            return (scratchPath, displayName);
+        }
+
+        /// <summary>
+        /// Same as OpenFreshDatabase, but with a genuinely empty MyMoney (no BasicsFixtureBuilder
+        /// seeding) - for scenarios that need to observe a specific operation's effect on an
+        /// otherwise-blank database, e.g. Populate Sample Data's account/transaction creation.
+        /// </summary>
+        internal static (string ScratchPath, string RegisteredName) OpenEmptyDatabase(string displayName)
+        {
+            string scratchPath = Path.Combine(Path.GetTempPath(), $"BasicsScratch-{Guid.NewGuid():N}.mmdb");
+
+            MyMoney money = new MyMoney();
             var db = new SqliteDatabase();
             db.DatabasePath = scratchPath;
             db.Create();
@@ -172,6 +208,11 @@ namespace Walkabout.UITests.Basics
             {
                 // best-effort
             }
+
+            // Deliberately NOT inside a try/catch that swallows it (unlike the best-effort
+            // cleanup above) - a real app crash must fail the test, not be silently absorbed.
+            // See AppCrashGuard's own comment for why this check exists.
+            AppCrashGuard.AssertNoCrashOccurred(BasicsAppSession.MainWindow, ref BasicsAppSession.LastCheckedLogLength);
         }
     }
 }
