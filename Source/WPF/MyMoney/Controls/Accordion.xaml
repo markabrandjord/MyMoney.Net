@@ -54,6 +54,7 @@
                                     BorderThickness="0,0,0,1">
                                 <ToggleButton x:Name="ExpanderToggleButton"
                                               Padding="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Stretch"
                                               HorizontalContentAlignment="Stretch"
                                               VerticalContentAlignment="Center"
                                               Content="{TemplateBinding Header}"
