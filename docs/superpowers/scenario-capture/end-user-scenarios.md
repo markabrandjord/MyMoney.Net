@@ -16,7 +16,7 @@ user-facing.
 | # | Phase | Scope | Status |
 |---|-------|-------|--------|
 | 1 | Core domain model | `Money.cs` (+ its `MyMoney` partial in `Money_Loans.cs`) — the persistent object graph and the operations it supports | **Done** |
-| 2 | Navigation & shell | Main window, view selectors, command routing | Not started |
+| 2 | Navigation & shell | Main window, view selectors, command routing | **Done** |
 | 3 | Views | `Views/` — the grids, trees and panes the user works in | Not started |
 | 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | Not started |
 | 5 | Reports + charts | `Reports/`, `Charts/` | Not started |
@@ -1193,3 +1193,696 @@ user-facing was a judgement rather than obvious from the code:
 8. **Attachments** are represented here only as a flag on a transaction
    (P1-TXN-12). The filing, viewing and management of the documents themselves is
    Phase 8.
+
+---
+
+# Phase 2: Navigation & Shell
+
+**Source examined (in full):**
+
+| File | Lines |
+|---|---|
+| `Source/WPF/MyMoney/MainWindow.xaml` | 438 |
+| `Source/WPF/MyMoney/MainWindow.xaml.cs` | 5,292 |
+| `Source/WPF/MyMoney/Controls/Accordion.xaml` + `Accordion.xaml.cs` | 13 + 348 |
+| `Source/WPF/MyMoney/App.xaml.cs` | 389 |
+| `Source/WPF/MyMoney/Commands/Commands.cs` (`AppCommands`) | 149 |
+| `Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs` | 56 |
+| `Source/WPF/MyMoney/Utilities/HelpService.cs` | 114 |
+| `Source/WPF/MyMoney/Controls/AppSettings.xaml` + `AppSettings.xaml.cs` | 86 + full |
+| `Source/WPF/MyMoney/Controls/QuickFilterControl.xaml.cs` | 86 |
+| `Source/WPF/MyMoney/Controls/OutputPane.xaml.cs` | full |
+
+Read in the relevant part only, because they are shell *collaborators* whose own
+content belongs to a later phase: `Views/ChangeTracker.cs` (`GetSummary` — what the
+pending-changes flyout shows), `View Selectors/AccountsControl.xaml.cs`
+(`IContainerStatus` implementation — what the left-nav header figure is),
+`Utilities/AppTheme.cs`, `Utilities/MessageBox/MessageBoxEx.xaml.cs` (its use of the
+main window's dimming `Shield`).
+
+> **Path note for later phases.** `CLAUDE.md`'s architecture section is accurate for
+> this phase: `MainWindow.xaml`/`.xaml.cs` and `Controls/Accordion.xaml*` are exactly
+> where it says. Two things worth recording anyway: the left-navigation *panels*
+> (`AccountsControl`, `CategoriesControl`, `PayeesControl`, `SecuritiesControl`,
+> `RentsControl`, `ReportsControl`, `RetirementControl`, `BalanceControl`) live in a
+> folder literally named **`Source/WPF/MyMoney/View Selectors/`** — with a space, and
+> *not* under `Views/` — so a `Views/` glob will silently miss them. And `HelpService`
+> is in `Utilities/HelpService.cs` despite declaring `namespace Walkabout.Help`.
+
+**What this phase covers and deliberately does not.** This section catalogs the
+app's *chrome* — how a user gets into their data, chooses which part of their
+finances to work on, moves between places, issues commands, learns what the product
+is doing, and shapes how it looks. The *content* of each destination — what an
+account register looks like, what a category tree lets you edit, what a report says —
+is Phase 3, 4 and 5. Where the shell merely provides the doorway to something a later
+phase owns, the doorway is captured here and the room is left alone.
+
+---
+
+## 2.1 Getting into the app and onto the right data
+
+### P2-START-1 — Pick up exactly where they left off
+When the user reopens the product it comes back the way they left it: the same
+financial file open, the window the same size in the same place, the navigation and
+chart panes the same width and height, each screen showing the same selection, and
+the charts set up the same way. Nothing has to be re-chosen to resume work.
+*(`MainWindow.LoadConfig`/`SaveConfig`, `Settings.WindowLocation`/`WindowSize`/
+`ToolBoxWidth`/`GraphHeight`/`GraphState`, `Settings.GetViewState`/`SetViewState`,
+`MainWindow.BeginLoadDatabase`)*
+
+### P2-START-2 — Be told when the data they were using has gone
+If the file the product last had open is no longer where it was, the user is told
+plainly which one is missing rather than being dropped into an empty or broken app.
+*(`MainWindow.BeginLoadDatabase` "Previous database no longer exists" message)*
+
+### P2-START-3 — Start straight from a file they double-clicked
+Opening a financial file or a downloaded statement from outside the product launches
+it on that file. If the product is already running, the existing window is brought to
+the front and handed the file instead of a second copy starting up.
+*(`App.SaveImportArgs`, `App.BringToFrontApplicationIfAlreadyRunning`,
+`MainWindow.ParseCommandLine`, `MainWindow.OnImportFolderContentHasChanged` watching
+the shared pending-import list)*
+
+### P2-START-4 — Ask the product how to start it differently
+A user starting the product from a command line can ask what options it accepts and
+is shown them, including starting with no file loaded at all.
+*(`MainWindow.ShowUsage`, `ParseCommandLine`'s `/n`, `/nd`, `/nosettings`, `/h`)*
+
+---
+
+## 2.2 The data file as a whole
+
+### P2-FILE-1 — Start a brand new set of books
+The user creates a fresh, empty financial file, names it and says where it should
+live, and the product switches to it.
+*(`MainWindow.OnMenuFileNewClick`, `NewSqliteDatabase`, `NewSqliteDatabaseDialog`)*
+
+### P2-FILE-2 — Switch to a different set of books
+The user picks from the financial files the product already knows about and switches
+to that one, after being given the chance to save anything outstanding first.
+*(`MainWindow.OnCommandFileOpen`, `OpenDatabaseDialog`, `OpenRegisteredDatabase`,
+`SaveIfDirty`)*
+
+### P2-FILE-3 — Jump back to something they were using recently
+The files the user has opened lately are offered directly, most recent first, so
+switching between two sets of books is a single click.
+*(`RecentFilesMenu.Refresh`, `MenuRecentFiles`, `DatabaseRegistry` ordering by last
+used, `RegisterRecentDatabase`)*
+
+### P2-FILE-4 — Save their work and be told it happened
+Saving writes everything outstanding and the user is told what it was saved to and
+how long it took; optionally a sound confirms it. Saving is only offered when there
+is somewhere to save to.
+*(`MainWindow.Save`, `OnCommandCanSave`, `ShowMessage`, `Settings.PlaySounds`)*
+
+### P2-FILE-5 — See exactly what is waiting to be saved
+Before saving, the user can open a summary of everything changed since the last save,
+broken down by what kind of record it is and whether it was added, changed or
+removed — and can click straight through to the affected transactions.
+*(`PendingChangeDropDown`/`pendingChangeFlyout`, `OnOpeningPendingChangeFlyout`,
+`ChangeTracker.GetSummary`)*
+
+### P2-FILE-6 — Never lose work by accident
+Whenever the user is about to do something that would discard unsaved work — closing
+the product, opening another file, reverting, or recovering from an unexpected error
+— they are asked first, and can save, discard or back out.
+*(`MainWindow.SaveIfDirty`, `OnClosing`, `OnRecentDatabaseSelected`,
+`App.HandleUnhandledException` calling `SaveIfDirty`)*
+
+### P2-FILE-7 — Throw away everything since the last save
+The user can abandon all changes made since the last save, is told how many changes
+that is, and has to confirm before the file is reloaded from storage.
+*(`MainWindow.OnCommandRevertChanges`, `OnCommandCanRevert`,
+`ChangeTracker.ChangeCount`)*
+
+### P2-FILE-8 — Keep a copy somewhere else, in a form of their choosing
+The user can write the whole of their data out to a new file, choosing the form it
+takes — the product's own storage, a readable or compact interchange format, or a
+plain spreadsheet export of what's currently listed.
+*(`MainWindow.OnCommandFileSaveAs` → `SaveAsSqlite`/`SaveAsSqlCe`/`SaveAsXml`/
+`SaveAsBinaryXml`/`ExportCsv`; format specifics are Phase 6)*
+
+### P2-FILE-9 — Take a backup
+The user can write a backup of their current data to a location they choose, offered
+in the form that matches how their data is stored, and is told when it's done.
+*(`MainWindow.OnCommandBackup`, `GetBackupPath`, `AppCommands.CommandFileBackup` —
+see Open Question 5: this command has no menu item and is currently unreachable)*
+
+### P2-FILE-10 — Get at the files behind their data
+The user can open the folder their financial data lives in, to find attachments,
+statements, logs or backups. The option is only offered when there is such a folder.
+*(`MainWindow.OnCommandOpenContainingFolder`, `OnCommandCanOpenContainingFolder`)*
+
+### P2-FILE-11 — Bring in data from outside
+The user can pull in statements, exports and other people's copies of the product's
+own data from files on disk, picking several at once, and watch the progress as it
+happens.
+*(`MainWindow.OnCommandFileImport`, `ImportQif`/`ImportOfx`/`ImportXml`/`ImportCsv`/
+`ImportMoneyFile`; the import behaviour itself is Phase 6)*
+
+### P2-FILE-12 — Make the product the natural home for financial files
+The user can tell the product to take ownership of statement and data file types, so
+that double-clicking one in future opens it here.
+*(`MainWindow.OnCommandFileExtensionAssociation`, `FileAssociation.Associate`)*
+
+### P2-FILE-13 — Let someone else sign in to shared data
+Where the data is held somewhere that supports more than one person, the user can add
+another sign-in. Where it isn't, the option isn't offered at all.
+*(`MainWindow.OnCommandFileAddUser`, `OnCommandCanExecuteAddUser`,
+`IDatabase.SupportsUserLogin` driving `MenuFileAddUser.Visibility`)*
+
+### P2-FILE-14 — Protect the data with a password, and change it later
+Where the storage supports it, the user sets a password when creating a copy and can
+change it afterwards from the settings panel; where it doesn't, they aren't asked.
+*(`MainWindow.PromptForPassword`, `PasswordWindow`, `AppSettings` password box,
+`OnAppSettingsPanelClosed`, `DatabaseSecurityPasswordStore`)*
+
+### P2-FILE-15 — Leave
+The user closes the product from the menu or the window, and is given the chance to
+save first.
+*(`MainWindow.OnCommandFileExit`, `OnClosing`, `OnClosed` saving layout and
+preferences)*
+
+---
+
+## 2.3 Choosing which part of their finances to work on
+
+### P2-NAV-1 — Choose between the areas of the product from one place
+The user has to choose between a variety of views that let them work on the different
+kinds of information the product holds. Choosing one changes what the main working
+area shows and presents them a new list of things to pick from within that area.
+*(`Accordion`, `MainWindow.toolBox.Add(...)` for ACCOUNTS / CATEGORIES / PAYEES /
+SECURITIES / RENTALS, `OnToolBoxItemsExpanded`, `OnSelectionChangeFor_*`)*
+
+### P2-NAV-2 — Have one area open at a time, using all the room available
+Opening one area closes whichever was open before and gives the newly opened one the
+full height of the panel, so the user is never squinting at five short lists at once.
+*(`Accordion.OnExpanderExpanded`/`OnExpanderCollapsed`, `SetRowHeight`)*
+
+### P2-NAV-3 — Pick something out of a long list by typing
+Within an area that can hold hundreds of entries, the user narrows the list by typing
+part of what they're looking for. The search box belongs to the open area and
+disappears when that area is closed.
+*(`QuickFilterControl`, `Accordion.Add(..., searchBox: true)` for categories, payees
+and securities, `Accordion.FilterUpdated` → `MainWindow.OnToolBoxFilterUpdated`)*
+
+### P2-NAV-4 — See an area's headline figure without opening it
+An area can show a single summary number on its own header, so for instance the
+user's net worth is visible whether or not the accounts list is the one currently
+open.
+*(`IContainerStatus`, `Accordion.Add` status text block,
+`AccountsControl.SetTextBlock` and its net-worth update)*
+
+### P2-NAV-5 — Have the navigation follow them when they arrive by another route
+When the user reaches something by a route other than the left-hand navigation — a
+back button, a link in a report, a freshly downloaded batch — the navigation catches
+up on its own: the right area opens and the right entry within it is highlighted.
+*(`MainWindow.OnAfterViewStateChanged` setting `toolBox.Selected` and each panel's
+selection from the view's active account/payee/category/security/rental)*
+
+### P2-NAV-6 — Have task-specific areas appear while a task is under way
+When the user starts a task that needs its own controls — balancing an account
+against a statement, choosing a report, planning for retirement — a panel for it
+appears in the navigation, is selected for them, and disappears again when the task
+is over or they navigate elsewhere.
+*(`MainWindow.BalanceAccount`/`HideBalancePanel`, `ShowReportsPanel`/
+`HideReportsPanel`, `ShowRetirementPanel`/`HideRetirementPanel`, `Accordion.Add`/
+`Remove`; the panels' own content is Phase 3/5)*
+
+### P2-NAV-7 — Not be shown areas for things they don't do
+A user who doesn't track rental property doesn't see a rentals area at all; turning
+the feature on makes it appear and turning it off removes it, without restarting.
+*(`MainWindow.UpdateRentalManagement`, `OnUpdateRentalTab`,
+`Accordion.ContainsTab`/`RemoveTab`, `DatabaseSettings.RentalManagement`)*
+
+### P2-NAV-8 — Decide how much room navigation gets
+The user drags the boundary between the navigation panel and the working area to suit
+their screen, and that choice is remembered.
+*(`GridSplitter` in `GridColumns`, `Settings.ToolBoxWidth`, `Grid_SizeChanged`)*
+
+---
+
+## 2.4 Retracing their steps
+
+### P2-HIST-1 — Go back to where they just were
+Having followed a chain of links — a report to a category, a category to a payee, a
+payee to an account — the user can step back through it and forward again, using
+on-screen buttons, the keyboard, or the back/forward buttons on their mouse.
+*(`MainWindow.Back`/`Forward`, `navigator` (`UndoManager`) of `ViewCommand`s,
+`BackButton`/`ForwardButton`, `OnPreviewKeyDown` Alt+Left/Right and browser keys,
+`OnPreviewMouseDown` thumb buttons)*
+
+### P2-HIST-2 — Land back on the same row, not just the same screen
+Going back doesn't just return to a screen, it returns to the exact entry they were
+looking at, unless they were deliberately sent somewhere more specific.
+*(`ViewCommand.Undo`/`Redo` restoring `ViewState`,
+`MainWindow.RestorePreviouslySavedSelection`, `TrackSelectionChanges`)*
+
+### P2-HIST-3 — Only be offered a direction that exists
+Back and forward are offered only when there is actually somewhere to go in that
+direction.
+*(`OnCommandBackCanExecute`, `CommandBinding_CanExecute`, `UndoManager.CanUndo`/
+`CanRedo`)*
+
+---
+
+## 2.5 The main working area
+
+### P2-WORK-1 — Have one place where the work happens
+Whatever the user is doing — a register of transactions, a loan schedule, a list of
+holdings, currencies, rename rules, a rental summary, a report — it fills the same
+main area, so the product has one focal point rather than a scatter of windows.
+*(`MainWindow.EditingZone`, `CurrentView`, `SetCurrentView<T>`, `IView`)*
+
+### P2-WORK-2 — Come back to a screen as they left it
+Returning to a screen they used earlier shows it configured the way they had it,
+within the session and across restarts.
+*(`GetOrCreateView<T>` caching one instance per screen, `IView.ViewState`,
+`Settings.GetViewState`/`SetViewState`/`GetViewStateNode`, `SaveConfig`)*
+
+### P2-WORK-3 — Decide how much room the working area gets
+The user drags the boundary between the working area and the charts beneath it, and
+that choice is remembered.
+*(`GridSplitter` between `EditingZone` and `TabForGraphs`, `Settings.GraphHeight`)*
+
+### P2-WORK-4 — Always know what they're looking at, and whether it's saved
+The window itself says which set of books is open, what is currently being shown, and
+whether there is unsaved work.
+*(`MainWindow.UpdateCaption`, `IView.Caption`, the `*` dirty marker)*
+
+---
+
+## 2.6 The picture beneath the numbers
+
+### P2-PANE-1 — See a picture of whatever they're working on
+Below the working area, the user gets charts that match what's on screen — a balance
+trend, a history of activity, a breakdown of income and of spending, a holding's
+price history, a loan's payments, a property's profit and loss — without having to
+ask for them.
+*(`TabForGraphs` and its tabs, `MainWindow.UpdateCharts`, `SetChartsDirty`; the charts
+themselves are Phase 5)*
+
+### P2-PANE-2 — Click the picture to filter the numbers
+Clicking a slice of the spending breakdown, a bar of the history, or a point on the
+trend narrows the list above it to just that, so the picture is a way of navigating
+rather than only something to look at.
+*(`PieChartSelectionChanged`, `HistoryChart_SelectionChanged`, `OnGraphMouseDown`)*
+
+### P2-PANE-3 — Not be shown pictures that don't apply
+Charts that mean nothing for the current screen are not offered at all, and if the
+one the user was looking at stops applying they are moved to one that does.
+*(`UpdateCharts` tab visibility/selection logic per current view)*
+
+### P2-PANE-4 — Watch what a long job is doing, and dismiss it when done
+When the product has something to report from a long-running job, a running commentary
+appears in the same strip, and the user can close it when they've read it.
+*(`OutputPane`, `ShowOutputEvent`/`HideOutputEvent`, `MainWindow.ShowOutputWindow`/
+`HideOutputWindow`, `TabOutput` with its close box)*
+
+### P2-PANE-5 — Follow a download or import as it happens
+While statements are being fetched or files imported, the user sees each account's
+progress in its own panel, can cancel it, and clicking a finished batch takes them
+straight to what arrived.
+*(`TabDownload`, `DownloadControl`, `OfxDownloadController`, `ShowDownloadTab`/
+`HideDownloadTab`, `OfxDownloadControl_SelectionChanged` → `ViewTransactions`;
+download behaviour is Phase 6/8)*
+
+---
+
+## 2.7 Commanding the product
+
+### P2-CMD-1 — Find every capability in one predictable place
+Everything the product can do is reachable from a menu bar grouped the way users
+expect — the file, editing, what to look at, reports, searching, online activity, and
+help.
+*(`MainMenu` with `MenuFile`/`MenuEdit`/`MenuView`/`MenuViewReports`/`MenuQuery`/
+`MenuOnline`/`MenuHelp`)*
+
+### P2-CMD-2 — Reach the things they do constantly without the menu
+The handful of actions a user performs many times a session — fetching new
+statements, saving, seeing what's new in the product — sit permanently on screen.
+*(`ButtonSynchronize`, `PendingChangeDropDown`, `ButtonShowUpdateInfo`)*
+
+### P2-CMD-3 — Drive the product from the keyboard
+The user can search, switch appearance, move back and forward, and reach any menu
+without touching the mouse.
+*(`Window.InputBindings`: Ctrl+F, Ctrl+L, Alt+Left/Right; menu access keys;
+`HelpService`'s F1)*
+
+### P2-CMD-4 — Only be offered what would actually work
+Commands that can't do anything right now are visibly unavailable rather than failing
+when pressed — saving with nothing to save to, reverting with nothing to revert,
+synchronising while a sync is running, updating prices while an update is in flight,
+adding a user where that isn't supported.
+*(the `CanExecute` handlers: `OnCommandCanSave`, `OnCommandCanRevert`,
+`CanSynchronizeOnlineAccounts`, `CanUpdateSecurities`, `OnCommandCanExecuteAddUser`,
+`OnCommandCanOpenContainingFolder`)*
+
+### P2-CMD-5 — Cut, copy, paste and delete what they have selected
+The clipboard commands act on whatever the user is actually focused on — the text
+they're typing, the row they've selected, the report they're reading — rather than
+meaning one fixed thing, and say so when something goes wrong.
+*(`MainWindow.GetClipboardClient`, `IClipboardClient`, `TextBoxClipboardClient`/
+`ComboBoxClipboardClient`/`RichTextBoxClipboardClient`/
+`FlowDocumentViewClipboardClient`, `ClipboardMonitor` keeping paste availability
+current)*
+
+### P2-CMD-6 — Search from anywhere
+A single keystroke puts the cursor in the search box of whatever the user is
+currently looking at, wherever they are in the product.
+*(`OnFind` → `IView.FocusQuickFilter`, `Find` command bound to Ctrl+F)*
+
+### P2-CMD-7 — Build a precise search when typing a word isn't enough
+The user can open a form for constructing a detailed search, run it, and clear it
+again, with the working area switching to show the results.
+*(`OnCommandShowQuery`/`ShowQueryPanel`/`HideQueryPanel`, `OnCommandQueryRun`,
+`OnCommandQueryClear`, `MenuQueryShowForm` check state; the form itself is Phase 3)*
+
+### P2-CMD-8 — Go straight to a list that isn't an account
+Some of the product's information isn't reached by picking something in the left-hand
+navigation — the holdings list, the currencies list, the rename rules — and the user
+opens those directly from a menu.
+*(`OnCommandViewSecurities`, `OnCommandViewCurrencies`, `OnCommandViewViewAliases`;
+the views themselves are Phase 3)*
+
+### P2-CMD-9 — Tidy up the data from one place
+The housekeeping jobs — dropping holdings nothing refers to, checking transfers,
+repairing itemised transactions, folding duplicate holdings and parties together,
+clearing category frequencies — are gathered in one menu, and each says what it did.
+*(`MenuEdit`'s "Cleanup" submenu: `OnRemovedUnusedSecurities`,
+`OnCommandTroubleshootCheckTransfer`, `MenuFixSplits_Click`,
+`MenuRemoveDuplicateSecurities_Click`, `MenuRemoveDuplicatePayees_Click`,
+`OnResetCategoryFrequencies`; the underlying operations are P1-HEALTH-1)*
+
+### P2-CMD-10 — Reach any report from one menu
+All the product's reports are listed together, and choosing one replaces the working
+area with it.
+*(`MenuViewReports` and its commands → `SetCurrentView<FlowDocumentView>` +
+`GenerateReport`; the reports are Phase 5)*
+
+### P2-CMD-11 — Reach anything online from one menu
+Fetching statements, refreshing prices, setting up a new download and choosing which
+services to use are gathered together.
+*(`MenuOnline`: `OnSynchronizeOnlineAccounts`, `OnCommandUpdateSecurities`,
+`OnCommandDownloadAccounts`, `OnStockQuoteServiceOptions`; behaviour is Phase 8)*
+
+---
+
+## 2.8 Knowing what the product is doing
+
+### P2-STATUS-1 — See what they're worth as soon as the data opens
+On opening a file, the user is shown their total net worth across every account
+without asking for it.
+*(`MainWindow.ShowNetWorth` → `ShowMessage`)*
+
+### P2-STATUS-2 — Get a running commentary along the bottom
+A status line reports what the product just did — what was loaded or saved and how
+long it took, where a backup went, what an import found, why a rate lookup failed —
+without interrupting the user.
+*(`StatusMessage`, `IStatusService.ShowMessage`, `InternalShowMessage`,
+`AnimatedMessage` for messages that change after the fact)*
+
+### P2-STATUS-3 — See how far through a long job the product is
+Importing, downloading and other long operations show a progress bar and a line
+saying what is currently being worked on.
+*(`ProgressBar`/`ProgressPrompt`, `IStatusService.ShowProgress`, busy cursor)*
+
+### P2-STATUS-4 — Be told about a problem without losing their place
+Errors and confirmations appear as a message the user can read at their own pace,
+with the detail available if they want it, over a dimmed window so it's clear what is
+waiting on them.
+*(`MessageBoxEx.Show(message, title, details, ...)`, the main window's `Shield`
+overlay)*
+
+### P2-STATUS-5 — Be told the product crashed last time
+If the product died unexpectedly on a previous run, the user is told on the next
+start and shown what happened, rather than it disappearing silently.
+*(`App.CheckCrashLog`, `CrashReport.Load`, `Log.FatalUnhandledException`)*
+
+### P2-STATUS-6 — Be offered a way out of an unexpected failure
+When something goes wrong that the product didn't anticipate, the user is told, given
+the details, and offered the chance to save their work before anything else happens.
+*(`App.OnUnhandledException`/`OnAppDomainUnhandledException`/
+`TaskScheduler_UnobservedTaskException1` → `HandleUnhandledException` →
+`SaveIfDirty`)*
+
+### P2-STATUS-7 — Notice that there's a newer version, and read what's in it
+When a newer version of the product exists, a button appears offering to show what
+changed, and after an update the user is shown what's new since the version they were
+on, with a way to get the update.
+*(`CheckLastVersion`, `ChangeListRequest`, `OnChangeListRequestCompleted`,
+`ButtonShowUpdateInfo`, `ShowChangeInfo` → `ChangeInfoReport`,
+`OnInstallButtonClick`)*
+
+---
+
+## 2.9 Shaping the product to their preferences
+
+### P2-PREF-1 — Switch between a light and a dark appearance
+The user chooses whether the product is light or dark, either from settings or with a
+single keystroke, and the change takes effect immediately and is remembered.
+*(`AppCommands.CommandToggleTheme` (Ctrl+L), `OnCommandToggleTheme`, `OnThemeChanged`,
+`AppTheme.SetTheme`, `Settings.Theme`, `AppSettings`'s theme list)*
+
+### P2-PREF-2 — Adjust preferences without leaving what they were doing
+Settings slide in over the side of the window rather than taking over the screen, and
+close as soon as the user clicks back into their work or presses the back arrow.
+*(`AppSettingsPanel` in `MainWindow.xaml`, `WpfHelper.Flyout`,
+`OnPreviewMouseDown` dismissing it, `AppSettings.Closed`)*
+
+### P2-PREF-3 — Say when their financial year starts
+The user sets the month their year begins, and everything that reports by year
+follows it.
+*(`AppSettings` fiscal-year list, `DatabaseSettings.FiscalYearStart`,
+`DatabaseSettings_PropertyChanged` → history chart and tax-year migration)*
+
+### P2-PREF-4 — Choose the currency everything is expressed in
+The user picks the currency totals are shown in and whether the symbol is displayed
+alongside amounts, and the product re-expresses everything accordingly.
+*(`AppSettings` currency list, `DatabaseSettings.DisplayCurrency`/`ShowCurrency`,
+`MainWindow.ApplyDisplayCurrency`; the conversion itself is P1-CUR-3)*
+
+### P2-PREF-5 — Turn whole features on and off
+The user turns off parts of the product they don't use, such as rental-property
+tracking, and the corresponding area leaves the navigation entirely.
+*(`AppSettings` rental checkbox → `DatabaseSettings.RentalManagement` →
+`UpdateRentalManagement`/`OnUpdateRentalTab`; see P2-NAV-7)*
+
+### P2-PREF-6 — Tune the product's smaller habits
+The user adjusts the details that affect day-to-day working: whether a sound plays on
+save, how many days either side to search when matching a transfer, whether already
+reconciled entries can be accepted, and how downloaded statement files should be
+read.
+*(`AppSettings` checkboxes and text box → `Settings.PlaySounds`/`TransferSearchDays`/
+`AcceptReconciled`/`ImportOFXAsUTF8`)*
+
+### P2-PREF-7 — Have every preference and layout choice remembered
+Preferences are saved as they're changed and layout as the product closes, so nothing
+has to be set twice.
+*(`DatabaseSettings_PropertyChanged`'s delayed save, `Settings.Save`,
+`MainWindow.SaveConfig` on close, and the "error saving settings" message when it
+fails)*
+
+---
+
+## 2.10 Getting help and getting unstuck
+
+### P2-HELP-1 — Get help about the screen they're on
+Pressing for help opens documentation about what the user is currently looking at
+rather than a generic front page.
+*(`HelpService.HelpKeyword` attached to the window and to each report view,
+`HelpKeyEventRouter` handling F1, `HelpService.OpenHelpPage`)*
+
+### P2-HELP-2 — Read the full documentation
+The user can open the product's documentation from the help menu.
+*(`OnCommandViewHelp`)*
+
+### P2-HELP-3 — Find out which version they're running
+The user can check the version they have and who supplies the market data behind it.
+*(`OnCommandHelpAbout`)*
+
+### P2-HELP-4 — Read what changed between versions
+The user can read the list of changes for the version they have at any time, not only
+when prompted after an update.
+*(`OnCommandViewChanges` → `ShowChangeInfo`, cached change list)*
+
+### P2-HELP-5 — Get at the logs when something is wrong
+When the user needs to report a problem, they can open the product's own log folder
+directly.
+*(`OnCommandViewLogs`, `Logger`'s log path)*
+
+### P2-HELP-6 — Try the product out with realistic data
+A user evaluating the product can fill an empty file with generated but realistic
+data and immediately land on the first account, and can generate a fresh profile from
+their own real data to build such a sample from.
+*(`OnCommandAddSampleData`, `SampleDatabase.Create`, `MenuExportSampleData_Click`;
+the sample-data dialog itself is Phase 4)*
+
+---
+
+## Phase 2 coverage checklist
+
+Every shell/chrome element examined. "Not user-facing" entries are plumbing the user
+never perceives directly.
+
+### Window structure (`MainWindow.xaml`)
+
+| Element | Status |
+|---|---|
+| `Window` chrome: title, icon, resize grip, modern window style | P2-WORK-4, P2-START-1 |
+| `Window.InputBindings` (Alt+Left/Right, Ctrl+F, Ctrl+L) | P2-CMD-3, P2-HIST-1, P2-CMD-6, P2-PREF-1 |
+| `Window.CommandBindings` (all 45 bindings) | P2-CMD-1…P2-CMD-11, P2-FILE-*, P2-HELP-* |
+| `BackButton` / `ForwardButton` | P2-HIST-1, P2-HIST-3 |
+| `MainMenu` — File / Edit / View / Reports / Query / Online / Help | P2-CMD-1 (each item mapped under 2.2, 2.6, 2.7, 2.10) |
+| `MenuRecentFiles` | P2-FILE-3 |
+| `MenuFileNew` (+ DEBUG-only engine submenu) | P2-FILE-1 — see Open Question 3 |
+| `MenuEdit` "Cleanup" submenu | P2-CMD-9 — except `MenuGCCollect`/`MenuEnvironment`, Open Question 2 |
+| Toolbar: `ButtonSynchronize` | P2-CMD-2 (behaviour Phase 8) |
+| Toolbar: `PendingChangeDropDown` + `pendingChangeFlyout` + Revert button | P2-FILE-4, P2-FILE-5, P2-FILE-7 |
+| Toolbar: `ButtonShowUpdateInfo` | P2-STATUS-7 |
+| `GridColumns` + vertical `GridSplitter` | P2-NAV-8 |
+| `toolBox` (`Accordion`) | P2-NAV-1…P2-NAV-8 |
+| `EditingZone` (`ContentControl`) | P2-WORK-1, P2-WORK-2 |
+| Horizontal `GridSplitter` | P2-WORK-3 |
+| `TabForGraphs` + `TabTrends`/`TabHistory`/`TabIncomes`/`TabExpenses`/`TabStock`/`TabLoan`/`TabRental` | P2-PANE-1, P2-PANE-2, P2-PANE-3 (chart content is Phase 5) |
+| `TabOutput` + `OutputPane` + `CloseBox` | P2-PANE-4 |
+| `TabDownload` + `DownloadControl` + `CloseBox` | P2-PANE-5 (download behaviour is Phase 6/8) |
+| `AppSettingsPanel` (`AppSettings`) | P2-PREF-1…P2-PREF-7, P2-FILE-14 — see Open Question 4 |
+| `StatusBar`: `StatusMessage` | P2-STATUS-1, P2-STATUS-2 |
+| `StatusBar`: `ProgressPrompt` + `ProgressBar` | P2-STATUS-3 |
+| `Shield` overlay | P2-STATUS-4 — the dimming behind a modal message |
+
+### `MainWindow.xaml.cs` responsibilities
+
+| Responsibility | Status |
+|---|---|
+| Startup / command line (`ParseCommandLine`, `ShowUsage`, `OnMainWindowLoaded`) | P2-START-3, P2-START-4 |
+| Config load/save (`LoadConfig`, `SaveConfig`, `GetGraphState`/`SetGraphState`) | P2-START-1, P2-NAV-8, P2-WORK-3, P2-PREF-7 |
+| Database lifecycle (`BeginLoadDatabase`, `LoadDatabase`, `CreateNewDatabase`, `OpenRegisteredDatabase`, `RegisterRecentDatabase`, `SaveNewDatabase`, `SaveAs*`, `ExportCsv`) | P2-START-2, P2-FILE-1, P2-FILE-2, P2-FILE-3, P2-FILE-8 |
+| Dirty tracking (`SetDirty`, `OnDirtyChanged`, `SaveIfDirty`, `Save`) | P2-FILE-4, P2-FILE-5, P2-FILE-6, P2-WORK-4 |
+| `OnDataContextChanged` — rewiring every panel to newly loaded data | **Not user-facing** on its own; its effect is that P2-FILE-2 leaves a working app rather than stale panels |
+| View management (`CurrentView`, `GetOrCreateView<T>`, `SetCurrentView<T>`, `cacheViews`) | P2-WORK-1, P2-WORK-2 |
+| Navigation history (`Back`, `Forward`, `navigator`, `ViewCommand`, `SaveViewStateOfCurrentView`, `RestorePreviouslySavedSelection`, `TrackSelectionChanges`) | P2-HIST-1, P2-HIST-2, P2-HIST-3 |
+| `IViewNavigator` (`NavigateToTransaction`, `ViewTransactions`, `NavigateToSecurity`) | P2-NAV-5 — how other parts of the product ask the shell to go somewhere |
+| `IServiceProvider.GetService` | **Not user-facing** — how views, dialogs and reports reach shared services; a few branches have side effects (`ReportsControl`/`RetirementControl`/`DownloadControl` *create* their panel), which is P2-NAV-6 / P2-PANE-5 |
+| `IStatusService` (`ShowMessage`, `ShowOutput`, `ShowProgress`, `ClearStatus`) | P2-STATUS-2, P2-STATUS-3, P2-PANE-4 |
+| Toolbox selection handlers (`OnToolBoxItemsExpanded`, `OnSelectionChangeFor_*`) | P2-NAV-1 |
+| Left-nav task panels (`BalanceAccount`/`HideBalancePanel`, `ShowReportsPanel`, `ShowRetirementPanel`) | P2-NAV-6 |
+| `OnAfterViewStateChanged` / `OnBeforeViewStateChanged` | P2-NAV-5, P2-HIST-2, P2-WORK-4 |
+| Chart orchestration (`UpdateCharts`, `SetChartsDirty`, `UpdateHistoryChart`, `UpdateTransactionGraph`, `FindCommonParent`, `UpdateCategoryColors`) | P2-PANE-1, P2-PANE-3 (chart content Phase 5) |
+| Chart→list drill-down (`PieChartSelectionChanged`, `HistoryChart_SelectionChanged`, `OnGraphMouseDown`) | P2-PANE-2 |
+| Clipboard routing (`GetClipboardClient`, the Cut/Copy/Paste/Delete handlers, `ClipboardMonitor`) | P2-CMD-5 |
+| Undo/Redo command handlers | **Not user-facing as written** — permanently disabled; Open Question 1 |
+| Query panel control (`ShowQueryPanel`, `HideQueryPanel`, `ExecuteQuery`, `OnCommandQuery*`) | P2-CMD-7 |
+| Report launching (`OnCommandNetWorth`, `OnTaxReport`, …, `GenerateReport`, `OnReportCreated`) | P2-CMD-10 (reports Phase 5) |
+| `ReportEventHandler` (weak-reference bridge from a report back to the shell) | **Not user-facing** — plumbing; its effect (a report link navigating the shell) is P2-NAV-5 |
+| Import entry points (`OnCommandFileImport`, `ImportQif`/`ImportOfx`/`ImportXml`/`ImportCsv`/`ImportMoneyFile`, `LoadImportFiles`, `importWatcher`) | P2-FILE-11, P2-START-3 (import behaviour Phase 6) |
+| Online entry points (`SyncAccount`, `DoSync`, `OnCommandDownloadAccounts`, `OnCommandUpdateSecurities`, `OnStockQuoteServiceOptions`) | P2-CMD-11 (behaviour Phase 8) |
+| Backup (`OnCommandBackup`, `GetBackupPath`) | P2-FILE-9 — implemented but unreachable; Open Question 5 |
+| Version check (`CheckLastVersion`, `ShowChangeInfo`, `OnInstallButtonClick`, change-list cache) | P2-STATUS-7, P2-HELP-4 |
+| Stock-price plumbing (`SetupOnlineServices`, `OnStockQuoteHistoryAvailable`, `UpdateBalance`, `FillInMissingUnitPrices`, `CleanupStockQuoteManager`) | **Not user-facing from the shell's side** — Phase 8; the shell only hosts it |
+| `AfterLoadChecks` (dangling-transaction removal, rebalance, security check, tax-year migration) | **Not user-facing** — startup repair; the user sees only a working file (P1-IMPORT-9) |
+| `OnChangedUI` (deciding when charts are stale) | **Not user-facing** — the effect is P2-PANE-1 staying current |
+| `Grid_SizeChanged`, `OnKeyboardFocusChanged` (empty), `OnQueryPanelGridSplitterDragCompleted` (empty) | **Not user-facing** — a layout workaround and two dead handlers |
+| `EventTracking` nested class | **Not user-facing** — declared, never used anywhere |
+
+### `Accordion` (the left-navigation mechanism)
+
+| Member | Status |
+|---|---|
+| `Add(header, id, content[, searchBox])` | P2-NAV-1, P2-NAV-3, P2-NAV-4, P2-NAV-6 |
+| `Selected` (get/set) | P2-NAV-1, P2-NAV-5 |
+| `Expanded` event | P2-NAV-1 |
+| `FilterUpdated` event / `OnFilterValueChanged` | P2-NAV-3 |
+| `OnExpanderExpanded` / `OnExpanderCollapsed` / `SetRowHeight` | P2-NAV-2 |
+| `ContainsTab` / `RemoveTab` / `Remove` / `RemoveRow` | P2-NAV-6, P2-NAV-7 |
+| `IContainerStatus` / status `TextBlock` | P2-NAV-4 |
+| `OnExpanderToAdd_SizeChanged` | **Not user-facing** — keeps the header's search box or figure from overflowing a narrow panel |
+| `GlyphBrush` attached property | **Not user-facing** — styling hook |
+
+### Other shell collaborators
+
+| Type | Status |
+|---|---|
+| `AppCommands` (`Commands/Commands.cs`) | P2-CMD-1…P2-CMD-11 — except `CommandFileRestore` and `CommandReportBudget`, **not user-facing**: declared but never bound to anything (Open Question 5) |
+| `RecentFilesMenu` | P2-FILE-3 |
+| `HelpService` + `HelpKeyEventRouter` | P2-HELP-1 |
+| `AppSettings` panel | P2-PREF-1…P2-PREF-7, P2-FILE-14 |
+| `QuickFilterControl` | P2-NAV-3 (also used inside views — Phase 3) |
+| `OutputPane` + its show/hide routed events | P2-PANE-4 |
+| `CloseBox` | P2-PANE-4, P2-PANE-5 — the affordance for dismissing a transient pane |
+| `AppTheme` | P2-PREF-1 |
+| `MessageBoxEx` | P2-STATUS-4 (its own layout is Phase 4) |
+| `AnimatedMessage` | P2-STATUS-2 — a status message that changes after the fact |
+| `App.MyApplicationStartup` / `LoadSettings` / `SetDefaultSettings` | P2-START-1, P2-START-3, P2-PREF-6 |
+| `App.CheckCrashLog` | P2-STATUS-5 |
+| `App.HandleUnhandledException` and the three exception hooks | P2-STATUS-6 |
+| `App.SaveImportArgs` / `BringToFrontApplicationIfAlreadyRunning` / `FindCurrentRunningMoneyApplication` | P2-START-3 |
+| `ChangeTracker.GetSummary` | P2-FILE-5 (the tracker itself is P1-WHOLE-2) |
+| `UndoManager` / `Command` / `ViewCommand` | P2-HIST-1, P2-HIST-2 — used as the navigation history, not as edit undo (Open Question 1) |
+| `TabCloseBox`, `ProgressDots`, `Resizer`, `StackedBar`, `RoundedButton`, `CustomizableButton`, `SingleLineTextBlock`, `HandyTextBox`, `HandyFlowDocumentScrollViewer`, `MoneyDataGrid`, `MoneyDatePicker`, `FilteringComboBox`, `ColorPickerPanel`, `PasswordControl`, `Calculator`, `TrendGraph`, `QueryViewControl` | **Not shell** — general-purpose controls in `Controls/` that `MainWindow.xaml` does not host directly; they belong to the views and dialogs that use them (Phase 3/4) |
+| `View Selectors/*Control` (Accounts, Categories, Payees, Securities, Rents, Reports, Retirement, Balance) | Captured here **only as navigation destinations** (P2-NAV-1, P2-NAV-6). Their own content — lists, trees, context menus, drag-and-drop, inline editing — is Phase 3; see Open Question 6 |
+
+---
+
+## Open questions from Phase 2
+
+Things a human should double-check, because the call was a judgement rather than
+obvious from the code:
+
+1. **Undo and Redo are present in the Edit menu but permanently disabled.**
+   `OnCommandCanUndo`/`OnCommandCanRedo` unconditionally set `CanExecute = false` and
+   the execute handlers are empty; the `UndoManager manager` field created for it in
+   the constructor is never used (only the separate `navigator` one, which drives
+   back/forward). No scenario claims editing undo. A redesign should decide whether
+   this is a capability to build or menu items to drop — but note that the *domain*
+   model has no undo support either (nothing in Phase 1 corresponds to it), so it
+   would be new work, not resurfacing.
+2. **`Edit ▸ Cleanup` ships two developer diagnostics to end users** — "GC.Collect"
+   and "Environment" (which dumps every process environment variable into a message
+   box). Neither is behind `#if DEBUG`. Treated as *not* user-facing and given no
+   scenario; P2-CMD-9 covers only the genuine data-tidying commands. Worth confirming
+   that's the intent rather than an oversight.
+3. **"File ▸ New" behaves differently in a debug build.** In release it goes straight
+   to creating the product's default storage; in debug it grows a submenu offering a
+   choice of storage engine. P2-FILE-1 describes the release behaviour (one command,
+   no engine choice) on the assumption that the storage engine is not an end-user
+   concept. If the redesign intends to expose a storage choice, that needs a real
+   decision rather than inheriting a debug-only menu.
+4. **The settings panel is a boundary call.** `AppSettings` is a flyout hosted
+   directly inside `MainWindow.xaml`, not something under `Dialogs/`, and the theme it
+   controls is bound to a window-level keyboard shortcut — so it is catalogued here as
+   shell (2.9) rather than deferred to Phase 4. If Phase 4 would rather own the
+   *contents* of that panel, P2-PREF-3…P2-PREF-6 are the ones to revisit; P2-PREF-1
+   and P2-PREF-2 are genuinely shell either way.
+5. **Three commands exist with no way to invoke them.**
+   `AppCommands.CommandFileBackup` has a command binding in `MainWindow.xaml` and a
+   complete implementation (`OnCommandBackup`, with per-storage-format file filters),
+   but **no menu item, button or keyboard gesture anywhere references it** — backup is
+   currently dead UI. `CommandFileRestore` and `CommandReportBudget` are declared in
+   `AppCommands` and never bound at all. P2-FILE-9 documents backup as an intended
+   capability with that caveat; restore and budget reporting get no scenario. A human
+   should decide whether backup is a regression to fix or a feature to design in.
+6. **The left-navigation panels straddle this phase and Phase 3.** The `View
+   Selectors/` controls are simultaneously the navigation mechanism (pick an account →
+   the register appears) and rich little views of their own (context menus for adding,
+   deleting, renaming and synchronising accounts; drag-and-drop; inline editing;
+   pasting an account from the clipboard). Only the navigation half is captured here.
+   Their internal capabilities are deliberately left to Phase 3 — which should be told
+   to look in `View Selectors/`, not just `Views/`.
+7. **`Query ▸ Adhoc SQL Query` and `Query ▸ Show Last Update` expose raw storage.**
+   Both open a free-form SQL window, and the adhoc one silently does nothing at all
+   unless the data happens to be held in a server database. Not given their own
+   scenario under P2-CMD-7, on the judgement that a free-form SQL console is a
+   developer tool rather than an end-user capability. If the redesign wants a
+   "power user" story, this is where it currently lives.
+8. **The bottom chart strip's *arrangement* is shell; its *content* is Phase 5.**
+   P2-PANE-1 and P2-PANE-3 describe only which pictures appear when and why — the
+   logic for that lives entirely in `MainWindow.UpdateCharts`. What each chart
+   actually plots is Phase 5's.
+9. **Status messages are suppressed for the first three seconds after startup** and
+   again for five seconds after a load completes (`loadTime + 3000`,
+   `skipMessagesUntil`). P2-STATUS-2 is therefore quieter in practice than the code's
+   many `ShowMessage` calls suggest. Flagged because a redesign that reworks the
+   status area could easily reintroduce the message storm these guards exist to
+   prevent.
