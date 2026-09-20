@@ -23,8 +23,9 @@ user-facing.
 | 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | **Done** |
 | 7 | Taxes | `Taxes/` (really `MyMoney.Business/Taxes/`) — tax-line association, capital-gains treatment, bracket estimation, TXF export | **Done** |
 | 8 | Cross-cutting | Attachments and statements, market data and exchange rates, settings persistence, storage, app-wide modal UI, theming, logging, updates, printing — plus the final completeness sweep for anything Phases 1–7 left unclaimed | **Done** |
+| 9 | Data engine internals | `Source/WPF/MyMoney.Data/` — the five storage engines, the server bootstrapper, the database registry, the credential store and the checked-in SQL scripts; the one area Phase 8 scoped out rather than read | **Done** |
 
-**All eight phases are complete.** See the "Catalog complete" note at the end of this
+**All nine phases are complete.** See the "Catalog complete" note at the end of this
 document for totals and for where the defects this audit found were filed.
 
 ### How to extend this catalog
@@ -8147,20 +8148,594 @@ ordered by how much a user could lose by trusting them.
 
 ---
 
+# Phase 9: Data Engine Internals
+
+**Source examined (in full):** every file under `Source/WPF/MyMoney.Data/` — 49 files,
+16,572 lines, enumerated with `Glob` rather than taken from Phase 8's list, which named
+five files and turned out to be missing eleven more `.cs` files and all 30 SQL scripts.
+
+| File(s) | Lines | Top-level types |
+|---|---|---|
+| `SqlDatabase.cs` | 3,991 | `ConnectMode`, `DatabaseSecurity`, `SqlServerDatabase`, `BackupResults`, `BackupStatus`, `ExecutionStatus`, `DataError` |
+| `SqlServerStoredProcDatabase.cs` | 3,075 | `SqlServerStoredProcDatabase` |
+| `SqliteDatabase.cs` | 2,720 | `SqliteDatabase` |
+| `XmlStore.cs` | 1,641 | `XmlStore`, `BinaryXmlStore`, `XmlNodeTypeToken`, `BinaryXmlWriter`, `BinaryXmlReader` |
+| `Utilities/XmlCsvReader.cs` | 1,058 | `State`, `XmlCsvReader`, `CsvReader` |
+| `SqlCeDatabase.cs` | 541 | `SqlCeEngine`, `SqlCeFactory`, `SqlCeDatabase` |
+| `Utilities/Credential.cs` | 361 | `CredentialType`, `CredentialFlags`, `CREDENTIAL_ATTRIBUTE`, `CredentialPersistence`, `Credential` |
+| `SqlServerBootstrapper.cs` | 276 | `SqlServerBootstrapper` |
+| `CsvStore.cs` | 203 | `CsvStore` |
+| `DatabaseRegistry.cs` | 173 | `DataEngineType`, `DatabaseRole`, `DatabaseCredential`, `DatabaseServerEntry`, `DatabaseEntry`, `DatabaseRegistry` |
+| `DatabaseFactory.cs` | 106 | `DatabaseFactory` |
+| `DataEnginePasswordGenerator.cs` | 62 | `DataEnginePasswordGenerator` |
+| `SqlServerConnectionFactory.cs` | 31 | `SqlServerConnectionFactory` |
+| `DatabaseSecurityPasswordStore.cs` | 21 | `DatabaseSecurityPasswordStore` |
+| `IDataLayerUiCallback.cs`, `IDirectorySecurity.cs`, `ISaCredentialPrompt.cs` | 42 | three one-method interfaces |
+| `MyMoney.Data.csproj`, `Properties/AssemblyInfo.cs` | 31 | build |
+| `SqlScripts/Access/*.sql` (16 files) | 1,762 | the stored-procedure surface the SQL Server engine is restricted to |
+| `SqlScripts/Bootstrap/*.sql` (2 files) | 137 | `MyMoney_BootstrapServer`, `MyMoney_CreateCatalog` |
+| `SqlScripts/Migrations/*.sql` (1 file) | 78 | the `Version` column |
+| `SqlScripts/Test/*.sql` (11 files) | 198 | `_Test_Reset` wipe procedures |
+
+> **Path/naming notes, continuing the run every phase has hit — and this folder is the
+> worst offender yet.**
+> - **`SqlDatabase.cs` declares no type called `SqlDatabase`.** The class is
+>   `SqlServerDatabase`, and the file also carries the Windows Credential Manager wrapper
+>   (`DatabaseSecurity`), the load-time integrity-error record (`DataError`) and three
+>   leftover backup types. Same trap as Phase 8's `TempFileCollection.cs` and Phase 7's
+>   `CapitalGains.cs`.
+> - **`SqliteDatabase`, `SqlCeDatabase` and `SqlServerStoredProcDatabase` all inherit from
+>   `SqlServerDatabase`.** The class named after one product is the shared base for every
+>   engine, including the two with nothing to do with SQL Server. Roughly a third of
+>   `SqlDatabase.cs` is generic code that only runs for SQLite.
+> - **`DbFlavor.SqlServer` builds `SqlServerDatabase`, not `SqlServerStoredProcDatabase`.**
+>   The 3,075-line stored-procedure engine is never reached through `DatabaseFactory` at
+>   all; its only production entry point is `SqlServerConnectionFactory.Connect`. See Open
+>   Question 4.
+> - `Utilities/XmlCsvReader.cs` declares two unrelated classes; only one is named after the
+>   file. `DatabaseRegistry.cs` carries five other types that its own comment says moved in
+>   from a since-deleted `DataEngineConfig.cs`.
+> - `IDirectorySecurity.cs`, `Utilities/Credential.cs` and `Utilities/XmlCsvReader.cs`
+>   declare `namespace Walkabout.Utilities`; every other file in the folder is
+>   `Walkabout.Data`.
+> - `CsvStore.DbFlavor` returns `DbFlavor.Xml`, with a `// BugBug:` comment marking it.
+> - The design documents refer to a `SqlScripts/Schema/` folder. There isn't one — schema
+>   comes from reflection over `[TableMapping]`, not from scripts.
+
+**Does Phase 8's "almost entirely not user-facing" judgement hold up?** **Mostly, but not
+entirely, and the exceptions matter.** The bulk of the folder really is plumbing:
+connection lifecycle, SQL text assembly, ADO.NET parameter marshalling and reader loops
+account for something like 11,000 of the 16,572 lines and support no user goal that Phase 1
+(P1-WHOLE-2 "have work saved", P1-WHOLE-4 "be warned when someone else changed the same
+record") and Phase 8 (P8-STORE-1…8) have not already stated. But four things in here are
+genuinely user-facing and were catalogued nowhere:
+
+1. **Standing a database server up from nothing** — prompting for the administrator
+   password once, inventing and remembering three service logins, creating a catalog,
+   deploying its procedures. `SqlServerBootstrapper` + `DatabaseRegistry` + the two
+   `Bootstrap/` scripts. Phase 4 owns the windows; nothing owned the capability.
+2. **Bringing an older file's shape up to date on open** — `CreateOrUpdateTable`'s
+   add/rename/drop/retype logic and SQLite's whole-table rebuild. Phase 8 marked
+   `Mapping.cs` "not user-facing — including the schema upgrade it drives", so this
+   silently fell between the two phases.
+3. **What each storage choice can and cannot do** — user logins, passwords, changing a
+   password, per-record saving, conflict detection and direct querying are each supported
+   by some engines and not others, and the product mostly does not say which.
+4. **What a *failed* save leaves behind** — the part of P1-WHOLE-2 nobody had looked at,
+   and the single most serious thing this phase found.
+
+So: 20 scenarios, not zero and not a hundred. The coverage checklist below marks the rest
+"not user-facing", each with the concrete reason the code gave.
+
+---
+
+## 9.1 Standing up a place to keep the books
+
+### P9-SERVER-1 — Point the product at a bare database server and have it made ready
+The user names a database server they have administrative access to, supplies the
+administrator credentials once, and the product does everything else needed to make that
+server a place their books can live — creating the accounts it will use day to day and
+installing the routines it needs.
+*(`SqlServerBootstrapper.BootstrapServerIfNeeded`, `ISaCredentialPrompt`,
+`SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql`; the window is Phase 4's P4-DB-*)*
+
+### P9-SERVER-2 — Never have to invent, type or remember the day-to-day logins
+The accounts the product uses to read and write the books are created for the user with
+strong passwords they never see and never need to know, and are remembered so that opening
+those books later is not a sign-in.
+*(`DataEnginePasswordGenerator.Generate`, `DatabaseRegistry.Servers`/`Save`. **See Open
+Questions 5 and 6.**)*
+
+### P9-SERVER-3 — Add another set of books to a server that is already set up
+Once a server has been prepared, creating a second, third or later set of books on it is a
+one-step operation — no repeat of the administrator step and no re-entry of credentials.
+*(`SqlServerBootstrapper.CreateCatalog`, `MyMoney_CreateCatalog.sql`, the registry's
+per-database entries)*
+
+### P9-SERVER-4 — Keep a throwaway set of books that can be safely wiped
+The user can mark a set of books as a scratch copy. Only a set of books marked that way
+gains the ability to be emptied wholesale, so the real books can never be cleared by the
+same action.
+*(`DatabaseEntry.TestDatabase`, `SqlServerBootstrapper.CreateCatalog`'s `testDatabase`
+branch deploying `SqlScripts/Test/*_Test_Reset` only into a flagged catalog)*
+
+### P9-SERVER-5 — Tell the product where each set of books is, once
+Every set of books the user has ever set up is recorded with which engine holds it, which
+server and catalog it lives on and when it was last used, in one plain, human-readable file
+they can inspect or hand-edit.
+*(`DatabaseRegistry` and its JSON shape; the list the user picks from is Phase 8's
+P8-STORE-2. **See Open Question 5.**)*
+
+---
+
+## 9.2 Keeping an existing file readable as the product changes
+
+### P9-UPGRADE-1 — Open a file made by an older version and just carry on
+When the product has learned to record something new since the user's file was written,
+opening that file brings its shape up to date automatically. The user is not asked, is not
+made to convert anything, and does not have to know it happened.
+*(`SqlServerDatabase.LazyCreateTables`/`CreateOrUpdateTable` and
+`SqliteDatabase.CreateOrUpdateTable`, both invoked on open)*
+
+### P9-UPGRADE-2 — Not lose anything when the stored shape changes
+Bringing a file up to date preserves what is in it: information that moved to a differently
+named place is carried across rather than dropped, and each record keeps the identity and
+edit history it already had.
+*(`ColumnMapping.OldColumnName` handling — add new column, copy, drop old; SQLite's
+rebuild path explicitly carrying the version column across. **See Open Question 9.**)*
+
+### P9-UPGRADE-3 — Be asked before a one-way conversion of the file itself
+Where bringing a file up to date means rewriting the file in a format an older version of
+the product could no longer open, the user is told what is about to happen and can decline
+and leave the file alone.
+*(`IDatabase.UpgradeRequired`/`Upgrade` → `DatabaseLifecycle.Open`'s confirmation.
+**See Open Question 10** — only one of the five engines ever asks.)*
+
+### P9-UPGRADE-4 — Be told plainly when a file needs something that isn't installed
+If a file is in a format that needs a component the machine doesn't have, the user gets an
+explanation naming what is missing and where to get it, rather than a failure.
+*(`SqlCeDatabase.Connect`'s guidance message and `DatabaseFactory`'s equivalent for the
+older format. **See Open Question 11** — one of the two names the wrong product.)*
+
+---
+
+## 9.3 What a save actually guarantees
+
+### P9-SAVE-1 — Have a whole-file save land completely or not at all
+When the user saves everything, the result is either all of their changes recorded or none
+of them — never a file holding half an edit, an account without its transactions, or a
+transfer with only one side.
+*(`SqlServerDatabase.Save`'s single transaction around every collection; the stored-proc
+engine's `BeginScope` enlisting in it. **See Open Question 1.**)*
+
+### P9-SAVE-2 — Have one edit saved on its own, without rewriting everything
+Changing one transaction, one category or one payee writes just that record, so saving
+stays instant no matter how many years of history the file holds.
+*(`SaveOne`/`SaveTransfer`/`SaveBatch` on `SqliteDatabase` and
+`SqlServerStoredProcDatabase`, and the `*_SaveBatch` procedures behind them.
+**See Open Question 12** — three of the five engines cannot do this at all.)*
+
+### P9-SAVE-3 — Have a refused save leave the work still there to retry
+If a save cannot go through — because the connection dropped, because the file is locked,
+or because someone else changed the same record first — the user's unsaved work is still
+unsaved rather than quietly discarded, and saving again after fixing the problem writes
+exactly what it should have written the first time.
+*(the deferred `postCommitActions` design in `SqliteDatabase.SaveBatch` and
+`SqlServerStoredProcDatabase.SaveBatch`, which only marks records saved once the write has
+actually committed. **See Open Question 1** — the whole-file save path does the opposite,
+and this is the most serious defect this phase found.)*
+
+### P9-SAVE-4 — Have a change made in one place be visible as a change everywhere
+When the same set of books is open in more than one place, a save made in one of them
+leaves a mark the others can see, so a second copy working from an out-of-date picture is
+caught rather than allowed to overwrite.
+*(the per-row version counter: `Version`/`RowVersion` written by the `*_SaveBatch`
+procedures and by SQLite's version-checked updates. The warning the user sees is Phase 1's
+P1-WHOLE-4. **See Open Question 2** — the whole-file save path does not leave that mark.)*
+
+---
+
+## 9.4 Reading and checking what is actually stored
+
+### P9-QUERY-1 — Ask a question of the stored data in its own terms
+For books kept in a real database, the user can run their own query against the stored data
+and see the answer as a table.
+*(`QueryDataSet` on each engine; the window is Phase 4's P4-SQL-1 and Phase 8's P8-STORE-7.
+**See Open Question 13** — for the file-based formats the query text is ignored entirely.)*
+
+### P9-QUERY-2 — See exactly what the product did to their data
+The user can look at the actual sequence of operations the product performed on the last
+load or save, which is what makes "it didn't save what I expected" a question someone can
+answer.
+*(`GetLog`, fed by every engine's own statement log, surfaced in the query window.
+**See Open Question 14** — the two engines most likely to be involved return nothing.)*
+
+### P9-QUERY-3 — Have problems in stored data found on the way in
+Loading a file checks the relationships between records — that both sides of every transfer
+exist, that no record claims two conflicting transfers, that no itemised line is orphaned —
+and gathers up what it finds.
+*(`DataError` and the error list `ReadTransactions` builds on all three engines; the user
+goal is Phase 1's P1-WHOLE-7 and P1-XFER-8. **See Open Question 3** — nothing ever looks at
+that list, and `DataError.Heal` is an empty method.)*
+
+---
+
+## 9.5 What each storage choice can and cannot do
+
+### P9-CHOICE-1 — Share one set of books with another person
+Where the books are kept on a server, the user can grant another person access to them
+under their own sign-in. Where the books are a file, there is no such thing to grant, and
+the product doesn't offer it.
+*(`IDatabase.SupportsUserLogin` driving the menu item's visibility,
+`SqlServerDatabase.AddLogin`; the dialog is Phase 4's P4-DB-5. **See Open Question 7.**)*
+
+### P9-CHOICE-2 — Put a password on the file, and have it mean something
+Choosing a password-protected format means the file on disk genuinely cannot be read
+without the password; choosing a format that does not support one means the product does
+not pretend otherwise.
+*(`BinaryXmlStore`'s encrypt/decrypt around save and load, `SqliteDatabase`'s
+password-carrying connection; the prompt is Phase 4's P4-DB-6 and the concept is Phase 8's
+P8-STORE-3. **See Open Questions 8 and 15.**)*
+
+### P9-CHOICE-3 — Change that password later
+A user who wants to change the password on their books can, for the formats where that is
+possible, and gets told plainly rather than silently failing where it isn't.
+*(`SqliteDatabase.OnPasswordChanged` rekeying the file in place;
+`SqlServerDatabase.OnPasswordChanged`'s explicit "not supported, use Save As instead"
+message)*
+
+### P9-CHOICE-4 — Keep the books as one ordinary file they can copy
+For every storage choice except a server database, the books are a single file the user can
+copy, move, put on a drive or hand to someone, with no export step and nothing left behind
+that the copy needs.
+*(`SqliteDatabase`/`SqlCeDatabase`/`XmlStore`'s file-based `Exists`/`Delete`/`Backup`;
+SQLite's sidecar files are cleaned up alongside the main file on delete and folded back into
+it before a copy. **See Open Question 16.**)*
+
+---
+
+## Coverage checklist
+
+### The five storage engines
+
+| File / type | Status |
+|---|---|
+| `SqlDatabase.cs` — `SqlServerDatabase` (the class, as the shared base) | P9-UPGRADE-1, P9-UPGRADE-2, P9-SAVE-1, P9-QUERY-1, P9-QUERY-2, P9-CHOICE-1, P9-CHOICE-3 |
+| `SqlDatabase.cs` — `DatabaseSecurity` | P9-SERVER-2 — the Windows Credential Manager entry that makes a password-protected file open without re-prompting |
+| `SqlDatabase.cs` — `DataError` | P9-QUERY-3. `Heal(MyMoney)` is an **empty method body** with a `// heal thyself!` comment — dead. See Open Question 3 |
+| `SqlDatabase.cs` — `BackupResults`, `BackupStatus`, `ExecutionStatus` | **Not user-facing / dead** — the return types of a SQL Agent backup-job feature that exists only as ~80 lines of commented-out code (`CheckBackupJob`, `RemoveBackupJob`, `GetBackupStatus`). Nothing constructs `BackupResults` |
+| `SqlDatabase.cs` — `ConnectMode` enum | **Dead** — declared, never referenced anywhere in the solution |
+| `SqlDatabase.cs` — `DBString`, `DBDateTime`, `DBDecimal`, `DBGuid` and the per-table `UpdateXxx` string-building branches | **Not user-facing on their own** — how a row becomes SQL text for the two engines that don't use parameters. But see Open Questions 17 and 18: this path corrupts line breaks and can fail outright on an apostrophe |
+| `SqlDatabase.cs` — `IsSqlExpressInstalled`, `IsSqlLocalDbInstalled`, `Attach`, `DropTable` | **Not user-facing** — machine probing and a table-drop helper called from nowhere. `DropTable` emits `DROP TABLE 'name'`, which is not valid T-SQL; it has no callers, so nothing has ever run it |
+| `SqlDatabase.cs` — `LoadTableMetadata`, `GetTableSchema`, `ReadSqlDataType`, `ReadYesNoAsBoolean`, `GetCreateTableScript`, `GetAddForeignKeyScripts`, `GetCreateIndexScripts` | **Not user-facing** — the reflection-to-DDL machinery behind P9-UPGRADE-1 |
+| `SqliteDatabase.cs` — `SqliteDatabase` | P9-UPGRADE-1, P9-UPGRADE-2, P9-SAVE-2, P9-SAVE-3, P9-SAVE-4, P9-CHOICE-3, P9-CHOICE-4. The default local format |
+| `SqliteDatabase.cs` — `ParseColumnSql`/`ParseSqlType` | **Not user-facing** — re-parsing SQLite's stored `CREATE TABLE` text to work out what the file's current shape is, because SQLite has no schema catalog to ask |
+| `SqlCeDatabase.cs` — `SqlCeDatabase` | P9-UPGRADE-3, P9-UPGRADE-4, P9-CHOICE-4 — a **legacy-only** engine: `DatabaseFactory` will open an existing `.sdf`, and `MainWindow`'s Save As still lists it, but no "create new" path offers it |
+| `SqlCeDatabase.cs` — `SqlCeEngine`, `SqlCeFactory` | **Not user-facing** — a hand-built reflection shim that loads the SQL CE assembly lazily so the installer doesn't require it. Its only user-visible consequence is P9-UPGRADE-4's message |
+| `SqlServerStoredProcDatabase.cs` | P9-SAVE-1, P9-SAVE-2, P9-SAVE-3, P9-SAVE-4 — the engine used when the books are on a shared server, restricted to stored procedures so the day-to-day login has no direct table rights |
+| `XmlStore.cs` — `XmlStore` | P9-CHOICE-4, P9-QUERY-1 (as the limitation). The plain-XML format. **See Open Questions 8, 13, 15, 19** |
+| `XmlStore.cs` — `BinaryXmlStore` | P9-CHOICE-2, P9-CHOICE-4 — the only format that actually encrypts. **See Open Question 8** |
+| `XmlStore.cs` — `BinaryXmlWriter`, `BinaryXmlReader`, `XmlNodeTypeToken` (lines 303–1641) | **Not user-facing / dead in the product** — a complete binary XML serializer, 1,338 lines, whose own header says *"currently not in use, but may come in handy in the future"*. Both call sites in `BinaryXmlStore` are commented out, with a note that it was no faster than gzipped text. Referenced only by `UnitTests/DataTests.cs`. **81% of `XmlStore.cs` is this** |
+| `CsvStore.cs` | **Phase 6** (P6-OUT-4; `ImportCsv` already recorded there as dead). Re-read here and confirmed: `DbFlavor` returns `Xml`, `Backup` reports *"XML Backup is not implemented"*, and `ImportCsv` parses dates and amounts with the machine's current culture despite demanding ISO-8601 input — moot only because nothing calls it |
+
+### Setting up and finding a database
+
+| File / type | Status |
+|---|---|
+| `DatabaseFactory.cs` | P9-UPGRADE-4, P9-CHOICE-2 — turns a chosen storage kind into a live engine. **See Open Questions 4 and 11** |
+| `DatabaseRegistry.cs` — `DatabaseRegistry`, `DatabaseEntry`, `DatabaseServerEntry`, `DatabaseCredential`, `DatabaseRole`, `DataEngineType` | P9-SERVER-2, P9-SERVER-3, P9-SERVER-4, P9-SERVER-5; Phase 8's P8-STORE-2. **See Open Question 5** |
+| `SqlServerBootstrapper.cs` | P9-SERVER-1, P9-SERVER-3, P9-SERVER-4. **See Open Question 6** |
+| `SqlServerConnectionFactory.cs` | P9-SERVER-5 — resolves a name from the registry into an open connection. Also the only production path that reaches `SqlServerStoredProcDatabase` (Open Question 4) |
+| `DataEnginePasswordGenerator.cs` | P9-SERVER-2. **See Open Question 20** |
+| `DatabaseSecurityPasswordStore.cs` | P9-SERVER-2 — a three-line adapter over `DatabaseSecurity`, existing only because the business layer cannot reference this assembly |
+| `IDatabaseFactory`/`IDatabasePasswordStore` implementations generally | **Not user-facing** — layering seams; the decision logic they serve is Phase 8's `DatabaseLifecycle` |
+
+### Interfaces, utilities and build files
+
+| File / type | Status |
+|---|---|
+| `IDataLayerUiCallback.cs` | **Not user-facing** — lets the WPF-free data layer raise a warning (the mixed-mode-logins notice in P9-CHOICE-1) without referencing WPF |
+| `IDirectorySecurity.cs` | **Not user-facing** — the seam behind Phase 8's P8-STORE-8; the implementation is `MyMoney/Setup/DirectorySetup.cs`, already covered there |
+| `ISaCredentialPrompt.cs` | P9-SERVER-1 — the "ask for the administrator password" seam |
+| `Utilities/Credential.cs` — `Credential` and its four supporting types | P9-SERVER-2, P9-CHOICE-2 — the Windows Credential Manager P/Invoke. **See Open Question 21** |
+| `Utilities/XmlCsvReader.cs` — `XmlCsvReader`, `CsvReader`, `State` | **Not user-facing / dead in the product** — a 2001–2005 Microsoft sample (`Copyright (c) 2001-2005 Microsoft Corporation`, "Chris Lovett") that presents a CSV file as an `XmlReader`. `XmlCsvReader` is referenced only by `UnitTests/CsvTest.cs`; `CsvReader` only by `CsvStore.ImportCsv`, which Phase 6 already established is called from nowhere. **The whole 1,058-line file is unreachable from the product** |
+| `MyMoney.Data.csproj`, `Properties/AssemblyInfo.cs` | **Not user-facing / build infrastructure.** Note the project declares **two** SQLite packages (`SQLitePCLRaw.bundle_e_sqlite3` and `System.Data.SQLite`) and ships no `<Content>` item for `SqlScripts/` — see Open Question 22 |
+
+### The checked-in SQL
+
+| File(s) | Status |
+|---|---|
+| `SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql` | P9-SERVER-1, P9-SERVER-2 — creates or re-passwords the three logins, idempotently |
+| `SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql` | P9-SERVER-3 — creates one catalog by name, with the catalog name quoted specifically against injection |
+| `SqlScripts/Migrations/2026-09-17-add-version-column.sql` | P9-SAVE-4 — adds the per-row version counter to the eleven aggregate-root tables. **See Open Question 23** |
+| `SqlScripts/Access/*_AccessProcs.sql` (16 files) | P9-SAVE-1, P9-SAVE-2, P9-SAVE-4 — the complete set of operations the day-to-day login is permitted. **Not user-facing individually**; their user-visible consequence is that a shared server cannot be damaged by the running application beyond these operations. **See Open Question 2** |
+| `SqlScripts/Test/*_TestProcs.sql` (11 files) | P9-SERVER-4 — the wholesale-wipe procedures, deployed only into a catalog flagged as a test database |
+
+---
+
+## Open questions from Phase 9
+
+Ordered, as Phase 8's were, by how much a user could lose by trusting them. The first four
+look like real defects rather than judgement calls.
+
+1. **A whole-file save marks everything as saved *before* it commits, so a save that fails
+   at the last step destroys the work it failed to write.** `SqlServerDatabase.Save(MyMoney)`
+   opens one transaction, calls `UpdateOnlineAccounts`, `UpdateCategories`, … in turn, and
+   only then calls `tran.Commit()`. But **every one of those `UpdateXxx` methods ends with
+   `foreach (… x) x.OnUpdated();` followed by `xs.RemoveDeleted()`** — clearing each
+   record's pending-change marker and purging deleted records from memory, while the
+   transaction is still open. If the commit then throws (a dropped connection, a deadlock, a
+   full disk) the `using` block rolls the database back — and the in-memory model now
+   believes it has no pending changes at all. The user's edits are gone from the database
+   *and* from the product's idea of what still needs saving; saving again writes nothing.
+   The same applies if any `UpdateXxx` throws part-way: the collections already processed
+   have been marked clean and will not be retried. This is precisely the failure mode
+   `SqliteDatabase.SaveBatch` and `SqlServerStoredProcDatabase.SaveBatch` were carefully
+   built to avoid — both defer every in-memory side effect into a `postCommitActions` list
+   with a long comment explaining why — so the correct pattern already exists in the same
+   folder and is simply not used by the whole-file path. **This is the most serious thing
+   Phase 9 found**, it affects every engine, and it belongs with the "the product says it
+   saved and it didn't" family already filed as #54.
+
+2. **Saving the whole file does not bump the version counter, so the protection against two
+   copies overwriting each other is switched off for exactly the operation most likely to
+   need it.** The per-record path (`*_SaveBatch`) checks `ExpectedVersion` and writes
+   `Version = Version + 1`. The per-row procedures the whole-file save uses —
+   `Transactions_Update`, `Categories_Update`, `Payees_Update` and the other thirteen — do
+   neither: no version check, no increment. Two consequences, both silent. A second copy of
+   the product holding a stale record still sees the version it remembers, so its next save
+   overwrites the first user's work with no conflict raised (Phase 1's P1-WHOLE-4 simply
+   does not fire). And a full save can overwrite a record another copy changed a moment
+   earlier without noticing. The SQLite whole-file path has the same gap for the same
+   reason: `Save(MyMoney)` routes through the inherited `UpdateXxx` methods, not through
+   `SaveBatch`. Worth deciding deliberately, because the design document this work came from
+   treats the version column as the guarantee.
+
+3. **Every integrity problem found while loading a file is collected and then thrown
+   away.** All three engines' `ReadTransactions` build an `ArrayList` of `DataError` records
+   — "other side of split transfer not found", "transaction is marked as a transfer, but
+   other side of transfer was not found", "already have a transfer for this transaction, so
+   transfer N is a duplicate of transfer M" — and return it. **Every production caller
+   discards the return value**: `SqlServerDatabase.Load` and
+   `SqlServerStoredProcDatabase.Load` both call `this.ReadTransactions(…)` as a bare
+   statement. The only code that reads the list is the unit tests. `DataError.Heal(MyMoney)`
+   — the method whose name says it was meant to repair these — has an empty body and a
+   `// heal thyself!` comment. So Phase 1's P1-XFER-8 ("have broken transfers found and
+   reported") is half true: they are found, on every load, and reported to nobody. Surfacing
+   them costs about as much as Phase 8's Open Question 23 logging suggestion and would turn
+   a class of silent corruption into something a user could act on.
+
+4. **The 3,075-line stored-procedure engine is unreachable through the normal
+   open-a-database path.** `DatabaseFactory.CreateDatabase`'s `DbFlavor.SqlServer` case
+   constructs `SqlServerDatabase` — the raw-SQL engine, which needs direct table rights
+   the `MyMoneyUser` login is deliberately not granted. `SqlServerStoredProcDatabase` is
+   constructed in exactly one production place, `SqlServerConnectionFactory.Connect`, which
+   is reached only through the registry-driven path. So the engine that the whole
+   `SqlScripts/Access/` surface, the bootstrapper and the concurrency design exist to serve
+   is not what you get by opening a SQL Server database through `DatabaseLifecycle`. Either
+   the factory case is wrong or `DbFlavor` needs to distinguish the two; a human should say
+   which, because it determines whether any of Open Questions 2, 17 and 18 can actually be
+   hit in production.
+
+5. **The three generated server passwords are written to an unprotected plain-text file.**
+   `DatabaseRegistry.Save` writes `%AppData%\…\dataengine.config.json` with
+   `File.WriteAllText` — no encryption, no DPAPI, no ACL tightening — and that file holds
+   `MyMoneyAdmin`, `MyMoneyUser` and `MyMoneyTest` with their passwords in the clear.
+   `MyMoneyAdmin` holds the `dbcreator` server role. The product already has a perfectly
+   good secret store for exactly this (`DatabaseSecurity`, the Windows Credential Manager,
+   used for the file password) and does not use it here. This is the same "security
+   exposure" family as the import/export findings filed as #56, and it sits next to the
+   hardcoded-salt/IV encryption bug already tracked in #52.
+
+6. **A bootstrap that fails half way leaves logins on the server whose passwords nobody
+   knows.** `BootstrapServerIfNeeded` generates three passwords, deploys and *executes*
+   `MyMoney_BootstrapServer` (which creates the three logins with those passwords), then
+   deploys `MyMoney_CreateCatalog` — and only writes the passwords into the registry after
+   all of that succeeds. If the second deploy throws, the method returns `false` and the
+   passwords are lost, while the logins exist on the server. It recovers in practice only
+   because `MyMoney_BootstrapServer` is written with `ALTER LOGIN` in its `ELSE` branch, so
+   a retry re-passwords the existing logins rather than failing — which also means each
+   retry silently rotates credentials any other machine may be holding. Saving the registry
+   *before* executing, or writing it in the same failure path, would make this explicit
+   rather than accidental.
+
+7. **Adding a user to a shared database makes them a server administrator, via
+   string-concatenated SQL.** `SqlServerDatabase.AddLogin` runs
+   `sp_addLogin '<user>','<password>'` followed by
+   `sp_addsrvrolemember '<user>','sysadmin'` — both built by concatenating the values
+   straight into the statement with no escaping of any kind, and the second one grants the
+   new person full control of the entire SQL Server instance, not just these books. The
+   menu item that reaches it (`File` ▸ `Add User`, Phase 4's P4-DB-5) is shown whenever the
+   books are on SQL Server. A password containing an apostrophe breaks the statement; one
+   crafted deliberately runs whatever it likes as the administrator who is doing the adding.
+   P9-CHOICE-1 describes the intent; this is what the code does.
+
+8. **The plain-XML format accepts a password and silently ignores it.** `XmlStore` has a
+   `Password` property, `DatabaseFactory` passes one into its constructor *and* sets the
+   property, and `DatabaseLifecycle.Open` saves it to the credential store — but
+   `XmlStore.Save` and `XmlStore.Load` never encrypt or decrypt anything. Only
+   `BinaryXmlStore` does. Today's `Save As` flow happens to pass `null` for `.xml` and only
+   prompts for `.bxml`, so no user is currently handed an unencrypted file they think is
+   encrypted; but every other layer is written as though `.xml` supported a password, and
+   one changed line at the call site would make it a real exposure. Separately: while a
+   `.bxml` file is being read or written, the **fully decrypted contents of the user's
+   entire financial history exist as a plain file in `%TEMP%`**, and on the read path
+   `File.Delete(tempPath)` sits after the parse rather than in a `finally` — so any load
+   failure leaves that plaintext copy behind indefinitely.
+
+9. **Bringing an older file up to date can rebuild a table, and the SQLite rebuild has one
+   unguarded step.** `SqliteDatabase.CreateOrUpdateTable`'s `newTable` path creates
+   `NEW_<Table>`, copies the rows across, `DROP TABLE`s the original and renames — all
+   inside one transaction, which is right. Two notes: the copy list is driven by the *old*
+   table's columns, so a genuinely new column is simply absent from the insert and takes its
+   default, which is intended; but the guard `if (first) throw new Exception("Invalid table
+   definition, no columns found in the old table")` is the only thing standing between a
+   mis-parsed `CREATE TABLE` (see `ParseColumnSql`, which reads SQLite's stored DDL text
+   with a hand-written scanner) and a `DROP TABLE` of real data. The parser is the weakest
+   link in P9-UPGRADE-2 and has no test coverage named in this folder.
+
+10. **Only one of the five engines ever asks permission to upgrade.**
+    `IDatabase.UpgradeRequired` is `true` only for `SqlCeDatabase`.
+    `SqlServerDatabase.UpgradeRequired` is written as
+    `try { this.Connect(); return false; } catch { return false; }` — both branches return
+    `false`, so the `try`/`catch` is decorative and the method's only real effect is to open
+    a connection as a side effect. SQLite and XML return `false` outright, and
+    `SqliteDatabase.Upgrade()` is an empty method marked `// TBD`. Which is fine, because
+    those engines' upgrades are non-destructive and happen silently on open (P9-UPGRADE-1) —
+    but it means P9-UPGRADE-3's confirmation is dead for four engines out of five, and a
+    reader of `IDatabase` would not guess that.
+
+11. **The "you need to install something" message names the wrong product.**
+    `DatabaseFactory`'s `DbFlavor.SqlCE` branch throws *"SQL Express does not appear to be
+    installed any more so we can't open your existing database"* and then links to the SQL
+    Server **Compact** Edition download. `SqlCeDatabase.Connect`'s own message for the same
+    condition gets it right. A user told to install SQL Express will install the wrong thing
+    and the file still won't open. Both messages also point at `microsoft.com/download`
+    URLs for a product retired years ago.
+
+12. **Three of the five engines cannot save a single record.** `SaveOne`, `SaveTransfer` and
+    `SaveBatch` throw `NotImplementedException` on `SqlServerDatabase` (the base, and so on
+    `SqlCeDatabase`), on `XmlStore`/`BinaryXmlStore` (with an explicit "see the design
+    spec's Non-goals") and on `CsvStore`. Only `SqliteDatabase` and
+    `SqlServerStoredProcDatabase` implement them. P9-SAVE-2 describes a real capability, but
+    it is a property of the storage choice, and nothing tells the user that picking `.xml`
+    means every edit rewrites the whole file. Worth stating in whatever replaces the
+    storage-choice window.
+
+13. **Running a query against an XML file ignores the query.**
+    `XmlStore.QueryDataSet(string cmd)` never looks at `cmd`; it calls
+    `result.ReadXml(this.filename)` and returns the entire file as a dataset.
+    `CsvStore.QueryDataSet` returns an empty dataset. So the query window (P4-SQL-1) accepts
+    whatever the user types against those formats and answers something unrelated, with no
+    indication that the question was not asked.
+
+14. **The "what did the product just do" log is empty for the engines most likely to need
+    it.** `XmlStore.GetLog()` and `CsvStore.GetLog()` return `""`. More surprisingly,
+    `SqlServerStoredProcDatabase` inherits `GetLog` but never writes to the log — its
+    `ExecuteProc`/`ExecuteSaveBatchProc` helpers bypass the base class's logging
+    `ExecuteScalar`/`ExecuteNonQuery` entirely. So for a shared-server database, the
+    diagnostic window shows the log of whatever ran through the *base* class, which on that
+    engine is nothing.
+
+15. **`SqlCeDatabase` builds its connection string with SQL Server's builder.**
+    `GetConnectionString` uses `Microsoft.Data.SqlClient.SqlConnectionStringBuilder` — a
+    different product's class — to produce a string handed to SQL CE, and ignores its own
+    `includeDatabase` parameter, with the original logic left behind as ten lines of
+    commented-out string concatenation. It works only because `Data Source` and `Password`
+    happen to mean the same thing in both. `SqliteDatabase.GetConnectionString` also ignores
+    `includeDatabase`, and `SqliteDatabase.Create()` assigns a connection string to a local
+    that is never used.
+
+16. **`Backup` copies without permission to overwrite, on three engines.**
+    `SqliteDatabase.Backup`, `SqlCeDatabase.Backup` and `XmlStore.Backup` all call
+    `File.Copy(source, backupPath)` with no `overwrite` argument, so backing up twice to the
+    same name throws `IOException`. `MainWindow.OnCommandBackup` deletes the target first,
+    which papers over it — but it also means that **between the delete and the copy the
+    user has no backup at all**, and if the copy fails they have lost the previous one.
+    `SqlServerDatabase.Backup` has a different sharp edge: it flips the database to `SIMPLE`
+    recovery, checkpoints, flips back to `FULL` and then backs up `WITH INIT`, which breaks
+    any existing log-backup chain and unconditionally overwrites the target. Phase 2's Open
+    Question 5 already notes the backup command is unreachable from the UI; if it is
+    restored, these are the behaviours being restored.
+
+17. **The non-parameterized save path turns line breaks in notes into literal `\r` and
+    `\n` text.** `SqlServerDatabase.DBString` does
+    `s.Replace("'", "''").Replace("\r", "\\r").Replace("\n", "\\n")`. The first replacement
+    is the correct T-SQL escape; the other two are C-style escapes that **T-SQL does not
+    interpret** — SQL Server string literals have no backslash escapes. So a multi-line memo
+    or account description saved through this path is stored with the two-character
+    sequences `\r` and `\n` where the line breaks were, and reads back that way forever. The
+    path is used by `SqlServerDatabase` and `SqlCeDatabase` (`SupportsParameterizedUpdate`
+    is `false` for both); SQLite is immune because it opts into parameters. Whether this is
+    live in production depends on Open Question 4.
+
+18. **One field on that same path forgets to escape at all, so an apostrophe breaks the
+    save.** `UpdateLoanPayments`' change branch writes
+    `sb.Append(string.Format(",Memo='{0}'", i.Memo))` — the raw value, with no `DBString`
+    call — while the *insert* branch three lines below does use `DBString`. A loan-payment
+    memo containing an apostrophe therefore saves fine when first entered and fails with a
+    raw SQL syntax error the next time it is edited. The same omission, on fields less
+    likely to contain quotes, appears in `UpdateCategories` (`Color`, `TaxRefNum`),
+    `UpdateSecurities` (`CuspId`) and `UpdateAliases`/`UpdateAccountAliases` (`AccountId`).
+    `SqlServerDatabase.Create` and `Delete` interpolate the database name into
+    `Create Database {0}` / `DROP DATABASE {0}` unbracketed for good measure, so a file whose
+    name contains a space or a hyphen fails to create with a syntax error.
+
+19. **Saving the plain-XML format leaves the document still marked as unsaved.** Every other
+    engine's `Save` ends by calling `money.OnSaved()` — `SqlServerDatabase.Save` after its
+    commit, `BinaryXmlStore.Save` after its write. `XmlStore.Save` does not, and
+    `MyMoney.Save(IDatabase)` does not do it for them. So after saving to `.xml` the product
+    still believes there are unsaved changes. `XmlStore` is asymmetric in two more ways worth
+    checking together: its `Load` constructs the serializer **without**
+    `MyMoney.GetKnownTypes()` while its `Save` constructs one **with** them, and its `Load`
+    calls `PostDeserializeFixup()` but not `OnLoaded()`, where `BinaryXmlStore.Load` calls
+    both.
+
+20. **The generated-password routine has a small modulo bias.**
+    `DataEnginePasswordGenerator.PickRandomChar` draws four random bytes and takes
+    `value % charset.Length` without rejection sampling, and `Shuffle` does the same. With
+    a 24-character password drawn from a 68-character alphabet the practical effect is
+    negligible, and the source of randomness is a proper CSPRNG — noting it only because
+    it is the kind of thing a security review will flag and it is a three-line fix.
+
+21. **Looking up a saved file password signals "there isn't one" by throwing.**
+    `DatabaseSecurity.LoadDatabasePassword` calls `Credential.Load()`, which throws
+    `Win32Exception("No credential exists with the specified TargetName")` when nothing is
+    stored — the normal first-run case. `MainWindow` catches it and treats it as "prompt the
+    user", so the behaviour is correct; but the sibling `SaveDatabasePassword` swallows
+    *all* exceptions into `Debug.WriteLine`, so a password that fails to save fails
+    invisibly and the user is silently re-prompted next time. Exception-as-control-flow on
+    one side and exception-suppression on the other, in a fourteen-line class.
+
+22. **Nothing in this project copies the SQL scripts to the output, and the project
+    references two different SQLite packages.** `SqlServerBootstrapper` takes a
+    `sqlScriptsRoot` and reads `Bootstrap/`, `Migrations/`, `Access/` and `Test/` off disk at
+    run time, but `MyMoney.Data.csproj` has no `<Content>`/`<None CopyToOutputDirectory>`
+    item for `SqlScripts/`; the plan documents say the copy lives in `MyMoney.csproj` and is
+    **DEBUG-only**. If that is still true, a release build cannot bootstrap a server or
+    create a catalog at all — the same shape as Phase 8's Open Question 24, where the SQL
+    Server reconnect path also turned out to be debug-only. Separately, the project
+    references both `SQLitePCLRaw.bundle_e_sqlite3` and `System.Data.SQLite`; only the
+    latter is used in code.
+
+23. **The version-column migration names one specific catalog and covers eleven tables.**
+    `2026-09-17-add-version-column.sql` opens with `USE MyMoney;` — the bootstrapper strips
+    any batch starting `USE`, so creating a differently-named catalog still works, but a
+    human running the file by hand as its own header instructs would target the wrong
+    database. The script adds `Version` to the eleven aggregate-root tables and deliberately
+    not to `Splits`, `Investments`, `RentUnits`, `AccountAliases` or `TransactionExtras`,
+    which are saved as part of their parent. That is the design, but it means those five
+    tables' rows are protected only by their parent's counter, and `RentUnits` in particular
+    is written by `SaveRentUnitsForBuilding` with no version check of any kind — including
+    after the parent building's own `DELETE` has already run.
+
+24. **`SqlServerStoredProcDatabase.ReadStockSplits` is declared `new`, not `override`.**
+    The base member is `protected virtual`; the subclass declares
+    `public new void ReadStockSplits(…)`, which hides rather than overrides it. It works
+    today only because this class also overrides `Load` and calls the method through a
+    statically-typed `this`. Any future code that reads stock splits through an `IDatabase`
+    or a `SqlServerDatabase` reference would silently get the base class's raw-SQL version,
+    which the day-to-day login has no rights to execute. `SqliteDatabase` overrides the same
+    member correctly, which is what makes the difference look accidental.
+
+---
+
 # Catalog complete
 
-All eight phases are done. Every file under `Source/WPF/MyMoney/` and
-`Source/WPF/MyMoney.Business/` has been read and either mapped to a scenario or recorded
-as not user-facing, with the single scoped-out exception named in Phase 8's Open Question
-25 (`Source/WPF/MyMoney.Data/`'s storage-engine internals).
+All nine phases are done. **Every file in all three source projects** —
+`Source/WPF/MyMoney/`, `Source/WPF/MyMoney.Business/` and `Source/WPF/MyMoney.Data/` — has
+now been read in full and either mapped to a scenario or recorded as not user-facing with a
+concrete reason. Phase 8's Open Question 25 named `MyMoney.Data/` as the one place where
+"all source processed" meant "assessed and scoped out" rather than "read"; Phase 9 closed
+that, and the qualifier no longer applies anywhere in this catalog.
 
 **What is here**
 
 | | |
 |---|---|
-| Scenarios | **791** across eight phases — 161 (core model), 70 (shell), 153 (views), 106 (dialogs), 90 (reports and charts), 71 (import/export), 41 (taxes), 99 (cross-cutting) |
-| Open questions | **169** — judgement calls, boundary decisions and suspected defects a human should confirm |
-| Phases | 8 of 8 complete |
+| Scenarios | **811** across nine phases — 161 (core model), 70 (shell), 153 (views), 106 (dialogs), 90 (reports and charts), 71 (import/export), 41 (taxes), 99 (cross-cutting), 20 (data engine internals) |
+| Open questions | **193** — judgement calls, boundary decisions and suspected defects a human should confirm |
+| Phases | 9 of 9 complete |
 
 **Where the bugs went.** This audit was a source-code read, not a test pass, but it kept
 finding things that were plainly wrong rather than merely undecided. Those have been
@@ -8183,6 +8758,18 @@ as a bug tracker:
 Phase 8's own first-ranked findings — statement documents being silently overwritten
 (Open Question 1) and silently dropped on merge (Open Question 2) — belong with #54 as
 the same "paperwork the user believes is filed is not" family, and are not yet filed.
+
+Phase 9's are also unfiled, and two of them outrank most of what is already tracked. Its
+**Open Question 1** — a whole-file save clears every record's pending-change marker
+*before* the transaction commits, so a save that fails at the last step destroys the work
+it failed to write, on every engine — belongs with #54. Its **Open Questions 2, 5 and 7**
+— full saves bypassing the version counter that the concurrency protection depends on,
+three server passwords stored in clear text in `%AppData%`, and "add a user" granting
+`sysadmin` through string-concatenated SQL — belong with #56, alongside the encryption
+bug already noted in #52. Its **Open Question 3** — every integrity error found while
+loading a file is collected and then discarded, with the method meant to repair them left
+empty — is the cheapest of the lot to fix and turns silent corruption into something a
+user can see.
 
 **How to read this catalog.** Each scenario is a *user goal*, deliberately written without
 naming a control, a class or a screen, so that a redesign can satisfy it any way it likes.
