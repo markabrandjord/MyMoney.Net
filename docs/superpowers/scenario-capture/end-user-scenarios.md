@@ -19,7 +19,7 @@ user-facing.
 | 2 | Navigation & shell | Main window, view selectors, command routing | **Done** |
 | 3 | Views | `Views/` + `View Selectors/` — the grids, trees and panes the user works in | **Done** |
 | 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | **Done** |
-| 5 | Reports + charts | `Reports/`, `Charts/` | Not started |
+| 5 | Reports + charts | `Reports/`, `Charts/` (+ `Views/GraphGenerators.cs` and `FlowDocumentView`'s report-hosting path, deferred here by Phase 3) | **Done** |
 | 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | Not started |
 | 7 | Taxes | `Taxes/` | Not started |
 | 8 | Cross-cutting | Online banking, attachments, printing, settings | Not started |
@@ -4183,3 +4183,1076 @@ obvious from the code — and, where noted, because they look like real defects.
     base that carries all five. It is also the same class of problem as the recently
     fixed "two dialogs opening disconnected from the app window" on this branch, which
     suggests the gaps are still being found one at a time.
+
+---
+
+# Phase 5: Reports + Charts
+
+**Source examined (in full):** every file in `Source/WPF/MyMoney/Reports/` (14 files,
+~5,400 lines) and `Source/WPF/MyMoney/Charts/` (13 code/markup files plus 5 icon
+assets, ~3,000 lines), plus the two things Phase 3 explicitly deferred here —
+`Views/GraphGenerators.cs` and the report-hosting half of `Views/FlowDocumentView.xaml`
++ `.xaml.cs`.
+
+| File(s) | Lines |
+|---|---|
+| `Reports/IReport.cs` | 193 |
+| `Reports/Reports.cs` (the `Report` base class) | 296 |
+| `Reports/NetWorthReport.cs` | 733 |
+| `Reports/AccountSummaryReport.cs` | 314 |
+| `Reports/CashFlowReport.cs` | 724 |
+| `Reports/PortfolioReport.cs` | 1,014 |
+| `Reports/TaxReport.cs` | 711 |
+| `Reports/W2Report.cs` | 454 |
+| `Reports/FutureBillsReport.cs` | 217 |
+| `Reports/UnacceptedReport.cs` | 152 |
+| `Reports/RetirementPlan.cs` | 1,572 |
+| `Reports/FlowDocumentReportWriter.cs` | 542 |
+| `Reports/HtmlDocumentReportWriter.cs` | 270 |
+| `Reports/CsvReportWriter.cs` | 220 |
+| `Charts/AnimatingBarChart.xaml` + `.xaml.cs` | 12 + 900 |
+| `Charts/AnimatingPieChart.xaml` + `.xaml.cs` | 11 + 535 |
+| `Charts/AreaChart.cs` | 613 |
+| `Charts/CategoryChart.xaml` + `.xaml.cs` | 32 + 458 |
+| `Charts/CategoryData.cs` | 120 |
+| `Charts/ChartData.cs` | 200 |
+| `Charts/ChartLegend.xaml` + `.xaml.cs` | 70 + 222 |
+| `Charts/HistoryBarChart.xaml` + `.xaml.cs` | 29 + 489 |
+| `Charts/LoanChart.xaml` + `.xaml.cs` | 35 + 146 |
+| `Charts/RentalChart.xaml` + `.xaml.cs` | 13 + 95 |
+| `Charts/RentalChartColumn.xaml` + `.xaml.cs` | 101 + 120 |
+| `Charts/RentalData.cs` | 28 |
+| `Charts/FormattingConverter.cs` | 44 |
+| `Charts/Styles.cs` | 43 |
+| `Views/GraphGenerators.cs` (deferred here by Phase 3) | 425 |
+| `Views/FlowDocumentView.xaml` + `.xaml.cs` (report-hosting path) | 126 + 385 |
+
+**Supporting files read but owned elsewhere**, because a scenario here can't be
+written honestly without them: `Controls/TrendGraph.xaml` + `.xaml.cs` (the control
+that hosts `AreaChart` and owns the chart strip's own menu),
+`View Selectors/ReportsControl.xaml` + `.xaml.cs` (the report options panel — Phase 3's
+P3-PANEL-1/2), `MainWindow.xaml.cs`'s "Reports Menu" region and `ReportEventHandler`
+(which report each menu item opens and where each drill-down lands), and
+`MyMoney.Business/Payments.cs` (the recurring-payment detection behind the future-bills
+report — see Open Question 1).
+
+> **Path/naming notes.**
+> - There is **no `Charts/styles.xaml`**, despite `Charts/Styles.cs` existing to load
+>   one. See Open Question 19.
+> - `Reports/W2Report.cs` declares its class in namespace **`Walkabout.Taxes`**, not
+>   `Walkabout.Reports` — the only file in the folder that does. Searching the
+>   `Walkabout.Reports` namespace misses it.
+> - `Reports/RetirementPlan.cs` declares class **`RetirementPlanReport`** (plus a
+>   nested `Simulation` and a `RetirementFunds` model) — filename and class don't match,
+>   the same trap Phases 3 and 4 flagged.
+> - `Charts/RentalChart.xaml.cs` carries the doc comment *"Interaction logic for
+>   OvertimeChartControl.xaml"* and `Charts/RentalChartColumn.xaml.cs` *"…for
+>   ProfitLossColumn.xaml"*; `Charts/CategoryChart.xaml.cs` says *"…for
+>   ExpensesCategoryView.xaml"* and `Charts/ChartLegend.xaml.cs` *"…for
+>   UserControl1.xaml"*. Four more copy-pasted `<summary>` comments naming classes that
+>   don't exist.
+> - `Charts/RentalChart.xaml` names its root grid **`MaingGrid`** (sic), which the
+>   code-behind relies on.
+> - Two chart controls (`AnimatingBarChart`, `AnimatingPieChart`, plus `AreaChart` and
+>   `PieSlice`) live in namespace **`LovettSoftware.Charts`**, not `Walkabout.Charts` —
+>   they read as a general-purpose charting library dropped into the product.
+
+**What this phase covers and deliberately does not.** This section catalogues the
+*questions a user asks of their own data and the answers the product gives back* — the
+standalone reports reached from the Reports menu, the charts that sit beside the
+register, and the one shared viewer they are all read in. Where a dialog collects the
+options a report runs with, the collecting is Phase 4 (P4-REPORT-*) and the resulting
+report is here. The **tax-form semantics** — which category maps to which line of which
+IRS form, what a `.txf` file contains, how capital gains are classified — are Phase 7;
+what is captured here is the tax *report* as a thing the user reads on screen and the
+affordance that exports it. The protocol and file work behind importing is Phase 6.
+`Setup/ChangeInfoReport.cs` (the "what's new in this version" page) is also rendered in
+this same viewer but belongs to Phase 2's P2-HELP-4 and Phase 8.
+
+---
+
+## 5.1 Reading, steering and taking away a report
+
+### P5-VIEW-1 — Read any report as one continuous document
+Every report the product produces is shown the same way: as a single scrolling
+document that takes over the whole working area, with headings, sub-headings, tables
+of figures and, where it helps, charts embedded between the tables. The user reads it
+top to bottom rather than paging through it.
+*(`FlowDocumentView`, `FlowDocumentReportWriter`)*
+
+### P5-VIEW-2 — Change the report's terms beside the report and watch it redraw
+While a report is on screen, a panel appears in the navigation area carrying only the
+settings that report actually has — the date it is struck at, a start and end date, a
+financial year, whether to group by year or by month, which kind of accounts to cover,
+how to group investment sales, and which currency to express everything in. Changing
+any of them regenerates the report in place.
+*(`ReportsControl` — already captured as an affordance in Phase 3's P3-PANEL-1; what
+each report puts in it is described per report below)*
+
+### P5-VIEW-3 — Find a word inside a long report
+The user types into the search box above the report and the view jumps to and
+highlights the next place that text occurs; typing again or asking for "find next"
+moves on to the one after. There is no way to see how many matches there are or to
+step backwards.
+*(`FlowDocumentView.QuickFilter`, `FindManager`, the "Find Next" context-menu item
+bound to F3 — the same mechanism Phase 3 catalogued as P3-VIEW-7)*
+
+### P5-VIEW-4 — Copy part of a report out
+The user can select text anywhere in the report, or select the whole thing, and copy
+it. What lands on the clipboard keeps its formatting as well as its plain text, so it
+can be pasted into a document or an email and still look like a table.
+*(`FlowDocumentView.Copy` writes both text and rich text; the Copy / Select All
+context-menu items)*
+
+### P5-VIEW-5 — Show or hide the detail beneath every summary line at once
+Reports that summarise — a category with individual lines under it, a holding with its
+separate purchase lots, a tax line fed by several categories — start collapsed, with a
+small expander on each summary row. One button above the report opens or closes every
+group at once, and it is disabled on reports that have nothing to expand.
+*(`IReportWriter.StartExpandableRowGroup`, `FlowDocumentView.ToggleExpandAll`,
+`FlowDocumentReportWriter.ExpandAll`/`CollapseAll`)*
+
+### P5-VIEW-6 — Save a report as a web page
+Any report on screen can be written out as an HTML file the user chooses the name of,
+so it can be kept, mailed or opened in a browser. Charts, colour swatches and the
+drill-down links do not survive the trip; the tables and the numbers do.
+*(`AppCommands.CommandExportHtml` on the report's context menu,
+`HtmlDocumentReportWriter`. See Open Questions 2 and 3 — for several reports this
+produces a truncated or failed file, and the styling depends on fetching a stylesheet
+from the internet.)*
+
+### P5-VIEW-7 — Take a report's figures away as a spreadsheet
+Two of the reports — the cash-flow report and the investment portfolio — offer an
+Export button in their options panel that writes the figures to a comma-separated file
+and then opens it, so the user can carry on in a spreadsheet. The other reports have no
+such button.
+*(`ReportsControl.ShowExportButton`, `Report.ExportReportAsCsv`, `CsvReportWriter`,
+`CashFlowReport.Export`, `PortfolioReport.Export`. See Open Question 4.)*
+
+### P5-VIEW-8 — Follow a figure back to the transactions behind it
+Most numbers in most reports are live: clicking one takes the user to a transaction
+list containing exactly the entries that produced it. A cash-flow cell opens that
+category's entries for that column's period; a tax line opens the entries filed under
+it; a payee or category in the future-bills report opens everything for that payee or
+category; an account name in the account summary selects that account; a holding's name
+opens every trade in it. This is the main way a user gets from "that number looks wrong"
+to "here is why".
+*(`IReport.OnMouseLeftButtonClick` + `IViewNavigator.ViewTransactions`/
+`ViewTransactionsBySecurity`; `CashFlowReport`, `W2Report`, `PortfolioReport`,
+`FutureBillsReport`, `AccountSummaryReport`)*
+
+### P5-VIEW-9 — Drill from a summary report into a report about one slice of it
+Clicking a slice of the net-worth pie, or a group in the portfolio summary, doesn't
+just filter — it opens a fresh report about that slice alone, struck at the same date,
+which itself has a chart and its own drill-downs. The user can keep going inwards.
+*(`NetWorthReport.SecurityDrillDown`/`CashBalanceDrillDown`, `PortfolioReport.DrillDown`,
+`MainWindow.OnReportDrillDown`/`OnReportCashDrillDown`; `SecurityGroup`, `AccountGroup`)*
+
+### P5-VIEW-10 — Close a report and get back to work
+A close box beside the report returns the user to the transaction register they came
+from.
+*(`FlowDocumentView.Closed` → `MainWindow.OnFlowDocumentViewClosed`)*
+
+### P5-VIEW-11 — Come back to a report set up the way it was left
+The settings a user chose for a report — its date, its year, its interval, its
+groupings — are remembered per report alongside their data file, so reopening that
+report later starts from the same terms rather than from defaults. Settings that can't
+be written down are silently allowed to lapse rather than failing.
+*(`Report.LoadState`/`SaveState`/`DelaySaveState` writing one XML file per report type
+into a `Reports` folder next to the money file; `IReportState`. Note the deliberate
+swallow-everything `try`/`catch` on both, and see Open Question 5.)*
+
+### P5-VIEW-12 — See every figure in one currency
+Where a report deals in money that could be in several currencies, the user picks a
+currency in the options panel and every figure is converted into it, with a note at the
+bottom stating the rate used. If the chosen currency isn't one they've set up, the
+report says so in place rather than silently showing wrong numbers.
+*(`Report.DefaultCurrency`/`SetDefaultCurrency`/`GetFormattedNormalizedAmount`/
+`WriteTrailer`; `ReportsControl`'s currency picker)*
+
+### P5-VIEW-13 — Know when the report was struck
+Every report ends with a line saying which date it was generated for, so a printout or
+an exported copy can't be mistaken for a current one.
+*(`Report.WriteTrailer`)*
+
+> **Not available: printing.** Nothing in the product prints a report. The only print
+> affordance anywhere is in the attachment window (Phase 4's P4-ATT-8). See Open
+> Question 6.
+
+---
+
+## 5.2 What am I worth?
+
+### P5-NET-1 — See everything they own and owe, totalled, as at a date they choose
+The user asks for a net-worth statement as at any date — today or years ago — and gets
+one figure for their overall position, built up from named groups: cash in everyday
+accounts, cash sitting in investment accounts, cash in tax-deferred and tax-free
+accounts, their investments broken down by kind of holding, the assets they own
+outright, the loans owed to them, and then their liabilities.
+*(`NetWorthReport`)*
+
+### P5-NET-2 — Have tax treatment kept visibly separate
+Tax-deferred and tax-free holdings are listed under their own headings rather than
+lumped in with ordinary taxable ones, and those headings only appear if the user
+actually has accounts of that kind, so the report doesn't invent structure they don't
+need.
+*(`NetWorthReport.WriteSecurities` by `TaxStatus`)*
+
+### P5-NET-3 — See the same picture as a pie
+Beside the table is a pie chart of the same figures, colour-matched to a swatch on
+every row, so the user can see at a glance what their wealth is mostly made of.
+Hovering a slice names it and gives its value.
+*(`AnimatingPieChart` embedded via `IReportWriter.WriteElement`)*
+
+### P5-NET-4 — Click a slice or a row to go deeper
+Clicking a slice of the pie, or the name of a group in the table, opens a report about
+just that group — the individual accounts making up a cash total, or the individual
+holdings making up a class of investment — struck at the same date.
+*(`OnPieSliceClicked` → `SecurityDrillDown`/`CashBalanceDrillDown` → a `PortfolioReport`)*
+
+### P5-NET-5 — See whether net worth has been going up or down over the years
+Under the statement is a bar chart of the user's net worth on the same date in each
+previous year, going back to their earliest transaction, filled in progressively as the
+figures are computed so the report is readable immediately. Each bar names its date and
+value on hover.
+*(`PopulateHistoricalNetWorth` on a background thread appending to the chart's series;
+`AnimatingBarChart`)*
+
+### P5-NET-6 — Jump the whole report to a year they see in the history
+Clicking a bar in the history chart re-strikes the entire net-worth statement as at that
+year's date, so the user can move back through their history without touching the date
+picker.
+*(`OnBarChartColumnClicked`)*
+
+### P5-NET-7 — Take the net-worth history away as a spreadsheet
+Right-clicking the history chart offers to export just that series — year and value per
+row — to a file of the user's choosing.
+*(`ExportHistoryClick`)*
+
+### P5-NET-8 — Be told when a holding hasn't been classified
+If any holding has no kind recorded against it, the report marks the affected line and
+says, in the report itself, where to go and fix it — rather than quietly filing it under
+nothing.
+*(the `SecurityType.None` asterisk and the closing note)*
+
+---
+
+## 5.3 What is each account worth?
+
+### P5-ACCT-1 — See a one-line balance for every account, grouped by kind of account
+The user gets a simple list of all their accounts with what each is worth as at a chosen
+date, grouped under headings for each kind of account, with investment accounts valued
+at market rather than just their cash. Accounts worth nothing are left out so the list
+stays short.
+*(`AccountSummaryReport`)*
+
+### P5-ACCT-2 — See which currency each account is really in
+Each row states the currency its figure is in, so a foreign-currency account isn't
+mistaken for a home-currency one — and a grand total is only offered when every account
+shares one currency.
+*(`WriteAccountSummary`'s `various` handling. See Open Questions 7 and 8.)*
+
+### P5-ACCT-3 — Click an account to go and work in it
+Clicking an account's name in the report selects that account and opens its register.
+*(`SelectAccount` → `MainWindow`'s accounts panel)*
+
+---
+
+## 5.4 Where did the money go?
+
+### P5-FLOW-1 — See income, spending and investing side by side across time
+The user gets a grid whose columns are periods and whose rows are their top-level
+categories, split into Income, Expenses, Investments and an Unknown group for anything
+uncategorised, with a total row underneath and a plain-language statement of the net
+cash flow for the whole span.
+*(`CashFlowReport`)*
+
+### P5-FLOW-2 — Choose the span and the granularity
+The user sets a start and an end date and chooses whether each column is a year or a
+month; the report defaults to the last five years by year. Column headings follow the
+user's financial year when they have set one.
+*(`ReportsControl`'s start/end date rows and "By Years"/"By Month" interval;
+`DatabaseSettings.FiscalYearStart`)*
+
+### P5-FLOW-3 — Have categories roll up only as far as makes sense
+Amounts roll up to the highest-level category they can without changing character — a
+sub-category that is income stays under income even if its parent is treated as
+investing — so a single parent category containing both fees and dividends doesn't
+misreport either.
+*(`TallyCategory`/`IsSimilarCategory`)*
+
+### P5-FLOW-4 — Open out a group to see the categories inside it
+Each of the four groups starts collapsed and can be opened to show the individual
+categories that make it up, either one group at a time or all at once.
+*(`StartExpandableRowGroup`, and P5-VIEW-5)*
+
+### P5-FLOW-5 — Click any cell to see the entries behind it
+Every figure that has entries behind it is clickable and opens exactly those entries —
+including individual lines of itemised transactions, which are counted against their own
+category rather than the whole transaction's.
+*(`CashFlowCell.Data`, `OnMouseLeftButtonClick` → `IViewNavigator.ViewTransactions`)*
+
+### P5-FLOW-6 — Have transfers, voids and asset accounts kept out of the picture
+Money moved between the user's own accounts, voided entries and anything in an asset
+account are excluded, so a transfer from savings to chequing doesn't read as income.
+Sales tax is excluded from the category amount as well.
+*(`GenerateColumn`'s filters, `Transaction.AmountMinusTax`)*
+
+### P5-FLOW-7 — Take the grid away as a spreadsheet
+An Export button writes the same grid out as a comma-separated file with expenses
+flipped to positive numbers, and opens it.
+*(`CashFlowReport.Export`/`GenerateCsvGroup`. See Open Question 9 — the exported file
+is not the same report.)*
+
+---
+
+## 5.5 How are my investments doing?
+
+### P5-PORT-1 — See everything they hold, what it cost and what it's worth now
+The user gets a portfolio report listing every holding still owned, with quantity,
+current price, market value, average unit cost, cost basis, gain or loss and gain as a
+percentage — subtotalled per kind of holding and totalled overall.
+*(`PortfolioReport`)*
+
+### P5-PORT-2 — See taxable, tax-deferred and tax-free investments separately
+The summary splits the portfolio three ways by tax treatment, each with its own subtotal,
+and gains inside tax-free accounts are deliberately shown as nothing rather than as
+taxable gains.
+*(`WriteSummary` per `TaxStatus`)*
+
+### P5-PORT-3 — Open a holding to see the individual lots behind it
+Each holding is one summary line that opens to show every separate purchase still held —
+the date it was acquired, what was paid, and what that particular lot is worth now — so
+the user can see which lots carry the gain.
+*(`WriteSecurities`'s expandable group over `SecurityPurchase` lots)*
+
+### P5-PORT-4 — Value the portfolio as at any date
+Changing the report date re-prices every holding using the price history the product has
+for that date, so the user can ask what the portfolio was worth at the end of last year.
+*(`CostBasisCalculator` + `StockQuoteCache.GetSecurityMarketPrice` at `ReportDate`)*
+
+### P5-PORT-5 — Look at one account, one class of holding, or everything
+The same report serves as the whole portfolio, as the portfolio of a single investment
+account (reached from the register), and as a report about one class of holding reached
+by drilling into the net-worth or portfolio pie — with the heading saying which of those
+the user is looking at, and the single-account version also counting that account's cash.
+*(`Account`/`SelectedGroup`/`AccountGroup` on `PortfolioReport`; also the in-register
+portfolio view Phase 3 captured as P3-INV-4/P3-INV-5)*
+
+### P5-PORT-6 — See a cash-balances report for a group of accounts
+Drilling into a cash slice of the net-worth pie produces a plain list of the accounts in
+that group with each one's cash balance and a pie of the same, so "where is my cash" is
+one click from the net-worth statement.
+*(`WriteCashBalanceSummary`. See Open Question 10.)*
+
+### P5-PORT-7 — Be warned about sales the product can't account for
+If a sale can't be matched to holdings the product knows about, the report says so
+explicitly — naming the account, the holding, the units and the date — instead of
+quietly producing wrong cost bases.
+*(`CostBasisCalculator.GetPendingSales`, the "Pending Sales" section)*
+
+### P5-PORT-8 — Jump from a holding to its trades
+Clicking a holding's name anywhere in the report opens every transaction in that holding
+across all accounts.
+*(`OnReportCellMouseDown` → `IViewNavigator.ViewTransactionsBySecurity`)*
+
+### P5-PORT-9 — Take the portfolio away as a spreadsheet
+An Export button writes the whole report — summary and per-lot detail — to a
+comma-separated file and opens it.
+*(`PortfolioReport.Export` via `CsvReportWriter`)*
+
+---
+
+## 5.6 What do I need for my taxes?
+
+> Boundary: this group covers the tax reports as **documents the user reads**. What a
+> tax category means, how the product decides short versus long term, and the contents of
+> the exported file are Phase 7.
+
+### P5-TAX-1 — See a year's tax-relevant totals in one place
+The user picks a financial year and gets every category they have associated with a tax
+line, grouped by tax line and sub-totalled, plus the year's sales tax as its own figure
+and a column separating amounts that came from tax-exempt holdings.
+*(`TaxReport.GenerateCategories`, `GetSalesTax`)*
+
+### P5-TAX-2 — See every investment sale in the year with its gain or loss
+Below the categories, short-term and long-term sales are listed separately, each row
+carrying the holding, quantity, date acquired (or "VARIOUS" for a consolidated lot),
+acquisition price, cost basis, date sold, sale price, proceeds and the resulting gain,
+with a total. Sales inside tax-deferred or tax-free accounts are excluded because they
+aren't reportable.
+*(`GenerateCapitalGains`, `CapitalGainsTaxCalculator`. See Open Question 11.)*
+
+### P5-TAX-3 — Be shown sales the product can't compute a cost basis for
+Sales with no known cost basis are listed in their own section rather than being folded
+in with a made-up basis, so the user knows exactly what they have to look up themselves.
+*(the "Capital Gains with Unknown Cost Basis" section)*
+
+### P5-TAX-4 — Choose whether to report on everything or on investments only
+A report-type choice limits the report to investment activity, for users whose only
+tax-relevant records are trades.
+*(`ReportTypeAllAccounts`/`ReportTypeInvestmentsOnly`. See Open Question 12.)*
+
+### P5-TAX-5 — Choose how sales are consolidated
+The user chooses whether sales are grouped by the date they were acquired or the date
+they were sold, which changes how many rows a partial sale of a long-held position
+produces.
+*(the consolidation row in the options panel → `CapitalGainsTaxCalculator`)*
+
+### P5-TAX-6 — Work to a financial year that isn't the calendar year
+The year picker is built from the years the user actually has data for, labelled "FY"
+where they have set a non-January financial year start, and the report follows that
+definition throughout.
+*(`SetStartDate`, `AddFiscalYearItems`, `Transactions.GetTaxYearRange`)*
+
+### P5-TAX-7 — Hand the year's figures to tax software
+A button at the top of the tax report writes the year out in the file format consumer
+tax software imports, named after the year, with any failure reported plainly rather
+than silently.
+*(`CreateExportTxfButton`, `TxfExporter` — the file's contents are Phase 7)*
+
+### P5-TAX-8 — See an estimated W-2 built from their own pay deposits
+Separately, the user can ask the product to reconstruct what their pay records add up to
+on each tax form, by reading the itemised lines of their paycheque deposits: each form
+gets its own table, each tax line its own figure, and where several of their categories
+feed one tax line the line opens to show them individually.
+*(`W2Report`)*
+
+### P5-TAX-9 — Be told plainly when no categories are associated with tax lines
+Both tax reports, rather than showing an empty table, say in words that no categories
+have been associated with tax lines and where to go to do it.
+*(`W2Report.Generate`'s `empty` branch, `TaxReport.GenerateCategories`'s `null` branch)*
+
+### P5-TAX-10 — Click a tax figure to see the pay entries behind it
+Every figure in the W-2 report opens the transactions that produced it.
+*(`AddHyperlink` → `IViewNavigator.ViewTransactions`)*
+
+---
+
+## 5.7 What's coming, and what needs my attention?
+
+### P5-BILLS-1 — See what their regular bills will cost over the coming year
+The product looks at the last five years of spending, works out by itself which
+payee-and-category pairs the user pays on a regular rhythm, and lists the next twelve
+months a month at a time with each predicted bill's date, payee, category and amount,
+headed by the total it expects them to spend.
+*(`FutureBillsReport`, `Payments.FindRecurringPayments`/`ComputeRecurrence`)*
+
+### P5-BILLS-2 — Have the rhythm worked out rather than declared
+The user doesn't set up a schedule. A payment is treated as recurring when its amounts
+sit close enough to a straight line (allowing for inflation) and its dates are evenly
+enough spaced, and the spacing is then named — weekly, fortnightly, monthly, quarterly
+and so on. Payments that stopped happening are dropped rather than predicted forever.
+*(`ComputeRecurrence`'s linear regression, standard-error thresholds and
+`AllowedMissedPayments`. See Open Question 1.)*
+
+### P5-BILLS-3 — Be told plainly when nothing recurring was found
+If the product can't find a rhythm in the data it says so in one line instead of showing
+twelve empty months.
+*(the `total == 0` branch)*
+
+### P5-BILLS-4 — Click a predicted bill to see its history
+The payee and category in each predicted row open that payee's or category's
+transactions, so the user can check the prediction against what actually happened.
+*(`PayeeSelected`/`CategorySelected`)*
+
+### P5-ATTN-1 — See everything downloaded but not yet approved, across all accounts
+The user gets one list of every entry that arrived from a download and hasn't been
+accepted yet, grouped by account with its date, payee and amount, memo on its own line,
+and a count at the end. Closed accounts are left out.
+*(`UnacceptedReport`)*
+
+---
+
+## 5.8 Will my money last?
+
+### P5-PLAN-1 — Model whether their savings will see them through retirement
+The user enters their situation — current age, a spouse's age, filing status, which
+state they pay tax in, the age they intend to retire, the age to plan to, the income
+they want each year, an expected rate of return, an inflation rate and an assumed rate
+at which tax brackets move — and the product simulates every year from now to the end,
+starting from what they actually hold today.
+*(`RetirementPlanReport`, `RetirementControl` — the entry panel is Phase 3's P3-PANEL-3)*
+
+### P5-PLAN-2 — See the answer as three figures before any chart
+The plan opens with what's left at the planning age, split into taxable, tax-deferred
+and tax-free, and the total tax paid across the whole retirement — the two numbers the
+whole exercise exists to produce.
+*(`Simulation.Render`'s summary table)*
+
+### P5-PLAN-3 — Watch the simulation run rather than stare at a frozen window
+Because the simulation is slow, the report says it is running and fills itself in when
+the figures are ready, leaving the rest of the product usable meanwhile.
+*(`Generate`'s "Running simulation..." placeholder and the background `Simulate`)*
+
+### P5-PLAN-4 — See net worth, income and tax year by year as charts
+Three charts follow the summary: assets by tax treatment at each age, where each year's
+income was drawn from (including the extra that had to be withdrawn purely to pay the
+tax on the withdrawal), and the tax paid to produce that income split into federal,
+state and capital-gains. Each carries its own legend, and hovering a bar names the age
+and amount.
+*(`Render`'s three `AnimatingBarChart`s and `CreateLegend`)*
+
+### P5-PLAN-5 — Switch between stacked and side-by-side bars
+A single toggle changes every chart in the plan between stacking the parts of each year
+on top of each other and setting them side by side, without re-running the simulation.
+*(`OnStackedBarsChanged`)*
+
+### P5-PLAN-6 — Ask what converting to a tax-free account would do
+Where the user has tax-deferred savings, they can model spreading a conversion into
+tax-free savings over a number of years, and a fourth chart runs the whole simulation
+sixteen times — no conversion, then one year through fifteen — so they can see the
+number of years that leaves them best off and what each costs in tax.
+*(`TaxDeferredStrategyRoth`, `RunRothSimulation`)*
+
+### P5-PLAN-7 — Have the rules of retirement applied for them
+The simulation takes required minimum distributions once the user reaches the age their
+birth year obliges, taxes the taxable share of their social security, draws income in a
+deliberate order — dividends, required distributions, social security, taxable savings,
+then tax-deferred, leaving tax-free savings until last — and sells the highest-cost lots
+first to limit capital gains. The user isn't asked to understand any of that.
+*(`RetirementFunds`, `GetMinimumDistribution`, `CalcSocialSecurityTax`,
+`SellTaxableAmount`, `CreateSortedHoldings`. See Open Questions 13, 14 and 15.)*
+
+### P5-PLAN-8 — Record social security at more than one claiming age
+The user can record what they'd receive at 62, at 67 and at 70, and switching the
+claiming age brings back the amount they recorded for it rather than making them retype
+it; a spousal benefit is estimated from the primary one when they haven't a figure of
+their own.
+*(`SaveSocialSecurityAmount`/`FindSocialSecurityAmount`, `ComputeSpousalSocialSecurity`)*
+
+---
+
+## 5.9 The picture beside the numbers
+
+> Phase 2 captured the chart strip as an affordance (P2-PANE-1 … P2-PANE-5). This group
+> captures what each of those pictures actually says.
+
+### P5-TREND-1 — Watch a balance rise and fall over the entries they're looking at
+Whatever list of entries the user has in front of them, a shaded area graph beneath it
+plots the running total across those entries in date order. What is being totalled
+follows the list: an account's running balance, a category's spending, a payee's total,
+or — for a list of one holding — that holding's value.
+*(`TransactionGraphGenerator`, `AreaChart`, `TrendGraph`)*
+
+### P5-TREND-2 — See spending trend upwards rather than downwards
+For credit accounts and expense categories, where every entry is negative, the graph is
+flipped so that "more" is up — matching what the user means by spending more.
+*(`IGraphGenerator.IsFlipped`)*
+
+### P5-TREND-3 — See what an investment account was really worth on every day of its life
+For a brokerage or retirement account the graph doesn't plot cash: it re-prices every
+holding for every single day from the account's first transaction onwards, applies stock
+splits as their dates pass, adds the cash balance, and draws the result — so the shape of
+the line is the shape of the market, not of the deposits.
+*(`BrokerageAccountGraphGenerator`, `StockQuoteCache`)*
+
+### P5-TREND-4 — See a holding's own price history
+Looking at a single holding, a separate graph shows that security's closing price over
+time, independent of how much of it the user owns.
+*(`SecurityGraphGenerator`, the "Stock" tab)*
+
+### P5-TREND-5 — Point at the graph to read off a value
+Moving the pointer over the graph puts a marker on the nearest point and shows its date
+and value; the point under the marker becomes the graph's selection.
+*(`AreaChart.UpdatePointer`, `Selected`)*
+
+### P5-TREND-6 — Move the graph through time
+The graph can be set to the year to date, to the whole history, or stepped forwards and
+backwards one period at a time; the period itself can be zoomed in or out from days
+through to years, with keyboard shortcuts for stepping and zooming. A custom start and
+end date can also be typed in.
+*(`TrendGraph`'s Year to date / Show all / Next / Previous / Zoom in / Zoom out /
+Custom range commands; the custom range window is Phase 4's P4-REPORT-1)*
+
+### P5-TREND-7 — Compare this period with the ones before it
+The user can add further series to the graph, each drawing the same measure over the
+immediately preceding period of the same length in a different colour, so this year's
+spending can be laid over last year's and the year before.
+*(`OnAddSeries`/`OnRemoveSeries`, `TrendGraphSeries`, the eight themed series colours)*
+
+### P5-TREND-8 — Take the plotted figures away
+A menu item on the graph exports the plotted series to a spreadsheet file and opens it.
+*(`OnExportData` → `ChartData.Export`. See Open Question 16.)*
+
+### P5-HIST-1 — See the same measure bucketed by year, month or day
+A history chart shows whatever the user is currently looking at as bars — one per year,
+month or day, chosen from a dropdown on the chart — over the last couple of dozen
+periods, with the bars coloured from the category's or payee's own colour.
+*(`HistoryBarChart`, `HistoryChartColumn`)*
+
+### P5-HIST-2 — See whether the trend is up or down
+A regression line is computed across the bars so the user can see the direction of
+travel rather than judging it by eye.
+*(`ComputeLinearRegression`. See Open Question 17.)*
+
+### P5-HIST-3 — Have spending shown as positive bars
+When most of the periods are negative — as they are for any expense — every bar is
+flipped so the chart reads as "how much", not "how far below zero".
+*(`ComputeInversion`/`InvertColumns`)*
+
+### P5-HIST-4 — Click a bar to narrow the list to that period
+Clicking a year, month or day filters the transaction list above to exactly that period,
+which is the fastest route from "that month looks expensive" to the entries that made it
+so.
+*(`SelectionChanged` → `TransactionsView.AddHistoryFilter`; Phase 3's P3-FIND-5)*
+
+### P5-HIST-5 — Turn the chart on its side, or take it away
+A right-click offers to rotate the bars between vertical and horizontal, and to export
+the plotted values to a spreadsheet.
+*(`Rotate`, `OnExport`)*
+
+### P5-PIE-1 — See what a period's spending, or income, was mostly made of
+Two pie charts summarise the entries currently listed — one of expenses, one of income —
+by top-level category, largest first, with the net total stated beside them.
+*(`CategoryChart` with `CategoryType` Expense / Income)*
+
+### P5-PIE-2 — Read a legend with every category, its colour and its total
+Beside each pie is a legend listing every slice with its colour, name and amount.
+*(`ChartLegend`)*
+
+### P5-PIE-3 — Hide a category to see the rest more clearly
+Clicking a colour swatch in the legend takes that category out of the pie and out of the
+stated total, so one dominant category can be set aside to see what's underneath.
+*(`ChartLegend.Toggled` → `CategoryChart.FilterChartData`)*
+
+### P5-PIE-4 — Click into a category to see its sub-categories
+Clicking a slice, or its legend entry, re-draws the pie for the categories inside that
+one, so the user can work down a category tree visually.
+*(`PieSliceClicked`/`Selected` → `CategoryChart.Selection` → `MainWindow.
+PieChartSelectionChanged`)*
+
+### P5-PIE-5 — Have transfers and unassigned amounts shown honestly
+Money moved to or from the user's own accounts appears as its own slice rather than
+being hidden, and the unallocated remainder of an itemised transaction appears as
+"Unassigned" rather than being dropped.
+*(`Tally`'s `transferredIn`/`transferredOut`/`unassigned` buckets. See Open Question 18.)*
+
+### P5-PIE-6 — Take the breakdown away as a spreadsheet
+A right-click exports the pie's categories and amounts to a spreadsheet file.
+*(`CategoryChart.OnExport` → `ChartData.Export`)*
+
+### P5-LOAN-1 — See how much of a loan went on interest, year by year
+For a loan, a chart shows each year's payments split into principal and interest as two
+bars, with the totals for the whole loan stated in the corner — the single most
+persuasive picture of what borrowing actually cost.
+*(`LoanChart`, `CumulatePayementsPerYear`)*
+
+### P5-RENT-1 — See a rental property's income against its costs, year by year
+For rental property, a chart shows each year as an income bar beside an expenses bar,
+with the expenses bar itself divided into taxes, repairs, maintenance, management and
+interest, each segment naming itself and its amount.
+*(`RentalChart`, `RentalChartColumn`, `RentalData`)*
+
+### P5-RENT-2 — Re-stack the cost breakdown to compare one cost class across years
+Clicking the chart rotates which class of expense sits at the bottom of every bar, so
+whichever cost the user is interested in can be brought to a common baseline and compared
+across years.
+*(`RentalChart.MaingGrid_MouseLeftButtonUp` → `SetExpensesDistribution`)*
+
+---
+
+## 5.10 What every chart does the same way
+
+### P5-CHART-1 — Point at any part of a chart and be told what it is
+Every chart in the product — pie, bar and area — shows a tooltip after a short hover
+naming the thing under the pointer and its value, and each report supplies its own
+wording rather than showing a raw number.
+*(`ToolTipGenerator` on `AnimatingPieChart`, `AnimatingBarChart` and `AreaChart`)*
+
+### P5-CHART-2 — Have charts animate rather than jump
+Slices grow into place and change colour smoothly, and bars ripple up rather than
+appearing, so a chart that redraws after a settings change is followed by eye rather than
+re-read from scratch.
+*(the animation-duration properties on both animating charts)*
+
+### P5-CHART-3 — Have negative values drawn sensibly
+A pie draws a negative amount by its size and tells the truth about its sign in the
+tooltip, rather than refusing to draw it or drawing nothing.
+*(`AnimatingPieChart.UpdateChart`)*
+
+### P5-CHART-4 — Have colours chosen for them, consistently
+Categories keep a stable colour derived from their name, so the same category is the
+same colour everywhere it appears; where a report has no colour to offer, one is picked
+so that slices remain distinguishable, and legend text flips between black and white to
+stay readable on its swatch.
+*(`CategoryData.GetColorFromCategoryName`, `ColorAndBrushGenerator`, the random-colour
+helpers in the reports, `ChartLegend`'s luminance test. See Open Question 20.)*
+
+### P5-CHART-5 — Have charts keep up with the data without being asked
+Charts redraw themselves when the underlying list changes, when the window is resized
+and when their tab is brought to the front, and defer work while they are not visible.
+*(`IsVisibleChanged` + `DelayedActions` in every chart; `MainWindow.SetChartsDirty`)*
+
+---
+
+## Phase 5 coverage checklist
+
+Every file in `Reports/` and `Charts/`, plus the two `Views/` files Phase 3 deferred
+here. "Not user-facing" entries are plumbing, shared bases or dead code the user never
+perceives.
+
+### `Reports/` — reports
+
+| File | Class | Status |
+|---|---|---|
+| `NetWorthReport.cs` | `NetWorthReport` | P5-NET-1…P5-NET-8, P5-VIEW-9 — see Open Questions 21, 22 |
+| `NetWorthReport.cs` | `AccountGroup` | P5-NET-4, P5-PORT-6 — the "these accounts, on this date" bundle a cash drill-down carries |
+| `AccountSummaryReport.cs` | `AccountSummaryReport` | P5-ACCT-1…P5-ACCT-3 — see Open Questions 7, 8 |
+| `CashFlowReport.cs` | `CashFlowReport` | P5-FLOW-1…P5-FLOW-7 |
+| `CashFlowReport.cs` | `CashFlowCell`, `CashFlowColumns` | P5-FLOW-1, P5-FLOW-5 — the per-cell figure plus the entries behind it |
+| `PortfolioReport.cs` | `PortfolioReport` | P5-PORT-1…P5-PORT-9, and the in-register portfolio of P3-INV-4/5 — see Open Questions 10, 23, 24 |
+| `TaxReport.cs` | `TaxReport` | P5-TAX-1…P5-TAX-7 — see Open Questions 11, 12 |
+| `W2Report.cs` | `W2Report` (namespace `Walkabout.Taxes`) | P5-TAX-8, P5-TAX-9, P5-TAX-10 |
+| `FutureBillsReport.cs` | `FutureBillsReport` | P5-BILLS-1…P5-BILLS-4 |
+| `UnacceptedReport.cs` | `UnacceptedReport` | P5-ATTN-1 |
+| `RetirementPlan.cs` | `RetirementPlanReport` | P5-PLAN-1…P5-PLAN-8 |
+| `RetirementPlan.cs` | `Simulation` (nested) | P5-PLAN-2…P5-PLAN-7 — the year-by-year model and the charts it renders |
+| `RetirementPlan.cs` | `RetirementFunds` (nested) | P5-PLAN-7 — the simulated pot of money and the tax rules applied to it; see Open Questions 13, 14, 15 |
+| `RetirementPlan.cs` | `RetirementPlanState`, `SocialSecurityAmount` | P5-VIEW-11, P5-PLAN-8 |
+| `RetirementPlan.cs` | `TableHelper` | **Not user-facing** — a two-cell row helper for the summary table |
+| `Reports.cs` | `Report` (abstract base) | P5-VIEW-11, P5-VIEW-12, P5-VIEW-13, P5-VIEW-7 — state persistence, currency normalisation, the trailer and the shared CSV-export flow; see Open Question 25 |
+| `IReport.cs` | `IReport`, `IReportState`, `IReportWriter`, `StateSource` | **Not user-facing** — the contract every report and every output format implements |
+| `IReport.cs` | `ReportInterval` (enum) | **Not user-facing here** — its only consumer is `ReportRangeDialog`'s interval combo (Phase 4's P4-REPORT-2), which that dialog's only caller hides. No report uses it; the cash-flow report has its own two strings. See Open Question 32 |
+| `IReport.cs` | `NullReportWriter` | **Not user-facing** — lets a report be run purely to compute totals; used by the future-bills report to get its headline figure before writing anything |
+
+### `Reports/` — output formats
+
+| File | Class | Status |
+|---|---|---|
+| `FlowDocumentReportWriter.cs` | `FlowDocumentReportWriter` | P5-VIEW-1, P5-VIEW-5 — the on-screen format, including the expandable groups and a manual column-width fix-up |
+| `FlowDocumentReportWriter.cs` | `NestedTableState`, `ColumnWidthExtensions` | **Not user-facing** — nested-table bookkeeping and per-column min/max width carriers |
+| `HtmlDocumentReportWriter.cs` | `HtmlDocumentReportWriter` | P5-VIEW-6 — see Open Questions 2, 3 |
+| `CsvReportWriter.cs` | `CsvReportWriter` | P5-VIEW-7 (portfolio only — the cash-flow report writes its own CSV by hand) |
+
+### `Charts/`
+
+| File | Status |
+|---|---|
+| `AnimatingPieChart.xaml` + `.xaml.cs` (`LovettSoftware.Charts`) | P5-NET-3, P5-PORT-1, P5-PIE-1, P5-CHART-1…P5-CHART-3 |
+| `AnimatingBarChart.xaml` + `.xaml.cs` (`LovettSoftware.Charts`) | P5-NET-5, P5-PLAN-4, P5-PLAN-5, P5-LOAN-1, P5-HIST-1, P5-HIST-5, P5-CHART-1, P5-CHART-2 — see Open Question 26 |
+| `AreaChart.cs` (`LovettSoftware.Charts`) | P5-TREND-1…P5-TREND-7 — the shaded area renderer behind the trend graph |
+| `CategoryChart.xaml` + `.xaml.cs` | P5-PIE-1…P5-PIE-6 — see Open Questions 18, 20 |
+| `CategoryData.cs` | P5-PIE-1, P5-CHART-4 — the per-slice view model and the name-derived colour |
+| `ChartData.cs` (`ChartData`, `ChartDataSeries`, `ChartDataValue`) | the shape every chart consumes; `ChartData.Export` is P5-TREND-8, P5-HIST-5, P5-PIE-6 — see Open Question 16 |
+| `ChartData.cs` (`ChartCategory`) | **Not user-facing on its own** — the per-series name and colour the trend graph attaches and the area chart reads back when drawing each band and its legend label |
+| `ChartLegend.xaml` + `.xaml.cs` | P5-PIE-2, P5-PIE-3, P5-PIE-4 |
+| `HistoryBarChart.xaml` + `.xaml.cs` (`HistoryBarChart`, `HistoryChartColumn`, `HistoryDataValue`, `ColumnLabel`, `HistoryRange`) | P5-HIST-1…P5-HIST-5 — see Open Question 17 |
+| `LoanChart.xaml` + `.xaml.cs` | P5-LOAN-1; its `OnColumnClicked` and `OnColumnHover` are **empty**, one with a "todo: any kind of drill down or pivot possible here?" comment — the loan chart is the one chart you cannot click into |
+| `RentalChart.xaml` + `.xaml.cs` | P5-RENT-1, P5-RENT-2 |
+| `RentalChartColumn.xaml` + `.xaml.cs` | P5-RENT-1, P5-RENT-2 — one year's income bar and segmented expense bar |
+| `RentalData.cs` | P5-RENT-1 — one year's income and its five expense classes |
+| `FormattingConverter.cs` (`NumberConverter`) | **Not user-facing** — formats the trend graph's axis labels as currency without a symbol |
+| `Styles.cs` (`StyleResources`) | **Dead** — loads a `Charts/styles.xaml` that does not exist, and nothing calls it. See Open Question 19 |
+| `Charts/Icons/Area.png`, `Table.png` | **Dead** — declared as resources in the project file, referenced by no code or markup; they look like the icons of a chart-type switcher that no longer exists |
+| `Charts/Icons/grab.cur`, `grabbing.cur` | **Dead** — embedded cursors referenced nowhere; no chart supports dragging |
+| `Charts/Icons/Excel.png` | **Dead copy** — the export button actually uses `Icons/Excel.png` at the project root; this second copy is referenced by nothing |
+
+### `Views/` files deferred here by Phase 3
+
+| File / member | Status |
+|---|---|
+| `GraphGenerators.cs` — `TransactionGraphGenerator` | P5-TREND-1, P5-TREND-2 |
+| `GraphGenerators.cs` — `BrokerageAccountGraphGenerator` | P5-TREND-3 — the day-by-day historical market value, including stock splits and cash-in-lieu rounding |
+| `GraphGenerators.cs` — `SecurityGraphGenerator` | P5-TREND-4 |
+| `FlowDocumentView` — the report-hosting path | P5-VIEW-1, P5-VIEW-3…P5-VIEW-6, P5-VIEW-10 |
+| `FlowDocumentView.ViewState` / `ReportViewState` | P5-VIEW-11 in intent only — it reconstructs a report by type and re-applies its state, but `DeserializeViewState` returns a bare `ViewState` and `ReportState` is marked not-to-be-serialized, so nothing survives a restart this way; the per-report XML files of P5-VIEW-11 are the mechanism that works. See Open Question 5 |
+| `FlowDocumentView.AddControl` / `AddWidget` | P5-TAX-7 — how a report puts its own button into the strip above the document |
+| `FlowDocumentView.Commit`, `Caption`, `SelectedRow`, `ActivateView`, `BeforeViewStateChanged`, `IsQueryPanelDisplayed` | **Not user-facing** — interface members implemented as no-ops or plain storage; `Caption` returns empty so the report view contributes no window title, and `BeforeViewStateChanged` is declared but never raised |
+
+### Supporting files owned by other phases
+
+| File | Status |
+|---|---|
+| `View Selectors/ReportsControl.*` | Phase 3's P3-PANEL-1/P3-PANEL-2; what each report shows in it is recorded per report above. See Open Question 27 |
+| `View Selectors/RetirementControl.*` | Phase 3's P3-PANEL-3/P3-PANEL-4; what the plan does with those answers is P5-PLAN-* |
+| `Controls/TrendGraph.*` | P5-TREND-1…P5-TREND-8 for its behaviour; the control itself is `Controls/` and was reached through Phase 2's P2-PANE-1/2 |
+| `MyMoney.Business/Payments.cs` | P5-BILLS-1, P5-BILLS-2 — **not covered by Phase 1**, which read only `Money.cs` and `Money_Loans.cs`. See Open Question 1 |
+| `Setup/ChangeInfoReport.cs` | **Out of scope here** — a report-shaped page rendered in the same viewer, belonging to Phase 2's P2-HELP-4 / Phase 8 |
+| `Taxes/` (`TaxCategoryCollection`, `CapitalGainsTaxCalculator`, `TxfExporter`, `FederalTaxes`, `StateTaxes`) | **Phase 7** — read only far enough to describe what the tax and retirement reports show |
+
+---
+
+## Open questions from Phase 5
+
+Things a human should double-check, because the call was a judgement rather than
+obvious from the code — and, where noted, because they look like real defects.
+
+1. **Setting a category's frequency removes it from the future-bills report entirely.**
+   `Payments.ComputeRecurrence` starts `this.Frequency = this.Category.Frequency;` and
+   then does all of its work inside `if (this.Frequency == CalendarRange.None)`. Every
+   other path falls through to the final `return false`. So a category the user has
+   explicitly marked as monthly or quarterly (Phase 1's P1-BUDGET-2) is *excluded* from
+   the report, while one left unmarked is included if the maths says so — the exact
+   opposite of what the guard two lines above (`if (Transactions.Count < 3 && Frequency
+   == None) return false;`) implies was intended. P5-BILLS-2 describes the detection that
+   actually runs. Also in the same method: the "remove outliers and recompute the cleaner
+   standard deviation" block recomputes from `this.Transactions`, the *unfiltered* list,
+   so it always produces exactly the same numbers and the outlier removal has no effect
+   on the result. This whole file sits in `MyMoney.Business` and was not in Phase 1's
+   scope (which read only `Money.cs` and `Money_Loans.cs`), so this is the first phase to
+   have looked at it.
+
+2. **"Export HTML" does not wait for the report to finish writing.**
+   `FlowDocumentView.GenerateHtmlReport` calls `this.report.Generate(htmlWriter)` without
+   awaiting the returned task, then immediately calls `Close()` and lets the `using` block
+   dispose the underlying writer. Four of the nine reports — net worth, account summary,
+   portfolio and the retirement plan — do real asynchronous work inside `Generate` (they
+   await stock prices), so the file is closed while they are still writing to it. The
+   identical bug was already found and fixed in `PortfolioReport.Export`, which now
+   carries an explicit comment explaining why it blocks instead (*"rather than discarding
+   the Task, which let the `using` block close the writer before InternalGenerate finished
+   writing to it"*) — the viewer's own copy of the pattern was not fixed. P5-VIEW-6
+   describes the intent. Worth exporting a net-worth report by hand to see what actually
+   lands on disk.
+
+3. **An exported report needs the internet to look right, and loses its charts.**
+   `HtmlDocumentReportWriter`'s `<head>` links Bootstrap from a CDN, so an exported file
+   opened offline is unstyled. `WriteElement` is a no-op, so every chart, and every colour
+   swatch beside a net-worth row, is simply absent; `WriteHyperlink` writes a plain `span`
+   with a comment saying *"not supported since there is no where to link to"*; and the
+   expandable groups are no-ops, so the detail rows of the cash-flow, W-2 and portfolio
+   reports come out shifted one column left (the expander cell the on-screen writer
+   inserts for them is never written). A redesign that wants a shareable report should
+   treat this as a rewrite, not a tweak.
+
+4. **Only two of the nine reports can be exported to a spreadsheet, and the rest don't say
+   so.** `ShowExportButton` is called only by `CashFlowReport` and `PortfolioReport`.
+   Every other report inherits `Report.Export`, which throws `NotImplementedException`,
+   or overrides it to throw explicitly (`FutureBillsReport`, `UnacceptedReport`,
+   `W2Report`). Because the button is never shown for them the exception is unreachable
+   today — but see Open Question 21 for the one place where that is a single character
+   away from being reachable.
+
+5. **A report is not restored on restart, despite two mechanisms that look like they
+   should.** `Report.LoadState`/`SaveState` do work — one XML file per report type in a
+   `Reports` folder beside the money file — and are what P5-VIEW-11 describes. The other
+   mechanism, `FlowDocumentView.ViewState`/`ReportViewState`, is a dead end: the class
+   carries a `// Todo: serialize this if we can, so restart can show the same report`
+   comment, its only property is `[XmlIgnore]`, and `DeserializeViewState` returns a bare
+   `ViewState`. So the app never reopens on the report the user was reading, which is the
+   same "most surfaces don't remember where the user was" problem Phase 3 raised as its
+   Open Question 2. Additionally, `PortfolioReport`'s state holds `Predicate<Account>`
+   values that cannot be serialized at all — acknowledged in a comment in the code,
+   which relies on `SaveState`'s catch-everything to swallow the failure.
+
+6. **Nothing prints a report.** The only `Print` command binding in the product is in
+   `AttachmentDialog`. There is no print menu item, button, keyboard shortcut or
+   context-menu entry for reports, and `FlowDocumentView` adds none. (The underlying WPF
+   document viewer has its own built-in print handling, so Ctrl+P with focus inside the
+   document may do something, but the product neither advertises nor tests it.) For a
+   personal-finance product whose reports are mostly things you hand to an accountant,
+   this is a conspicuous gap and a deliberate decision for the redesign.
+
+7. **The account-summary report prints every balance with the local currency symbol.**
+   `AccountSummaryReport.WriteRow` formats with `balance.ToString("C2")`, which uses the
+   machine's current culture, while printing the account's real currency code in a
+   separate column — so a euro account reads `$1,234.00  EUR`. Every other report routes
+   money through `Report.GetFormattedNormalizedAmount`, which uses the chosen currency's
+   culture. P5-ACCT-2 describes the currency column, not the symbol.
+
+8. **A mixed-currency account type silently contributes nothing to the total.** In
+   `WriteAccountSummary`, if two accounts of the same kind report different currency
+   symbols the local `various` flag is set and the method returns `0` instead of its real
+   subtotal — so that whole account type drops out of the grand total with no warning,
+   and because `commonSymbol` is a field shared across types, one odd account anywhere
+   can suppress the "All Accounts" row for everything. Worth deciding what the report
+   *should* say; it currently says less than it knows.
+
+9. **The cash-flow CSV is not the cash-flow report.** `Export` writes three groups —
+   Income, Expenses, Investments — and omits the Unknown group and the Total row that the
+   on-screen report shows, and it flips the sign of expenses. So the exported file and
+   the report on screen do not agree, and the exported file does not balance. P5-FLOW-7
+   records that an export exists without claiming it matches.
+
+10. **The cash-balances drill-down writes a malformed table.**
+    `PortfolioReport.WriteSummaryRow` puts its final `writer.EndCell()` *inside*
+    `if (col3 != null)`, so whenever the third column is empty — which is every row of the
+    cash-balances report, since `WriteCashBalanceSummary` passes `null` — a cell is opened
+    and never closed. It is survivable in the on-screen writer (which treats end-of-row as
+    end-of-cell) but it is plainly not what was meant, and the CSV and HTML writers both
+    count cells. P5-PORT-6 describes the intent.
+
+11. **The tax report closes one table too many when there are no long-term sales.**
+    `GenerateCapitalGains` ends the short-term table inside its own `if`, opens the
+    long-term table inside the next `if`, and then calls `writer.EndTable()`
+    unconditionally at the end. A tax year with short-term sales but no long-term ones
+    therefore ends a table that isn't open; a year with neither ends one that was never
+    started. Harmless in the on-screen writer, which resets its state, but it is an
+    unbalanced document and the HTML writer counts depth and throws *"You closed too many
+    tags"*. Combined with Open Question 2, "export this tax report as a web page" is
+    unlikely to work.
+
+12. **Restoring the tax report's saved settings puts the wrong value in the dropdown.**
+    `TaxReport.ApplyState` sets the *report type* combo (All Accounts / Investments Only)
+    from `this.consolidateOnDateSold`, the *consolidation* flag — `box.SelectedIndex =
+    this.consolidateOnDateSold ? 0 : 1;`. It should be reading `investmentsOnly`, and the
+    index is inverted relative to the order the items are added. So reopening the tax
+    report can show a report type the user didn't choose, and the consolidation setting it
+    did restore isn't reflected in its own combo at all. P5-TAX-4 and P5-TAX-5 describe
+    the settings, not their restoration.
+
+13. **The retirement plan's required-minimum-distribution age and its distribution table
+    disagree.** `Simulation` computes `rmdAge` as 73 or 75 from the user's birth year and
+    uses it to decide *when* distributions start, but the table that decides *how much*
+    lives on `RetirementFunds`, whose own `RmdAge` field is hard-coded to 75 and never set
+    from the simulation's value. For anyone born before 1960 the simulation therefore
+    triggers a distribution at 73 and then computes it as zero, for two years. P5-PLAN-7
+    describes the intent.
+
+14. **A state-tax figure in the retirement plan is computed from the wrong amount.**
+    In `PayIncomeTaxRecursively`'s tax-deferred branch, the federal tax is computed on
+    `amount` (the extra withdrawal being made) but the state tax on the same line is
+    computed on `income` — the original parameter — so the state tax charged on a
+    gross-up withdrawal is wrong in both directions depending on the sizes involved. One
+    identifier; adjacent lines. Given the whole point of the Roth comparison (P5-PLAN-6)
+    is comparing total tax paid, this is worth checking before anyone acts on the answer.
+
+15. **Closed brokerage and money-market accounts are still counted in the retirement
+    plan.** `CalculatePortfolioBalance` tests
+    `!account.IsClosed && account.Type == Retirement || account.Type == Brokerage ||
+    account.Type == MoneyMarket` — which, by C# precedence, is
+    `(!closed && Retirement) || Brokerage || MoneyMarket`. The closed check only applies
+    to retirement accounts. The same expression appears twice in the method, once for cash
+    and once for holdings. So a closed brokerage account's balance is included in the
+    money the plan assumes the user has.
+
+16. **Exporting a multi-series chart can fail outright.** `ChartData.Export` takes its row
+    count from the *first* series (`this.Series[0].Values.Count`) and then indexes every
+    other series with the same index. The trend graph's comparison series (P5-TREND-7)
+    are built from different date ranges and routinely have different lengths, so
+    exporting a trend graph with more than one series is an index-out-of-range exception
+    with nothing catching it. (The same method also calls `Path.GetTempFileName()` and
+    then appends `.csv` to the name, so it leaves an orphaned empty temp file behind on
+    every export.)
+
+17. **The history chart's trend line never skips the incomplete first period.**
+    `ComputeLinearRegression` reads `if ((c == last || c == last) && ...)` — the same
+    comparison twice, where the local `first`, assigned two lines earlier and otherwise
+    unused, was obviously meant. The stated intent in its own comment is to ignore the
+    first *and* last bucket when they look short on data; only the last one is ignored.
+    A partial first year therefore drags the trend line. P5-HIST-2 describes the feature,
+    not the arithmetic.
+
+18. **Transfers inside an itemised transaction are charted with the wrong amount.** In
+    both `CategoryChart.Tally` and its must-be-kept-in-sync twin `ComputeNetAmount`, the
+    split loop passes `amount` — the running unallocated remainder — instead of
+    `subtotal` when the split line is a transfer, while every other branch passes the
+    line's own figure. So a transaction split between a transfer and ordinary categories
+    contributes the wrong number to the transfers slice. The two methods also carry
+    explicit "ALERT: this method has to be kept in sync with…" comments in both
+    directions, which is itself a redesign signal.
+
+19. **A chart style sheet is loaded that does not exist.** `Charts/Styles.cs` builds a
+    `ResourceDictionary` from `pack://application:,,,/MyMoney;component/Charts/styles.xaml`
+    inside a `try`/`catch` that comments the failure as *"not a WPF app"* — but there is
+    no `Charts/styles.xaml` anywhere in the repository, so the dictionary is always null
+    and `GetResource` would throw on any call. Nothing calls it. Pure dead code, listed
+    because its presence implies chart styling lives somewhere it does not.
+
+20. **Drawing the expenses pie chart can make the data file dirty.**
+    `CategoryChart.Tally` assigns `c.Root.Color = cd.Color.ToString()` for any category
+    that has no colour of its own — a write to the persisted model performed as a side
+    effect of rendering a chart. The user can therefore be told they have unsaved changes
+    purely because they looked at a chart. Whether persisting the generated colours is
+    desirable is a design decision (it does make P5-CHART-4's "same category, same colour"
+    stick across sessions); doing it from a draw path is not.
+
+21. **The net-worth report's export hook is subscribed with the wrong operator, which is
+    the only thing keeping it from crashing.** `NetWorthReport.Register()` ends with
+    `this.panel.ReportExport -= this.OnReportExport;` — an unsubscribe where every other
+    report writes `+=` — and `OnReportExport` is a one-line
+    `throw new NotImplementedException();`. The report also never calls
+    `ShowExportButton()`, so the button isn't there to press. Two independent accidents
+    are hiding one unfinished feature. Fixing either one alone would crash the app.
+
+22. **The net-worth pie shows liabilities as positive slices while saying it doesn't.**
+    The code carries the comment *"liabilities are not included in the pie chart because
+    that would be confusing"* and indeed omits credit-card balances — but the very next
+    call, `WriteLoanAccountRows(writer, data, color, true)`, adds every liability loan to
+    the same pie data with `Math.Abs(balance)`. So a mortgage appears as a positive slice
+    of what the chart presents as net worth. Also in the same report: asset and loan rows
+    are added to the pie with no drill-down attached, so those slices are the only ones
+    that do nothing when clicked, with no indication of the difference.
+
+23. **The portfolio report's "as of" line is a day earlier than its heading.**
+    `InternalGenerate` writes the heading with `ReportDate` and then, whenever that isn't
+    today, a sub-heading reading *"As of "* plus `ReportDate.AddDays(-1)`. The two lines
+    of the same report disagree by a day. Whether the holdings are as at the start or the
+    end of the chosen date is a real question a user would ask, and the report answers it
+    twice, differently.
+
+24. **A date picker the portfolio report can embed in its own heading is unreachable.**
+    `InternalGenerate` builds an inline `DatePicker` (with an automation name, suggesting
+    it was once tested) under `if (this.flowwriter != null && this.panel == null)` — but
+    `panel` is assigned in `OnSiteChanged`, which runs whenever the report is given a
+    service provider, i.e. always. Dead in practice. The date is set from the options
+    panel instead (P5-VIEW-2).
+
+25. **The shared CSV export reports failures under the wrong name.**
+    `Report.ExportReportAsCsv` offers a `.csv` save dialog, and on failure shows a message
+    box titled *"Error Exporting .txf"* — copied from the tax report's TurboTax export
+    next to it. A user exporting the cash-flow report to a spreadsheet who hits an error
+    is told about a file format they've never heard of. It also opens the finished file
+    via `InternetExplorer.OpenUrl`, which is a differently-named helper for the same shell
+    "open this file" the charts use via `NativeMethods.ShellExecute` — two ways of doing
+    one thing.
+
+26. **The bar chart throws a bare exception on data it doesn't like.**
+    `AnimatingBarChart.OnDataChanged` throws `new Exception(...)` if the series it is
+    given have different lengths or different labels. Every current caller happens to
+    satisfy it, but this is a UI control throwing an unhandled, untyped exception from a
+    property assignment — the same class of thing as the crash Phase 3's Open Question
+    and `CLAUDE.md` record for `AccountsControl`. Any new report that feeds it uneven
+    series takes the app down.
+
+27. **The reports options panel's help topic is the wrong one.**
+    `ReportsControl.xaml` declares `help:HelpService.HelpKeyword="Accounts/BalancingAccounts/"`
+    — the balancing-an-account topic, copied from `BalanceControl`. Pressing F1 in the
+    report settings panel opens documentation about reconciling a statement. Relatedly,
+    of the nine reports only seven set a help topic when they open: the cash-flow and
+    unaccepted reports set none, so F1 there falls back to whatever the shell offers.
+    Same convention-drift pattern Phase 4 documented for dialogs.
+
+28. **A discarded report writer sits in the unaccepted-transactions command.**
+    `MainWindow.OnCommandReportUnaccepted` constructs a `FlowDocumentReportWriter` over the
+    view's document and then never uses it — `GenerateReport` creates its own. It is the
+    only one of the nine report commands that does this. Harmless, but it clears the
+    document twice and reads as a half-finished edit.
+
+29. **The report options panel is rebuilt every time a report is generated.**
+    `MainWindow.GetService(typeof(ReportsControl))` calls `ShowReportsPanel()`, which
+    disposes the old panel and constructs a new one — so asking for the panel is what
+    makes it appear, and every report gets a fresh one. That is why the panel has
+    `Hide…` methods but no matching `Show…` for the date and currency rows: each report
+    hides what doesn't apply to it and relies on the next report getting a clean panel.
+    It works, but "getting a service has a visible side effect" is a pattern a redesign
+    should not inherit, and it is the reason every report must re-register its event
+    handlers on every generation (which all of them do by unsubscribing twice first —
+    `Unregister(); … Unregister(); Register();` appears verbatim in four reports).
+
+30. **Where the Phase 7 line was drawn.** `TaxReport` and `W2Report` live in `Reports/`
+    and are captured here as documents the user reads (P5-TAX-*). Everything behind them —
+    `Taxes/TaxCategoryCollection`, `CapitalGainsTaxCalculator`, `TxfExporter`,
+    `FederalTaxes`, `StateTaxes` and the state/federal rate tables the retirement plan
+    also uses — is Phase 7 and was read only far enough to describe what appears on
+    screen. If Phase 7 finds a user-visible decision that only exists inside those
+    classes, it belongs there. The same line runs through P5-PLAN-7: the retirement plan's
+    tax modelling is described as "rules applied for them", not enumerated.
+
+31. **Where the Phase 6 line was drawn.** Nothing in this phase imports anything, but three
+    things write files — the CSV exports (P5-VIEW-7), the HTML export (P5-VIEW-6) and the
+    chart exports (P5-TREND-8) — and all three are captured here as report affordances
+    rather than as export formats, on the basis that Phase 6's scope is `Importers/`,
+    `Ofx/` and the storage formats. The `.txf` tax export (P5-TAX-7) is the one case where
+    the file's contents genuinely matter to a user, and those contents are Phase 7's.
+
+32. **There are four overlapping notions of "a period" in this one feature area, and the
+    one in the shared interface is the least used.** `IReport.cs` defines
+    `enum ReportInterval { Days, Months, Years }`, which reads like the intended shared
+    vocabulary. No report uses it — its only consumer is `ReportRangeDialog`'s interval
+    combo, which that dialog's sole caller collapses (Phase 4's Open Question 16), so it
+    is reachable in name only. Meanwhile the cash-flow report buckets by two hard-coded
+    strings, the history chart has `HistoryRange` (the same three members, different
+    semantics), and the trend graph has `CalendarRange` (ten members). A redesign that
+    wants "choose a period" to mean one thing has four definitions to reconcile.
