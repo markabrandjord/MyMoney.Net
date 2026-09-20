@@ -3,15 +3,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Startup="MyApplicationStartup"             
              DispatcherUnhandledException="OnUnhandledException"
-             xmlns:ui="http://schemas.modernwpf.com/2019">
-             
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:mwpf="http://schemas.modernwpf.com/2019">
+
 
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ui:ThemeResources />
-                <ui:XamlControlsResources />
-                <ui:IntellisenseResources/>
+                <mwpf:ThemeResources />
+                <mwpf:XamlControlsResources />
+                <mwpf:IntellisenseResources/>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+                <ResourceDictionary Source="Themes/DialogResources.xaml"/>
                 <ResourceDictionary Source="Themes/generic.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

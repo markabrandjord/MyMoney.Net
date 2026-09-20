@@ -213,6 +213,13 @@ namespace Walkabout.UITests.Basics
             // cleanup above) - a real app crash must fail the test, not be silently absorbed.
             // See AppCrashGuard's own comment for why this check exists.
             AppCrashGuard.AssertNoCrashOccurred(BasicsAppSession.MainWindow, ref BasicsAppSession.LastCheckedLogLength);
+
+            // Same rationale, for purely-visual bugs AppCrashGuard can't see (Phase 1's own
+            // post-mortem: 4 real bugs, 0 exceptions). Checks the whole main window is not a
+            // single flat color - a coarse, cheap, always-applicable smoke check; per-dialog
+            // AssertNotClipped/AssertSettledWithin checks are added explicitly by the tests that
+            // open those dialogs, since they need to know which theme is currently active.
+            VisualGuard.AssertNotBlank(BasicsAppSession.MainWindow, expectDark: false);
         }
     }
 }

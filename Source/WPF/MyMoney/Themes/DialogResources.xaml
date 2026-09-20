@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      App-owned aliases for the two ModernWpf-only brush keys BaseDialog.cs used to reference
+      directly (SystemControlPageBackgroundChromeLowBrush / SystemControlPageTextBaseHighBrush).
+      Both exist only in ModernWpf.dll (confirmed via assembly resource-key scan, 2026-09-20) -
+      referencing them directly meant every dialog's background/foreground would silently break
+      the day ModernWpfUI is removed. These aliases point at WPF-UI's real equivalents
+      (ApplicationBackgroundBrush / TextFillColorPrimaryBrush, confirmed present in the installed
+      Wpf.Ui.dll 4.3.0) so BaseDialog no longer depends on ModernWpf at all.
+    -->
+    <SolidColorBrush x:Key="DialogBackgroundBrush" Color="{DynamicResource ApplicationBackgroundColor}"/>
+    <SolidColorBrush x:Key="DialogForegroundBrush" Color="{DynamicResource TextFillColorPrimary}"/>
+</ResourceDictionary>

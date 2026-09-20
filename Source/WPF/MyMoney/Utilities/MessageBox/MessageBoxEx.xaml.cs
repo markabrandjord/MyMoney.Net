@@ -183,7 +183,15 @@ namespace Walkabout.Utilities
                 mb.Owner = Application.Current.MainWindow;
                 mb.MaxWidth = SystemParameters.PrimaryScreenWidth * 2 / 3;
                 mb.MaxHeight = SystemParameters.PrimaryScreenHeight * 2 / 3;
-                mb.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                // Was CenterScreen, overriding the XAML's own WindowStartupLocation="CenterOwner"
+                // default and ignoring the Owner set just above for positioning purposes - centered
+                // on the whole physical screen instead of the app window. Went unnoticed while
+                // MainWindow always opened fullscreen (screen center ~= window center); became
+                // visibly disconnected from the app once /nosettings launches windowed (this
+                // session's own change, 2026-09-20). CenterOwner matches the XAML default and keeps
+                // this dialog (and every other MessageBoxEx.Show call site, e.g. "Save Changes")
+                // visually attached to the app window it belongs to.
+                mb.WindowStartupLocation = WindowStartupLocation.CenterOwner;
                 mb.SizeToContent = SizeToContent.WidthAndHeight;
                 mb.Title = title;
                 mb.Message = message;

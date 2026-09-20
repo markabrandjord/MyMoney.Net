@@ -7,9 +7,10 @@
         xmlns:ui="http://schemas.modernwpf.com/2019"
         ui:WindowHelper.UseModernWindowStyle="True"
         ui:ThemeManager.IsThemeAware="True"
-        Title="Attachments" Height="425" Width="800" 
+        Title="Attachments" Height="425" Width="800"
         xmlns:help="clr-namespace:Walkabout.Help"
         AllowDrop="True"
+        WindowStartupLocation="CenterOwner"
         help:HelpService.HelpKeyword="Basics/Attachments/">
     
     <Window.Resources>

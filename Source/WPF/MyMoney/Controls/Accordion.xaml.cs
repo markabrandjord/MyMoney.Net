@@ -102,7 +102,10 @@ namespace Walkabout.Controls
 
             expanderToAdd.Name = id;
             expanderToAdd.IsExpanded = false;
-            expanderToAdd.Margin = new Thickness(0, 0, 0, 3);
+            // No margin - the scoped Expander style (Accordion.xaml) gives each header its own
+            // 1px bottom separator instead, keeping the list flat/cohesive rather than a stack of
+            // separately-spaced cards (see that file's comment for the full history).
+            expanderToAdd.Margin = new Thickness(0);
 
 
             // The expander header is a Grid with 2 columns
@@ -210,9 +213,22 @@ namespace Walkabout.Controls
 
                 if (customHeader != null)
                 {
-                    customHeader.Width = expander.ActualWidth - 30; // rough size of the DropDown adornment
-
-                    double width = customHeader.Width - customHeader.ColumnDefinitions[0].ActualWidth - 8;
+                    // Previously set customHeader.Width = expander.ActualWidth - 30 - a hardcoded
+                    // guess at "the DropDown adornment"'s width, tuned against ModernWpf's old
+                    // chevron and wrong for WPF-UI's differently-sized one (kept for its harmless
+                    // rotation animation - see this file's scoped Expander style in Accordion.xaml).
+                    // Root cause turned out to be one level up, not this method: Accordion.xaml's
+                    // ExpanderToggleButton had no explicit HorizontalAlignment="Stretch" of its own
+                    // (only HorizontalContentAlignment="Stretch", which only governs its own
+                    // content, not its size within its parent Border) - WPF's built-in ToggleButton
+                    // theme baseline defaults HorizontalAlignment to Left, so the button (and
+                    // everything inside it, including this header) sized to its own content instead
+                    // of stretching to the Expander's real width. Confirmed live, 2026-09-20, via a
+                    // full bounds trace through Expander -> HeaderBorder -> ExpanderToggleButton ->
+                    // customHeader - fixed in Accordion.xaml, not here. customHeader's own ActualWidth
+                    // is now reliable without any magic number.
+                    customHeader.UpdateLayout();
+                    double width = customHeader.ActualWidth - customHeader.ColumnDefinitions[0].ActualWidth - 8;
                     width = Math.Min(width, 144);
                     width = Math.Max(width, 0); ;
                     if (width < 34)

@@ -9,10 +9,8 @@
         xmlns:help="clr-namespace:Walkabout.Help"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-        xmlns:ui="http://schemas.modernwpf.com/2019"
-        ui:WindowHelper.UseModernWindowStyle="True"
-        ui:ThemeManager.IsThemeAware="True"
-        mc:Ignorable="d" 
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        mc:Ignorable="d"
         AutomationProperties.AutomationId="MoneyWindow"
         Title="MyMoney" 
         Height="600" 
@@ -119,8 +117,8 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <!-- Menu -->
-        <ColumnDefinition Width="81.296" />
-        <ColumnDefinition Width="314.707"/>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto"/>
         <!-- spacer -->
         <ColumnDefinition Width="*" />
         <!--Toolbar buttons on the right side-->
@@ -246,33 +244,44 @@
 
         <Button x:Name="ButtonSynchronize" Command="p:AppCommands.CommandOnlineSyncAccount" >
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="Download" Margin="0,0,4,0"/>
+            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.ArrowDownload24}" Margin="0,0,4,0"/>
             <TextBlock Text="Download"/>
           </StackPanel>
         </Button>
 
         <Separator Visibility="Hidden" Width="10"/>
 
-        <ui:SplitButton x:Name="PendingChangeDropDown" VerticalAlignment="Center" Click="PendingChangeClicked">
-
-          <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="Save" Margin="0,0,4,0"/>
-            <TextBlock Text="Save"/>
-          </StackPanel>
-
+        <!--
+          SplitButton.Flyout only wires up real behavior when assigned a real
+          System.Windows.Controls.ContextMenu - confirmed 2026-09-20 via reflection on the
+          installed Wpf.Ui.dll (SplitButton.OnFlyoutChanged does `value is ContextMenu`) and a
+          throwaway spike test: a Wpf.Ui.Controls.Flyout compiles (Flyout's property type is
+          `object`) but is silently inert - no error, no popup, the chevron does nothing. An
+          earlier fix worked around this with two plain Buttons and a hand-toggled ui:Flyout,
+          but that lost SplitButton's native joined-button look and its IsOpen tracking desynced
+          after an outside-click dismissal (confirmed via the same spike). Using a real
+          ContextMenu here is both the correct fix and the one WPF-UI actually supports: it
+          restores the native visual and its own open/close/reopen state is handled internally
+          by SplitButton, not by us.
+        -->
+        <ui:SplitButton x:Name="PendingChangeDropDown" Click="PendingChangeClicked">
+          <ui:SplitButton.Content>
+            <StackPanel Orientation="Horizontal">
+              <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Save24}" Margin="0,0,4,0"/>
+              <TextBlock Text="Save"/>
+            </StackPanel>
+          </ui:SplitButton.Content>
           <ui:SplitButton.Flyout>
-            <ui:Flyout x:Name="pendingChangeFlyout" Opening="OnOpeningPendingChangeFlyout">
-              <Border>
-                <Grid >
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                  </Grid.RowDefinitions>
-                  <StackPanel x:Name="pendingStack" Grid.Row="0"></StackPanel>
-                  <Button Grid.Row="1" Command="p:AppCommands.CommandRevertChanges" HorizontalAlignment="Right" Margin="3">Revert Changes</Button>
-                </Grid>
-              </Border>
-            </ui:Flyout>
+            <ContextMenu Opened="OnPendingChangeContextMenuOpened">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="pendingStack" Grid.Row="0"></StackPanel>
+                <Button Grid.Row="1" Command="p:AppCommands.CommandRevertChanges" HorizontalAlignment="Right" Margin="3">Revert Changes</Button>
+              </Grid>
+            </ContextMenu>
           </ui:SplitButton.Flyout>
         </ui:SplitButton>
 
@@ -280,7 +289,7 @@
 
         <Button x:Name="ButtonShowUpdateInfo" Click="OnButtonShowUpdateInfoClick">
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="AllApps" Margin="0,0,4,0"/>
+            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Apps24}" Margin="0,0,4,0"/>
             <TextBlock x:Name="ButtonShowUpdateInfoCaption" Text="View Changes"/>
           </StackPanel>
         </Button>
