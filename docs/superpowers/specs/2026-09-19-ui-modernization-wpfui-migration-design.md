@@ -174,6 +174,73 @@ theme systems' implicit (type-targeted) styles in the same visible surface produ
 corner-radii, accent mechanisms, focus visuals, and padding, because whichever resource
 dictionary is merged last/closest wins per-control, not per-window.
 
+### Phase 1 Finding
+
+**Result: shipped, with corrections below.** "Remove `ModernWpfUI`" (this section's opening line)
+did **not** happen — implementation found that removing it broke 8 files not yet migrated
+(`AppBarButton`/`CommandBar`/`TextBoxHelper`/`DropDownButton` usages) plus `Dark.xaml`/`Light.xaml`
+(below), so `App.xaml` instead merges both libraries under separate `ui:`/`mwpf:` prefixes, with
+WPF-UI merged last so its implicit styles win on every overlapping key. `ModernWpfUI`'s removal is
+still outstanding, deferred to whichever future plan finishes migrating those 8+2 files.
+
+**Phase 1 restyled more than `MainWindow`'s chrome — the whole app, silently.** Found during the
+final whole-branch review (2026-09-20), not anticipated when Task 5 was planned: WPF-UI's
+`ControlsDictionary` and `ModernWpfUI`'s own resources share **52 resource key names** (e.g.
+`DefaultButtonStyle`, `DefaultTextBoxStyle`, `DefaultComboBoxStyle`, `DefaultDataGridStyle`,
+`DefaultDataGridCellStyle`, `DefaultListBoxItemStyle`, `DefaultTreeViewItemStyle`), referenced via
+`BasedOn=`/`Style=` at **54 sites across roughly 20 XAML files** app-wide (`Themes/generic.xaml`,
+`Views/QueryViewControl.xaml`, `Views/Controls/BalanceControl.xaml`, `Dialogs/RenamePayeeDialog.xaml`,
+`Dialogs/CsvImportDialog.xaml`, `Dialogs/ReportRangeDialog.xaml`, `Views/Controls/AccountsControl.xaml`,
+`Views/Controls/PayeesControl.xaml`, `Dialogs/CategoryDialog.xaml`, and others — not an exhaustive
+list). Because WPF-UI is merged last, every one of those sites has been deriving from WPF-UI's
+version of that key since Task 5 landed (`5d7f30dc`), not `ModernWpfUI`'s — Task 5's own
+self-review incorrectly assumed the app was "functionally unchanged from a user's perspective."
+Every `TargetType` matches between the two libraries (both target stock `System.Windows.*` types),
+so this is a **visual/behavioral risk, not a crash risk** — nothing has thrown at load time — but
+it means the true scope of what Phase 1 already touched is the whole app's stock-control styling,
+not just `MainWindow`'s chrome as originally scoped. A short manual smoke pass across a handful of
+dialogs (the ones listed above are a reasonable starting set) is recommended before/alongside
+whatever phase is next, specifically to catch visual regressions this silent restyle may have
+introduced outside `MainWindow`.
+
+**Dark theme required an explicit second call, and initially didn't get one.** `App.xaml`'s
+`ui:ThemesDictionary` is pinned to `Theme="Light"`; WPF-UI's own theming needs
+`Wpf.Ui.Appearance.ApplicationThemeManager.Apply(...)` called explicitly to switch — it does not
+follow `ModernWpf.ThemeManager`. Found and fixed 2026-09-20 (final review, before merge):
+`MainWindow.xaml.cs`'s `OnThemeChanged` now calls both theme managers. Before this fix, toggling
+to Dark (Ctrl+L, a first-class shipped feature) left every WPF-UI-styled stock control rendering
+in Light colors against a dark app background — confirmed via live toggle before and after the
+fix. The Basics FlaUI suite runs under the default Light theme and would not have caught this
+either way; it's a manual-verification-only risk until/unless a FlaUI check for theme-applied
+brush values is added.
+
+**`SplitButton.Flyout` only accepts a real `System.Windows.Controls.ContextMenu`, not a
+`Wpf.Ui.Controls.Flyout`.** Confirmed via reflection on the installed `Wpf.Ui.dll` and via
+`SplitButton`'s real source (both the 4.3.0 tag and the unreleased `main` branch, checked
+2026-09-20): `SplitButton.Flyout` is typed `object` — so assigning a `Flyout` to it compiles — but
+its internal click handler only wires up and opens the popup when the assigned value is a
+`ContextMenu`; anything else is silently inert (no error, no popup). The pending-changes Save
+control (`MainWindow.xaml`'s `PendingChangeDropDown`) now uses a real `ContextMenu` hosting its
+existing summary/Revert-Changes content — see the inline XAML comment at that control for the
+full history (an intermediate two-Button-plus-hand-toggled-Flyout workaround was tried first,
+fixed the "doesn't open" bug but lost the native split-button visual and desynced after an
+outside-click dismissal; superseded by the `ContextMenu` approach, which a throwaway spike
+confirmed avoids both problems). Any future `SplitButton` usage in this app should go straight to
+`ContextMenu`, not rediscover this.
+
+**`Themes/Dark.xaml` and `Themes/Light.xaml` also depend on `ModernWpfUI`** — via their own
+file-local `xmlns:m="http://schemas.modernwpf.com/2019"` prefix and `m:DynamicColor` usage, found
+during Task 6 (not caught by this spec's original `xmlns:ui=`-only file inventory). Neither file
+is merged by `App.xaml` (only `generic.xaml` is) and neither was touched by this plan. Add both to
+the file list for whichever future plan finishes removing `ModernWpfUI` — the true remaining count
+is at least 8 (Scope, above) + these 2.
+
+**Not done, deferred by design:** adopting `FluentWindow`/`ApplicationThemeManager.IsThemeAware`
+for `MainWindow` itself (the direct replacements for `ui:WindowHelper.UseModernWindowStyle` and
+`ui:ThemeManager.IsThemeAware`, removed without replacement in Task 6) — `MainWindow` still derives
+from plain `Window`. Worth its own follow-up task rather than folding into a future phase's
+existing scope, since it's a `MainWindow`-root-level change, not a per-control one.
+
 ### Phase 2 — Simple dialogs first
 
 Convert the lower-risk dialogs first, to establish and document the resource-override

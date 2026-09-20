@@ -1615,11 +1615,17 @@ namespace Walkabout
             if (themeToApply == "Dark")
             {
                 ModernWpf.ThemeManager.Current.ApplicationTheme = ModernWpf.ApplicationTheme.Dark;
+                // WPF-UI's own stock-control styles (Button, TextBox, DataGrid, etc. - see
+                // App.xaml's ui:ControlsDictionary) don't follow ModernWpf's theme manager;
+                // they need WPF-UI's own theme applied too, or they stay rendered in Light
+                // regardless of this setting (found during Task 6's final review, 2026-09-20).
+                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Dark);
                 AppTheme.Instance.SetTheme("Themes/Dark.xaml");
             }
             else
             {
                 ModernWpf.ThemeManager.Current.ApplicationTheme = ModernWpf.ApplicationTheme.Light;
+                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Light);
                 AppTheme.Instance.SetTheme("Themes/Light.xaml");
             }
         }
@@ -2613,7 +2619,7 @@ namespace Walkabout
         }
 
 
-        private void OnOpeningPendingChangeFlyout(Wpf.Ui.Controls.Flyout sender, System.Windows.RoutedEventArgs e)
+        private void OnPendingChangeContextMenuOpened(object sender, RoutedEventArgs e)
         {
             this.pendingStack.Children.Clear();
 
@@ -2628,11 +2634,6 @@ namespace Walkabout
         private void PendingChangeClicked(object sender, object args)
         {
             this.Save();
-        }
-
-        private void OnPendingChangeDropDownToggleClick(object sender, RoutedEventArgs e)
-        {
-            this.pendingChangeFlyout.IsOpen = !this.pendingChangeFlyout.IsOpen;
         }
 
         #endregion
