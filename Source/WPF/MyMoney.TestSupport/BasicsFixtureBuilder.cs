@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using Walkabout.Utilities;
 
 namespace Walkabout.Data
 {
@@ -111,6 +113,28 @@ namespace Walkabout.Data
             money.Transactions.AddTransaction(groceryHistory);
 
             return money;
+        }
+
+        /// <summary>
+        /// Pre-creates one attachment file on disk for a transaction, matching
+        /// AttachmentManager's real directory/file-naming convention (Attachments/
+        /// AttachmentManager.cs's SetupAttachmentDirectory/GetUniqueFileName): a
+        /// "&lt;dbname&gt;.Attachments" folder next to the database file, containing one
+        /// subfolder per account (name sanitized via NativeMethods.GetValidFileName), holding
+        /// files named "&lt;transactionId&gt;&lt;extension&gt;" for a transaction's first
+        /// attachment. Not part of Build() itself (which has no database path to work with) -
+        /// call this separately once the scratch database's path and the target transaction's
+        /// real (post-AddTransaction) Id are both known.
+        /// </summary>
+        public static void WriteAttachmentFile(string databasePath, Account account, long transactionId, string content)
+        {
+            string attachmentDirectory = Path.Combine(
+                Path.GetDirectoryName(databasePath),
+                Path.GetFileNameWithoutExtension(databasePath) + ".Attachments");
+            string accountDirectory = Path.Combine(attachmentDirectory, NativeMethods.GetValidFileName(account.Name));
+            Directory.CreateDirectory(accountDirectory);
+            string fileName = Path.Combine(accountDirectory, transactionId + ".txt");
+            File.WriteAllText(fileName, content);
         }
     }
 }

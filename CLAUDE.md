@@ -348,6 +348,31 @@ scenario tests, project dependency diagram). Quick reference:
   where the grid's default selection already lands on one of the two seeded `TARGET T-1234`
   duplicates as soon as the account opens.
 
+- **`Transaction.HasAttachment` (the grid's paperclip icon) is driven by `AttachmentWatcher`'s
+  background scan, dispatched via `Dispatcher.BeginInvoke(..., DispatcherPriority.Background)`** -
+  it did not visibly flip within 10 seconds in this environment (confirmed by polling and
+  dumping the grid's Attachment-column cell repeatedly). Don't gate a FlaUI test on this icon
+  appearing. It doesn't matter for testing "does the app see this attachment" anyway:
+  `AttachmentDialog.Transaction`'s setter (`LoadAttachments`) does its own synchronous
+  `AttachmentManager.GetAttachments(t)` directory scan every time the dialog opens for a
+  transaction, completely independent of `HasAttachment` - open the dialog directly (via the
+  Attachment column's edit-mode button, `TransactionsView.CommandScanAttachment`) and it finds a
+  pre-seeded file regardless of whether the icon ever appeared. Transaction Id *is* confirmed
+  stable across a real SQLite save/reload round-trip (checked directly, in case that was the
+  culprit) - it wasn't.
+
+- **A non-modal, owned `Window.Show()` (e.g. `AttachmentDialog`) can be completely invisible to
+  UIA desktop-enumeration**, even scoped by `ByProcessId`, while a screenshot proves it's
+  genuinely rendered on screen. `automation.GetDesktop().FindAllChildren(...)` and
+  `Application.GetAllTopLevelWindows(...)` are the same underlying UIA mechanism (confirmed from
+  FlaUI's own source), so neither is an independent check against the other - this is a
+  documented, known-flaky UIA path (FlaUI#57/#239), not something specific to native common
+  dialogs despite the flaui-wpf-testing skill's reference file being framed around those. The
+  fix: raw Win32 `EnumWindows` via P/Invoke, bypassing UIA's desktop-children enumeration
+  entirely (`Source/WPF/UITests/Basics/Win32WindowFallback.cs`, lifted from the skill's
+  `references/native-dialogs.md`) - finds the window by HWND reliably, then everything else
+  (patterns, `FindFirstDescendant`, etc.) works completely normally on the wrapped element.
+
 - **`Splits`/`Transfer` gotchas, found writing `SplitsAndTransfersTests.cs`:**
   - `Splits.Unassigned`/`HasUnassigned` are not auto-recomputed when you add a split or set a
     split's `Amount` in a headless (no WPF databinding) scenario - `Split.OnAmountChanged` is an

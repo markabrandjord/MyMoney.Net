@@ -77,6 +77,76 @@ namespace Walkabout.UITests.Basics
             return (scratchPath, displayName);
         }
 
+        /// <summary>
+        /// Same as OpenFreshDatabase, but also pre-creates one attachment file on disk for the
+        /// fixture's "AMC THEATRES 1234" transaction (BasicsFixtureBuilder.WriteAttachmentFile),
+        /// for the Attachments FlaUI tests. Kept separate from OpenFreshDatabase (rather than
+        /// adding this to every test's fixture) since only the Attachments tests need the extra
+        /// disk I/O, and because it needs the transaction's real (post-AddTransaction) Id, which
+        /// OpenFreshDatabase's plain (ScratchPath, RegisteredName) return doesn't expose.
+        /// </summary>
+        internal static (string ScratchPath, string RegisteredName, long AttachmentTransactionId) OpenFreshDatabaseWithAttachment(string displayName)
+        {
+            string scratchPath = Path.Combine(Path.GetTempPath(), $"BasicsScratch-{Guid.NewGuid():N}.mmdb");
+
+            MyMoney money = BasicsFixtureBuilder.Build();
+
+            Transaction amcTransaction = null;
+            // Plain foreach, not LINQ - Money.cs's collections implement two different
+            // IEnumerable<T> instantiations, which makes LINQ extension methods ambiguous
+            // (CS0411). See CLAUDE.md.
+            foreach (Transaction t in money.Transactions)
+            {
+                if (t.Payee != null && t.Payee.Name == "AMC THEATRES 1234")
+                {
+                    amcTransaction = t;
+                    break;
+                }
+            }
+            if (amcTransaction == null)
+            {
+                throw new InvalidOperationException("BasicsFixtureBuilder no longer seeds an 'AMC THEATRES 1234' transaction - update this helper to match.");
+            }
+
+            var db = new SqliteDatabase();
+            db.DatabasePath = scratchPath;
+            db.Create();
+            db.Save(money);
+
+            BasicsFixtureBuilder.WriteAttachmentFile(scratchPath, amcTransaction.Account, amcTransaction.Id, "Basics attachment FlaUI test file.");
+
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = scratchPath,
+                TestDatabase = true
+            };
+            registry.Save();
+
+            return (scratchPath, displayName, amcTransaction.Id);
+        }
+
+        internal static void CleanUpDatabaseWithAttachment(string scratchPath, string registeredName)
+        {
+            CleanUpDatabase(scratchPath, registeredName);
+            try
+            {
+                string attachmentDirectory = Path.Combine(
+                    Path.GetDirectoryName(scratchPath),
+                    Path.GetFileNameWithoutExtension(scratchPath) + ".Attachments");
+                if (Directory.Exists(attachmentDirectory))
+                {
+                    Directory.Delete(attachmentDirectory, recursive: true);
+                }
+            }
+            catch
+            {
+                // best-effort
+            }
+        }
+
         internal static void CleanUpDatabase(string scratchPath, string registeredName)
         {
             try
