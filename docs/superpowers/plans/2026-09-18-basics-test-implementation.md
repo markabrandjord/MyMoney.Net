@@ -1865,3 +1865,63 @@ Confirm every Basics row's `Status` column reflects its real outcome (`Passing` 
 git add docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
 git commit -m "docs: finalize Basics section status in FlaUI/business-layer scenario catalog"
 ```
+
+---
+
+## Task 17: Consolidate CLAUDE.md's "Things that have been gotten wrong before" section
+
+**Why:** this plan's own Tasks 1-16 added roughly 20+ gotcha entries to `CLAUDE.md` (it
+grew from ~100 lines at the start of this plan to 396+ lines / ~30KB by the end of Task 13
+alone), and `CLAUDE.md` is loaded into context on every session regardless of what's being
+worked on. Not every entry earns that permanent cost equally - some are durable domain/
+architecture knowledge, others are narrow FlaUI test-authoring mechanics only relevant when
+writing more FlaUI tests in this same area.
+
+**Files:**
+- Modify: `CLAUDE.md`
+- Create: `docs/dev/flaui-basics-test-notes.md` (or fold into the `flaui-wpf-testing` skill's
+  own reference material, if that skill is user-level/shared rather than project-local -
+  confirm which before creating a new file)
+
+- [ ] **Step 1: Sort existing entries into two piles**
+
+Re-read every entry added since this plan started (everything from the `new Transaction()`/
+`Transaction(money.Transactions)` gotcha onward) and classify each as:
+- **Durable domain/architecture knowledge** - true regardless of what task someone's doing
+  in this codebase (e.g. `Category.Name` vs `Label`, the parented-`Transaction`-constructor
+  requirement, the dual-`IEnumerable<T>` `CS0411` ambiguity, `RemoveTransfer` only removing
+  one side, `Alias`'s eager regex construction, `Transactions.FindPotentialDuplicate`'s
+  index-based contract). These stay in `CLAUDE.md`.
+- **FlaUI test-authoring mechanics** - only relevant when writing/maintaining FlaUI tests in
+  this specific UI area (e.g. stale cell handles after an edit-mode template swap, the
+  toolbox-section `Expander`/`ExpandCollapse` pattern, `SelectionItem` vs `Click()`
+  reliability, the duplicate-connector Merge button having no `AutomationId`, the Currencies
+  grid's F4/one-Enter sequence, the "Save Changes" prompt on a second `Open()` in one
+  session). These move out.
+
+- [ ] **Step 2: Move the FlaUI-mechanics pile**
+
+Write them to `docs/dev/flaui-basics-test-notes.md` (or the `flaui-wpf-testing` skill's
+reference material - check `C:\Users\MarkBran\.claude\skills\flaui-wpf-testing\references\`
+for where this repo's other FlaUI findings already live before deciding). Preserve the
+reasoning ("why", not just "what") for each - these notes exist so a future FlaUI-test-writing
+session doesn't have to rediscover them the hard way. Add one link line in `CLAUDE.md` at the
+top of its own gotcha section pointing to wherever they landed.
+
+- [ ] **Step 3: Tighten the durable pile in place**
+
+For entries staying in `CLAUDE.md`, cut anything that's really just restating what the code
+already makes obvious, and merge near-duplicate entries discovered across different tasks
+(e.g. multiple entries touching `Transactions.ExecuteQuery`/`Transaction.Matches` semantics
+could likely consolidate into one).
+
+- [ ] **Step 4: Verify and commit**
+
+Confirm `CLAUDE.md` still reads coherently top to bottom (no dangling references to entries
+that moved), and that the new linked doc's content isn't duplicated back in `CLAUDE.md`. Run
+`dotnet build`/`dotnet test` is not needed here (docs-only change).
+
+```bash
+git add CLAUDE.md docs/dev/flaui-basics-test-notes.md
+git commit -m "docs: consolidate CLAUDE.md gotchas, move FlaUI-specific mechanics to a linked doc"
+```
