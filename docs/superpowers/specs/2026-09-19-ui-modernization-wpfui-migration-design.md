@@ -246,6 +246,50 @@ existing scope, since it's a `MainWindow`-root-level change, not a per-control o
 Convert the lower-risk dialogs first, to establish and document the resource-override
 pattern/checklist before tackling the higher-risk cases in Phase 3.
 
+### Phase 2 Planning Notes (forward-looking expert panel, 2026-09-20)
+
+Before any Phase 2 implementation started, a two-panelist review (a WPF-UI/lepoco developer
+expert and a Fluent UI/UX expert, working independently from the same real material: live
+screenshots, the 24-file `Dialogs/` directory, and this app's own user docs) evaluated the actual
+scope. Both panelists' full reports are the authority here; this is a synthesis.
+
+**Real scope is smaller than "24 dialogs," but there's a shared landmine.** Only 5 dialog XAMLs
+reference `ModernWpf` directly (`AttachmentDialog`, `CategoryDialog`, `MoneyFileImportDialog`,
+`OnlineAccountDialog`, `PasswordWindow`) — the other 19 mostly need re-verification, not rework.
+But `Dialogs/BaseDialog.cs` (every dialog's shared base) references 4 resource keys
+(`SystemControlPageBackgroundChromeLowBrush`, `SystemControlPageTextBaseHighBrush`,
+`SystemControlPageBackgroundChromeMediumLowBrush`, `DefaultListViewItemStyle`) confirmed present
+**only** in `ModernWpf.dll`, never in `Wpf.Ui.dll` — verified by scanning both assemblies. These
+resolve fine today because `ModernWpfUI` is still referenced, but the moment it's ever fully
+removed, every dialog silently loses its background (no compile error, no exception — worst in
+Dark mode). **Phase 2's actual first task**: define app-owned semantic aliases for these 4 keys in
+`generic.xaml`, mapped to WPF-UI brushes, and repoint `BaseDialog` to them — before touching any
+individual dialog.
+
+**Sequencing correction**: start with `RenamePayeeDialog`, not `CsvImportDialog`. Despite its
+name, `CsvImportDialog` is not a wizard (87 lines, a single field-mapping `ListView`) — it's not
+the hard case this plan assumed. `RenamePayeeDialog` is the better first conversion: it's already
+screenshotted as reference material, it's in the shared 52-key blast radius, and its
+label-right/field-left layout is the template most of the other form-style dialogs copy.
+
+**Bucket the 24 by actual fit**, not a uniform treatment:
+- Fits `ContentDialog` cleanly (modal, single-task, one primary action) per the UX panelist:
+  `OpenDatabaseDialog`, `NewSqliteDatabaseDialog`, `NewSqlServerDatabaseDialog`, `AddLoginDialog`,
+  `PickDateDialog`, `MergeCategoryDialog`, `RecategorizeDialog`, `PasswordWindow`,
+  `RenamePayeeDialog`, `MoneyFileImportDialog`, and others in that shape.
+- Property-sheet forms — keep as resizable restyled `Window`s, do not force into `ContentDialog`:
+  `AccountDialog`, `CategoryDialog`, `LoanDialog`, `ReportRangeDialog`, `FreeStyleQueryDialog`,
+  `AttachmentDialog` (a document viewer — needs to stay resizable/non-modal-feeling).
+- No strong Fluent prescription, need app-specific treatment: `CsvImportDialog` (a mapping table —
+  add live preview of parsed rows, don't force a wizard shape it doesn't have), `OnlineAccountDialog`
+  (a genuinely two-stage flow currently showing both stages at once — this one actually deserves a
+  real stepper), `RentalDialog` (the only `TabControl` dialog — keep tabs, just restyle).
+- **However**: the WPF developer panelist's counter-finding is that `ContentDialog` requires a
+  `ContentDialogHost` in the visual tree and `MainWindow` is still a plain `Window` (`FluentWindow`
+  adoption was explicitly deferred — see the Phase 1 Finding above). Recommendation: **stay with
+  plain `Window`s, restyled**, for all of Phase 2. Revisit `ContentDialog` only if/when `FluentWindow`
+  adoption is separately taken on — don't take on both changes in the same phase.
+
 ### Phase 3 — Transaction/split grid views
 
 The DataGrid-heavy core UX — the highest-risk surface, tackled once the Phase 2 pattern is
@@ -253,6 +297,49 @@ proven. Explicitly includes `TransactionConnectorAdorner` as its own line item: 
 `Adorner`-based overlay whose visuals are largely hand-coded in `.cs`, not XAML, and is easy to
 miss in a file-by-file migration checklist for exactly that reason. **Do not theme it** — see
 Phase 4.
+
+### Phase 3 Planning Notes (forward-looking expert panel, 2026-09-20)
+
+**The Phase 0 spike is not sufficient confidence for the rest of the grid — and one edit surface
+has already silently migrated, unplanned.** Verified by byte-scanning both assemblies:
+`DefaultDatePickerStyle` exists in **both** `Wpf.Ui.dll` 4.3.0 and `ModernWpf.dll`. Since
+`Controls/MoneyDatePicker.cs:26` does `SetResourceReference(StyleProperty,
+"DefaultDatePickerStyle")`, and Phase 1 merged WPF-UI last, **every date cell in every transaction
+grid has been rendering WPF-UI's `DatePicker` template since Phase 1 landed** — never verified,
+not tracked as a Phase 1 or Phase 3 task. This is the same silent-shared-key pattern documented in
+the Phase 1 Finding above, just discovered in a different control this time.
+
+That silent change has a concrete, plausible failure mode worth spiking **before** any further
+Phase 3 markup work: `MoneyDataGrid.GetCellEditor` (`Controls/MoneyDataGrid.cs:821-853`) hit-tests
+the active cell editor and tries `FindAncestor<TextBox>` *before* `FindAncestor<DatePicker>`.
+WPF-UI's `DatePicker` template contains a `DatePickerTextBox` (a `TextBox` subclass) — so the hit
+test can resolve the editor as a plain `TextBox`, silently routing `GetUncommittedColumnText`/
+`SetColumnValue` (lines 890-961) down the wrong branch. Compiles fine; wrong at runtime, exactly
+the Phase 1 failure pattern. Three concrete spikes recommended before Phase 3 markup starts:
+
+1. **Date-cell editor identity** — assert the concrete runtime type `GetCellEditor` returns for a
+   date column, not just "an editor was found."
+2. **`TransactionAmountColumn`'s validation-error path** (`Views/TransactionsView.xaml.cs:7238-7291`)
+   — its bespoke `TransactionAmountControl` has an inner `TextBox` that does inherit WPF-UI's
+   style; spike a bad-value commit (lines 7275-7290) to check the error/focus visuals still work.
+3. **Row/cell asymmetry** — `MoneyDataGrid : DataGrid` is a *derived* type, so WPF-UI's implicit
+   `DataGrid` style does **not** reach it, but `DataGridRow`/`DataGridCell`/`DataGridColumnHeader`
+   are stock types and *do* get WPF-UI's style (confirmed: `Themes/generic.xaml:53` already
+   re-bases the header on `DefaultDataGridColumnHeaderStyle`). Headers/rows are already
+   WPF-UI-styled; the grid shell and cell templates (`MyDataGridStyle`,
+   `Views/TransactionsView.xaml:473,533+`) are not. Set row density explicitly on `MyDataGridStyle`
+   — don't assume it's inherited correctly from either library.
+
+**Design-intent stance from the UX panelist, informing the density criterion above**: adopt
+Fluent's *materials* here (dark mode, accent-aware selection that preserves the existing category
+color swatches, a deliberately *thickened* focus ring beyond Fluent's thin default, since this is
+cell-level keyboard editing), but explicitly *reject* Fluent's default *metrics* — WPF-UI's stock
+row height/padding would roughly halve visible rows on this reconciliation-focused screen, a
+direct regression against this spec's own density criterion. Freeze a density override on
+`MoneyDataGrid` **before** touching any cell templates, so later template work isn't authored
+against the wrong row heights. Corner radius, Mica/acrylic backgrounds, and reveal-on-hover
+animation are called out as actively harmful on a 6000-row dense ledger and should be refused, not
+just left as defaults.
 
 ### Phase 4 — Duplicate-transaction merge redesign
 
@@ -263,6 +350,34 @@ any Phase 3 work on `TransactionConnectorAdorner`'s visuals — don't spend effo
 something this phase deletes. Also serves as a proof-of-concept for a genuinely Fluent-native
 dialog built against real domain data, per the UI/UX review's recommendation.
 
+### Phase 4 Planning Notes (forward-looking expert panel, 2026-09-20)
+
+**Both panelists independently converged on the same fix from different angles, and in the
+process found a real, pre-existing bug unrelated to this migration.** `TransactionsView.xaml.cs`'s
+`Merge()` is called from two places with different confirmation behavior:
+`TransactionConnectorAdorner`'s "Merge" button (line ~3691) passes `promptForConfirmation: false`;
+the drag-and-drop merge path (line ~1120) passes `true` for the identical operation. The visually
+*lightest* affordance on screen — a small floating button — is the one that deletes a transaction
+with **zero confirmation**, silently picks which side survives via an invisible heuristic, and
+never shows the user what's discarded. `docs/Basics/Merging.md` describes this feature as safe
+("tries to preserve any information"); the code doesn't match that promise. **Recommend filing
+this as its own tracked issue, independent of the migration** — it's a real data-safety gap, not
+a styling concern, and shouldn't wait on Phase 4's sequencing.
+
+**Design direction (converged)**: keep `TransactionConnectorAdorner` as the lightweight
+*discovery* affordance — both panelists agree its cost is low (5 brush keys, already documented,
+already working) and its job (surface "these might be duplicates") is correctly lightweight.
+Don't replace it with `InfoBar` (a banner control, wrong shape for a between-rows overlay) or
+`Flyout` (the same WPF-UI type whose `SplitButton` coupling already caused a real Phase 1 bug —
+avoid re-introducing that dependency here). **Replace only the action**: wire the Merge button to
+open the comparison dialog this phase already planned, and let *that* dialog do the actual
+confirming — two columns, differing fields highlighted, the surviving row's reason stated ("Keeping
+this one — it's reconciled"), replacing the generic Yes/No prompt entirely. Keep "not a duplicate"
+(the small dismiss) as an equal-weight, clearly-labeled secondary action, not a 12px `(x)` — per
+`docs/Basics/Merging.md`, that choice persists and deserves comparable visual weight to accepting.
+`CreateConnectorGeometry`/`ArrangeOverride` (the adorner's actual positioning logic) stay
+untouched — this phase changes what happens after the click, not how the connector is drawn.
+
 ### Deferred beyond this migration
 
 A broader audit of other bespoke interaction patterns elsewhere in the app, and any
@@ -272,17 +387,82 @@ shell/navigation-architecture change (see "Scope" above).
 
 Matches #42's own originally-stated process: after each phase lands, review and update the
 relevant `Source/WPF/UITests/Basics/*` FlaUI tests for whatever UI surface that phase touched,
-before moving to the next phase.
+before moving to the next phase. **Phase 1's actual experience shows this process, as stated, is
+not sufficient**: the 15-test Basics FlaUI suite stayed 100% green throughout Phase 1 while its
+owner, watching the live app, independently found four real bugs the suite never caught (a
+truncated menu label, an inert `SplitButton`, a blank title bar plus a wrong-colored dialog under
+Dark theme, and an `Expander` animation racing the app's own layout code) — all four purely
+visual/timing failures, invisible to FlaUI's dominant idiom of asserting on the automation tree
+(element existence, `Name`, control type, pattern state). A forward-looking QA/test-strategy
+panel review (2026-09-20) proposed a concrete fix for Phase 2-4, superseding the screenshot-diffing
+idea below:
 
-**Addition, scoped narrowly:** lightweight per-control screenshot diffing (via
-`FlaUI.Core.Capturing.Capture.Screen()`, already used for debugging in this codebase) for Phase
-0's spike and Phase 3's grid work specifically — not a full visual-regression pipeline. This
-exists because FlaUI's automation-tree queries (`AutomationId`/`ControlType`/pattern presence)
-cannot detect a "renders as a big white box"-class failure: a control can be functionally present
-and identity-correct while being visually broken, and that is the specific failure mode this
-migration is most at risk of. Scope: cropped per-control snapshots of the specific controls being
-themed in that phase, generous tolerance thresholds, run at a fixed resolution/DPI — a
-supplementary smoke signal, never a hard gate replacing FlaUI's functional checks.
+**Self-referential visual invariants, not golden-image baselines.** Golden-image diffing is a
+maintenance sink (frame variance, DPI, theme) and was already scoped as "supplementary" — replace
+it with invariants that need no stored baseline at all, added as `VisualGuard.cs`
+(`Source/WPF/UITests/Basics/`, same static-helper idiom as the existing `AppCrashGuard.cs`, built
+on `FlaUI.Core.Capturing.Capture`):
+
+- `AssertNotClipped(element)` — crops the element's `BoundingRectangle`; fails if non-background
+  pixels touch the last 1-2px of any edge. Catches the Phase 1 menu-truncation class of bug, is
+  theme-independent, needs no golden image.
+- `AssertNotBlank(element)` — fails if a crop has ≤1 distinct color, or if mean luminance doesn't
+  match the currently-active theme (dark theme ⇒ luminance below a fixed threshold). Catches the
+  Phase 1 blank-title-bar/wrong-dialog-background class of bug directly.
+- `AssertSettledWithin(element, budget)` — captures a crop at the moment of interaction and again
+  after `budget` (e.g. 400ms); fails if they differ, meaning the UI was still repainting past the
+  expected settle time. Catches the Phase 1 `Expander`-animation-race class of bug with no
+  baseline at all.
+
+Wire all three into `BasicsTestSetup.CleanUpDatabase` (the universal `[TearDown]`) the same way
+`AppCrashGuard` was retrofitted, so every existing and future Basics test gets this checking for
+free rather than requiring each test author to remember to call it. Add a second, `[Category("Theme:Dark")]`
+pass of the suite (toggle Ctrl+L at session start) so `AssertNotBlank` actually exercises both
+themes, not just the default Light one Phase 1's suite ran under exclusively.
+
+**An "adversarial fast pass" for animated controls.** Bug #4 (the `Expander` race) was
+specifically *timing-dependent* — invisible at the test suite's own careful, waited interaction
+pace, worse under faster, more realistic clicking. Add a reusable `Adversarial.Hammer(element,
+clicks, gapMs)` helper (rapid-clicks a control with deliberately-short gaps, using real
+`Mouse.Click`/`SendInput` per this repo's `flaui-wpf-testing` skill, so mark these
+`[Category("Interactive")]` rather than folding them into the headless-safe pattern-based suite)
+followed by `VisualGuard.AssertSettledWithin`. Register one AutomationId per animated WPF-UI
+control (`Expander`, `SplitButton`, `ComboBox`, etc.) introduced in Phase 2-4 via
+`[TestCaseSource]`, so new controls opt in by registering a string, not writing a new test.
+
+**Coverage that must exist *before* Phase 3 and Phase 4 start, not just after.** Per
+`docs/Basics/Merging.md`, the real duplicate-merge feature includes drag-and-drop merge, a
+dismiss ("not a duplicate") that persists, and field-preserving merge semantics — none of which
+`MergingDuplicateTransactionsFlaUiTests.cs` currently covers (it only asserts the connector
+appears and the row count drops to 1 after clicking Merge). Since Phase 4 *deletes* this UI, write
+the missing coverage first as the behavior contract the replacement dialog must also satisfy —
+merge-semantics belongs in `UnitTests` against `Transaction.Merge` directly (fast, survives the
+redesign), the interaction-level behaviors in FlaUI. Similarly, `TransactionsView.xaml` (929
+lines) has essentially no grid coverage beyond quick-search filtering today — before Phase 3
+starts, record the column header set/order, row height in pixels as a literal number (the density
+criterion below is unenforceable without this), the one-line/Show-All-Splits view toggles, inline
+edit commit, and sort-by-column, so Phase 3 has something concrete to diff against.
+
+**Process fix**: run the suite — now including the `VisualGuard`/adversarial checks and the
+dark-theme pass — after every *task*, not just every phase. A task isn't done until
+`dotnet test --filter "Category=Basics|Category=Visual"` passes under both themes. This is a
+cadence change as well as a content change; Phase 1's per-phase cadence with functional-only
+checks is what let four real bugs accumulate to the end of a phase undetected.
+
+**Static complement, from the WPF-UI developer panel's cross-cutting recommendation**: a
+resource-key provenance unit test (`Source/WPF/UnitTests`, STA) that loads `ui:ControlsDictionary`,
+`mwpf:XamlControlsResources`, and `generic.xaml` independently, enumerates their keys, and
+cross-references every `StaticResource`/`DynamicResource`/`SetResourceReference` literal used
+across the app's XAML/C#. Fails if any referenced key is supplied by **neither** library (would
+have caught `BaseDialog`'s ModernWpf-only keys — see the Phase 2 Planning Notes above, a class of
+bug invisible until the day `ModernWpfUI` is finally removed) and snapshots the keys supplied by
+**both** libraries, failing if that snapshot changes unreviewed (the 52-key silent-restyle class
+of bug from the Phase 1 Finding, including the `DefaultDatePickerStyle` instance found in the
+Phase 3 Planning Notes above). This runs before the app ever launches, catching two of the three
+pitfall classes statically rather than live. Pair it with a hard rule for the third class (an API
+that compiles but is inert or has unrelated side effects, e.g. `SplitButton.Flyout`,
+`ApplicationThemeManager.Apply`): read the actual WPF-UI source for any new `Wpf.Ui.*` API before
+its first use in this codebase, not just its public doc comments.
 
 Also worth tracking as its own test dimension once introduced: if `wpfui`'s theme-mode
 (Light/Dark/System) switching is adopted, that's a new axis FlaUI coverage should account for on
@@ -290,12 +470,24 @@ controls whose automation identity could plausibly differ across themes.
 
 ## Design/UX acceptance criteria
 
+**Non-goal, added 2026-09-20 per the forward-looking UX panel review**: "make MyMoney look like a
+modern Windows 11 app" is explicitly *not* the destination, and should not be treated as one by
+default. Phase 1's own experience is the argument — the library's aesthetic won by default
+everywhere it wasn't deliberately overridden (the 52-key silent restyle documented in the Phase 1
+Finding above), and that drift is the wrong direction for a dense financial ledger this app's
+users work in daily. The actual destination: identical-or-higher information density versus
+today, plus real dark mode, checked contrast on the red/green figures, a focus ring at least as
+visible as the current classic WPF one, keyboard parity, and one consistent control vocabulary —
+Fluent's *quality-of-life* layer, deliberately decoupled from its *visual* defaults.
+
 These are concrete, checkable criteria for each phase's work, not just narrative goals:
 
 - **Density**: the transaction register's row height/padding must stay dense — do not accept
   `wpfui`'s default spacing on the core financial grid. This needs a deliberate density override;
   `MoneyDataGrid` already being a custom control (not stock `DataGrid`) makes this a natural
-  customization point rather than something inherited wholesale from the library.
+  customization point rather than something inherited wholesale from the library. **Checkable
+  gate**: a Phase 3 change that reduces the number of transaction rows visible at 1080p versus the
+  pre-migration baseline is a regression, full stop, regardless of how the change looks.
 - **Contrast**: verify actual rendered contrast on any acrylic/Mica surfaces introduced,
   especially near the red/green gain-loss figures already used for financial data (which has its
   own colorblindness consideration independent of this migration).
