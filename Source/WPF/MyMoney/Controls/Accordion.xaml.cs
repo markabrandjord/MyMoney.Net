@@ -102,7 +102,10 @@ namespace Walkabout.Controls
 
             expanderToAdd.Name = id;
             expanderToAdd.IsExpanded = false;
-            expanderToAdd.Margin = new Thickness(0, 0, 0, 3);
+            // No margin - the scoped Expander style (Accordion.xaml) gives each header its own
+            // 1px bottom separator instead, keeping the list flat/cohesive rather than a stack of
+            // separately-spaced cards (see that file's comment for the full history).
+            expanderToAdd.Margin = new Thickness(0);
 
 
             // The expander header is a Grid with 2 columns
