@@ -9,10 +9,8 @@
         xmlns:help="clr-namespace:Walkabout.Help"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-        xmlns:ui="http://schemas.modernwpf.com/2019"
-        ui:WindowHelper.UseModernWindowStyle="True"
-        ui:ThemeManager.IsThemeAware="True"
-        mc:Ignorable="d" 
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        mc:Ignorable="d"
         AutomationProperties.AutomationId="MoneyWindow"
         Title="MyMoney" 
         Height="600" 
@@ -246,7 +244,7 @@
 
         <Button x:Name="ButtonSynchronize" Command="p:AppCommands.CommandOnlineSyncAccount" >
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="Download" Margin="0,0,4,0"/>
+            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.ArrowDownload24}" Margin="0,0,4,0"/>
             <TextBlock Text="Download"/>
           </StackPanel>
         </Button>
@@ -256,12 +254,12 @@
         <ui:SplitButton x:Name="PendingChangeDropDown" VerticalAlignment="Center" Click="PendingChangeClicked">
 
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="Save" Margin="0,0,4,0"/>
+            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Save24}" Margin="0,0,4,0"/>
             <TextBlock Text="Save"/>
           </StackPanel>
 
           <ui:SplitButton.Flyout>
-            <ui:Flyout x:Name="pendingChangeFlyout" Opening="OnOpeningPendingChangeFlyout">
+            <ui:Flyout x:Name="pendingChangeFlyout" Opened="OnOpeningPendingChangeFlyout">
               <Border>
                 <Grid >
                   <Grid.RowDefinitions>
@@ -280,7 +278,7 @@
 
         <Button x:Name="ButtonShowUpdateInfo" Click="OnButtonShowUpdateInfoClick">
           <StackPanel Orientation="Horizontal">
-            <ui:SymbolIcon Symbol="AllApps" Margin="0,0,4,0"/>
+            <ui:SymbolIcon Symbol="{x:Static ui:SymbolRegular.Apps24}" Margin="0,0,4,0"/>
             <TextBlock x:Name="ButtonShowUpdateInfoCaption" Text="View Changes"/>
           </StackPanel>
         </Button>

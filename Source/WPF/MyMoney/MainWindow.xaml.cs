@@ -2613,7 +2613,7 @@ namespace Walkabout
         }
 
 
-        private void OnOpeningPendingChangeFlyout(object sender, object e)
+        private void OnOpeningPendingChangeFlyout(Wpf.Ui.Controls.Flyout sender, System.Windows.RoutedEventArgs e)
         {
             this.pendingStack.Children.Clear();
 
