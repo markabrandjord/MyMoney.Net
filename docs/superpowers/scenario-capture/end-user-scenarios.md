@@ -18,7 +18,7 @@ user-facing.
 | 1 | Core domain model | `Money.cs` (+ its `MyMoney` partial in `Money_Loans.cs`) — the persistent object graph and the operations it supports | **Done** |
 | 2 | Navigation & shell | Main window, view selectors, command routing | **Done** |
 | 3 | Views | `Views/` + `View Selectors/` — the grids, trees and panes the user works in | **Done** |
-| 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | Not started |
+| 4 | Dialogs | `Dialogs/` — modal flows, wizards, editors | **Done** |
 | 5 | Reports + charts | `Reports/`, `Charts/` | Not started |
 | 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | Not started |
 | 7 | Taxes | `Taxes/` | Not started |
@@ -3125,3 +3125,1061 @@ obvious from the code — and, where noted, because they look like real defects.
     charges — but it means the moment a user is most likely to notice a duplicate is
     the moment the product stops pointing them out. Worth a deliberate decision rather
     than inheriting it.
+
+---
+
+# Phase 4: Dialogs
+
+**Source examined (in full):** every file in `Source/WPF/MyMoney/Dialogs/` — 53 files,
+29 classes, ~7,700 lines.
+
+| File(s) | Lines |
+|---|---|
+| `AccountDialog.xaml` + `.xaml.cs` | 135 + 463 |
+| `AddLoginDialog.xaml` + `.xaml.cs` | 32 + 111 |
+| `AttachmentDialog.xaml` + `.xaml.cs` | 121 + 1,277 |
+| `AuthTokenDialog.cs` | 54 |
+| `BaseDialog.cs` | 12 |
+| `CategoryDialog.xaml` + `.xaml.cs` | 109 + 365 |
+| `ChangePasswordDialog.cs` | 131 |
+| `CsvImportDialog.xaml` + `.xaml.cs` | 86 + 99 |
+| `FreeStyleQueryDialog.xaml` + `.xaml.cs` | 46 + 61 |
+| `LoanDialog.xaml` + `.xaml.cs` | 108 + 153 |
+| `MergeCategoryDialog.xaml` + `.xaml.cs` | 48 + 64 |
+| `MfaChallengeDialog.cs` | 74 |
+| `MoneyFileImportDialog.xaml` + `.xaml.cs` | 54 + 437 |
+| `NewSqlServerDatabaseDialog.xaml` + `.xaml.cs` | 22 + 36 |
+| `NewSqliteDatabaseDialog.xaml` + `.xaml.cs` | 23 + 44 |
+| `OfxLoginDialog.cs` | 80 |
+| `OnlineAccountDialog.xaml` + `.xaml.cs` | 180 + 1,575 |
+| `OnlineServiceDialog.xaml` + `.xaml.cs` | 83 + 236 |
+| `OpenDatabaseDialog.xaml` + `.xaml.cs` | 13 + 37 |
+| `PasswordWindow.xaml` + `.xaml.cs` | 62 + 248 |
+| `PickDateDialog.xaml` + `.xaml.cs` | 33 + 56 |
+| `RecategorizeDialog.xaml` + `.xaml.cs` | 55 + 63 |
+| `RenamePayeeDialog.xaml` + `.xaml.cs` | 97 + 318 |
+| `RentalDialog.xaml` + `.xaml.cs` | 150 + 72 |
+| `ReportRangeDialog.xaml` + `.xaml.cs` | 87 + 115 |
+| `SaCredentialDialog.xaml` + `.xaml.cs` | 14 + 23 |
+| `SampleDatabaseOptions.xaml` + `.xaml.cs` | 77 + 123 |
+| `SelectAccountDialog.xaml` + `.xaml.cs` | 55 + 112 |
+| `TaxReportDialog.xaml` + `.xaml.cs` | 43 + 78 |
+
+> **Path notes.** The "24 files in `Dialogs/`" figure in this repo's own docs is stale —
+> there are **53** (29 `.cs` files declaring 29 classes, 24 of them with a `.xaml`
+> partner). The number 24 happens to be the count of `.xaml` files, which may be where
+> the stale figure came from.
+> Two naming traps of the kind Phase 3 flagged:
+> - **`PickDateDialog.xaml` / `PickDateDialog.xaml.cs` declare a class called
+>   `PickYearDialog`**, whose window title is "Select Date" and whose content is a
+>   full date picker, not a year picker. Neither the filename nor the class name
+>   describes it; searching for either one alone misses it.
+> - `MergeCategoryDialog.xaml.cs`, `LoanDialog.xaml.cs`, `RentalDialog.xaml.cs`,
+>   `ReportRangeDialog.xaml.cs`, `RecategorizeDialog.xaml.cs` and
+>   `AttachmentDialog.xaml.cs` all carry copy-pasted `<summary>Interaction logic for
+>   …</summary>` comments naming a *different* dialog (`MoveMergeCategoryDialog`,
+>   `AccountDialog` ×2, `RenamePayeeDialog`, `CategoryTransferDialog`, `ScanDialog`).
+>   Doc comments are not a reliable index here.
+>
+> Four of the classes are **not** `Window`-derived dialogs in the usual sense:
+> `BaseDialog` is the shared base, and `OfxLoginDialog`, `AuthTokenDialog`,
+> `MfaChallengeDialog` and `ChangePasswordDialog` are code-only subclasses of
+> `PasswordWindow` that reshape it rather than declaring their own XAML.
+
+**What this phase covers and deliberately does not.** Phase 3 catalogued the *doors* —
+"the user can open the account window from here". This section catalogues the *rooms*:
+what each modal (or, in three cases, modeless) window lets the user create, edit,
+confirm or choose, and what it validates or refuses. Where a dialog merely collects
+options that a report or an importer then acts on, the *collecting* is here and the
+*acting* is Phase 5 (reports/charts) or Phase 6 (import/export). Native Windows file
+and folder pickers are used throughout and are not catalogued individually; they are
+the platform's, not the product's.
+
+---
+
+## 4.1 Setting up and maintaining an account
+
+### P4-ACCT-1 — Describe an account in one place
+The user gives an account its name, the number the bank knows it by, a separate
+identifier for downloads if the bank formats it differently, a free-text description,
+what kind of account it is, its tax treatment, its opening balance, its currency, the
+web site they visit for it, and how many months they'll allow between balancing it.
+*(`AccountDialog`)*
+
+### P4-ACCT-2 — Be stopped from naming an account something the product can't handle
+Certain characters aren't allowed in an account name. Typing one turns the name field
+red, explains why, and prevents the user from confirming. A blank name also blocks
+confirmation.
+*(`AccountDialog.OnNameChanged`, `Accounts.InvalidNameChars`, `CheckButtonStates`)*
+
+### P4-ACCT-3 — Abandon account edits without consequence
+Everything the user types is applied to a working copy of the account, and only
+copied onto the real account when they confirm. Backing out leaves the account
+exactly as it was.
+*(`Account.ShallowCopy` into `editingAccount`, `HandleOk` copying field-by-field —
+but see Open Question 2)*
+
+### P4-ACCT-4 — Mark an account closed, or reopen it
+Closing an account is a single toggle in its own window rather than a separate
+command.
+*(`AccountDialog` closed checkbox → `Account.IsClosed`)*
+
+### P4-ACCT-5 — Jump to the bank's web site from the account
+The user can open the site they've recorded for an account directly. If they haven't
+recorded one, or what they typed isn't a usable address, they're told so rather than
+being taken nowhere. A bare address without `http`/`https` is accepted and completed
+for them.
+*(`AccountDialog.OnButtonGoToWebSite` — the loan equivalent is broken; see Open
+Question 3)*
+
+### P4-ACCT-6 — Teach the product other names this account is known by
+The user can record extra identifiers that downloads and imports use for this
+account, add a new one by typing it and pressing Enter, and remove one from the list.
+Typing an identifier already assigned to another account moves it to this one.
+*(`AccountDialog` aliases combo, `AccountAliases.AddAlias`/`RemoveAlias`,
+`AccountAlias` — but see Open Question 2)*
+
+### P4-ACCT-7 — See what a foreign-currency account is worth in home terms
+Choosing a currency other than the home one shows the current exchange rate beside
+it, fetching it if the product doesn't already have it, and keeps that figure current
+if rates change while the window is open.
+*(`AccountDialog.OnCurrencyChanged`/`UpdateRateText`, `ExchangeRateService.CreateOrUpdate`)*
+
+### P4-ACCT-8 — Have a currency created for them
+If the user picks a currency the product has never seen, it's added to their list of
+currencies with its proper name and regional formatting worked out from the code,
+rather than failing or leaving a blank entry.
+*(`AccountDialog.HandleOk`, `CultureHelpers.CurrencyCultures`)*
+
+### P4-ACCT-9 — Attach the account to an institution without leaving the window
+From the account's own window the user picks which stored institution connection this
+account downloads from, clears it, or opens the institution window to set up a new
+one — and the choice they make there comes back into the account window.
+*(`AccountDialog.comboBoxOnlineAccount`, `OnButtonOnlineAccountDetails_Click`)*
+
+### P4-ACCT-10 — Set up a loan account with its principal and interest categories
+A loan is set up through its own window rather than the ordinary account one: name,
+reference number, description, the two categories that represent principal and
+interest, currency, web site and whether it's closed. The categories are chosen by
+typing part of their full path.
+*(`LoanDialog`, `Account.CategoryForPrincipal`/`CategoryForInterest` — but see Open
+Questions 3 and 4)*
+
+### P4-ACCT-11 — Choose which of their accounts an unrecognised one is
+When something arriving from outside names an account the product doesn't recognise,
+the user is shown their accounts — name, number and current balance, with closed ones
+pushed to the bottom — and picks the right one, creates a new account there and then,
+or abandons the whole import.
+*(`SelectAccountDialog`, `AccountHelper.PickAccount`)*
+
+### P4-ACCT-12 — Only have to answer that question once
+Once the user has said which of their accounts a foreign identifier belongs to, that
+mapping is remembered, so the same identifier is routed automatically next time
+instead of asking again.
+*(`AccountHelper.PickAccount` creating an `AccountAlias`)*
+
+---
+
+## 4.2 Connecting an account to a financial institution
+
+### P4-ONLINE-1 — Find their bank in a list rather than typing its settings
+The user picks their institution from a list of thousands that the product downloads
+and caches, narrowing it by typing part of the name. Institutions they already have a
+connection for are shown in bold at the top of that same list.
+*(`OnlineAccountDialog`, `OfxInstitutionInfo.GetCachedBankList`/`GetRemoteBankList`)*
+
+### P4-ONLINE-2 — Have the connection settings filled in for them
+Choosing an institution fills in its identifiers, its download address, the protocol
+version it wants, its logo and its web site, so the user doesn't have to find any of
+that themselves. If they already have a connection to that institution, their stored
+sign-in details come across too.
+*(`OnlineAccountDialog.UpdateInstitutionInfo`)*
+
+### P4-ONLINE-3 — Set up an institution the list doesn't know about
+The user can type a name the list doesn't contain and fill in the technical details by
+hand — institution name, identifier, bank/branch/broker identifiers, address, protocol
+version, application identity. Only the fields that make sense for that kind of
+account are shown.
+*(`OnlineAccountDialog.ShowHideFieldsForAccountType`, `OnGotProfile` adding a new
+entry — but see Open Question 5)*
+
+### P4-ONLINE-4 — Test the connection before committing to it
+The user clicks to connect, and the product talks to the institution and reports back
+in the window: what it found, or the exact error, or the bank's own HTML error page
+rendered as the bank wrote it. The connect action isn't offered until the minimum
+details are present.
+*(`OnButtonVerify` → `StartVerify` → `HandleProfileResponse`, `ShowError`,
+`ShowHtmlError`, `UpdateButtonState`)*
+
+### P4-ONLINE-5 — Check they're talking to the right organisation before handing over credentials
+Before the password prompt appears, the user is shown the name, postal address, phone
+number, email and logo the institution returned, and asked to confirm it's who they
+think it is.
+*(`HandleProfileResponse`, `GetAddressParagraph`)*
+
+### P4-ONLINE-6 — Be told how to enrol if they don't have online banking yet
+If the user isn't signed up for online banking, the window relays the institution's own
+enrolment instructions, a link to its enrolment page, or its customer-service number —
+whichever the institution supplied — rather than just failing to sign them in.
+*(`HandleProfileResponse` enrolment branch)*
+
+### P4-ONLINE-7 — Be told plainly when the bank wants security the product doesn't do
+If the institution demands a security level the product doesn't implement, the user
+gets a plain statement of that, plus a link to the raw exchange so it can be reported.
+*(`HandleProfileResponse` security-level check)*
+
+### P4-ONLINE-8 — See which of their accounts the institution offers, and decide about each
+After signing in, the user gets the list of accounts the institution says they have,
+each with a single toggle that cycles through connect / skip / disconnect. Nothing is
+connected until they confirm the window.
+*(`ShowResult`, `FindMatchingOnlineAccount`, `OnIconButtonClick`, `OnButtonOk`)*
+
+### P4-ONLINE-9 — Resolve an account the institution knows about but the product doesn't
+Where the institution reports an account number the user has no account for, they're
+offered their existing accounts to match it to, or the chance to create a new account
+for it — and can undo that choice before confirming.
+*(`OnIconButtonClick` new-account branch → `AccountHelper.PickAccount`,
+`PlaceHolder` undo)*
+
+### P4-ONLINE-10 — Be told when they've filed an account under the wrong kind
+If the institution says an account is a chequing account and the user has it as
+savings, they're told which account and both opinions, and offered a one-click
+correction.
+*(`FindMatchingOnlineAccount` type mismatch, `OnIconButtonClick` warning branch)*
+
+### P4-ONLINE-11 — Have a working institution remembered for next time
+When a connection succeeds, whatever the user corrected — name, identifiers, protocol
+version, address — is saved back against that institution along with the date it last
+worked, so the next account they set up starts from settings that are known to work.
+*(`OnGotProfile`, `OfxInstitutionInfo.SaveList`)*
+
+### P4-ONLINE-12 — Rename an institution to something they recognise
+The user can type over the institution's official name and the connection is stored
+under their own wording.
+*(`OnComboBoxNameChanged` null-provider allowance, `OnButtonOk` name copy-back)*
+
+---
+
+## 4.3 Proving who they are to an institution
+
+### P4-AUTH-1 — Enter online-banking credentials in a window that explains itself
+The credential prompt states which institution is asking, names the exact server the
+details will be sent to and that it will be sent securely, and tells the user to back
+out if that address isn't one they recognise.
+*(`OfxLoginDialog`, `PasswordWindow`)*
+
+### P4-AUTH-2 — Supply whatever extra credentials their bank asks for
+Where an institution requires additional fields beyond user name and password, they
+appear with the bank's own labels rather than as generic boxes, and the user's answers
+are kept with that institution's connection.
+*(`PasswordWindow.AddUserDefinedField`/`GetUserDefinedField`,
+`OfxSignOnInfo.UserCredentialLabel1`/`2`)*
+
+### P4-AUTH-3 — Answer the bank's extra identity questions
+When an institution demands multi-factor authentication, the user is shown its
+questions — in the bank's own wording where it supplied one, or the product's
+translation of a known question code — with an explanation of why they're being asked.
+A question the product can't translate is shown as an unknown question with its code,
+so the user can ring the bank rather than being stuck.
+*(`MfaChallengeDialog`, `GetPhrasePrompt`, `MfaPhrases.xml`)*
+
+### P4-AUTH-4 — Supply a one-off authentication token
+Where the institution requires a token, the user is told what a token is for and given
+the institution's own link or phone number for obtaining one, and can enter it. If the
+token was rejected, they're told that specifically.
+*(`AuthTokenDialog` — but see Open Question 6)*
+
+### P4-AUTH-5 — Change an online-banking password when the bank insists
+If the institution requires a new password, the user enters and confirms one; it's
+checked against the institution's own length rules before anything is sent. The
+product then changes the password with the institution and tells the user not to close
+the window until it hears back, disabling both buttons so a half-finished change can't
+be abandoned at the dangerous moment. If the institution rejects it, the reason is
+shown and they can try again.
+*(`ChangePasswordDialog`, `DisableButtons`/`EnableButtons`)*
+
+### P4-AUTH-6 — Retry rather than start over when sign-in fails
+An invalid sign-in, an expired token or a demand for extra authentication re-prompts
+for just that one thing and then continues where it left off, instead of throwing away
+everything the user had entered.
+*(`HandleSignOnErrors` continuation actions)*
+
+### P4-AUTH-7 — See at a glance whether the password they typed is the right one
+While typing a password the product already knows, the icon beside the box changes to
+show matched, not-yet-matched or rejected, and an incorrect entry is called out in
+words rather than only by refusing.
+*(`PasswordWindow.OnPasswordChanged`, `PasswordFailure`, `RealPassword`)*
+
+---
+
+## 4.4 Market data and exchange-rate services
+
+### P4-QUOTES-1 — Choose which service supplies prices and exchange rates
+The user picks from the services the product knows how to talk to, sees the address
+each one lives at, and can open that address to sign up.
+*(`OnlineServiceDialog`, `IOnlineService.GetDefaultSettingsList`)*
+
+### P4-QUOTES-2 — Enter an access key and be told immediately whether it works
+Shortly after the user finishes typing an access key, the product tries it against the
+service and reports "Service is working" or the exact failure, without the user having
+to confirm and find out later.
+*(`OnPasswordChanged` → `CheckApiKey`, `TestApiKeyAsync`)*
+
+### P4-QUOTES-3 — Record what their subscription is allowed to do
+The user records how many requests per minute, per day and per month their plan
+permits, and whether it includes price history and stock splits, so the product stays
+inside the limits they're paying for.
+*(`OnlineServiceSettings.ApiRequestsPerMinuteLimit`/`PerDay`/`PerMonth`,
+`HistoryEnabled`, `SplitHistoryEnabled`)*
+
+### P4-QUOTES-4 — Turn a service off without deleting its settings
+Clearing the access key disables the service while leaving everything else recorded;
+there's a button that does exactly that.
+*(`OnDisable`)*
+
+### P4-QUOTES-5 — Be warned about having two services doing the same job
+If the user enables more than one service of the same kind, they're told which two and
+that it isn't recommended.
+*(`CheckMultiple` — but see Open Question 7)*
+
+---
+
+## 4.5 Categories
+
+### P4-CAT-1 — Create or edit a category and everything that goes with it
+In one window the user names a category (typing a full path creates the levels above
+it), says whether it's income, expense, savings or investment, how often it recurs,
+what colour it gets in charts, which tax line it feeds, and what it's for.
+*(`CategoryDialog`, `Categories.GetOrCreateCategory`)*
+
+### P4-CAT-2 — Pick an existing category from an indented list
+Existing categories are offered as an indented tree so the user can see where each one
+sits, and they can type to narrow.
+*(`CategoryDialog.GetListLabel`, `RefreshCategories`)*
+
+### P4-CAT-3 — Have a change of kind cascade to the categories beneath
+Changing a category from, say, expense to savings changes everything underneath it too,
+so a branch doesn't end up half one thing and half another.
+*(`PropagateCategoryTypeToChildren`)*
+
+### P4-CAT-4 — Find the right tax line by searching either its form or its name
+Rather than scrolling a long list of tax lines, the user types part of a form name or
+part of a line's description and sees only the matches. An empty entry at the top lets
+them clear the tax association entirely.
+*(`ComboBoxForTaxCategory_FilterChanged`, `TaxCategoryCollection`)*
+
+### P4-CAT-5 — Pick a colour from a picker rather than typing one
+The colour is chosen visually, with the chosen colour shown on the button, and it's
+registered so that everywhere else in the product that draws this category uses it.
+*(`ColorPickerPanel`, `ColorAndBrushGenerator.SetNamedColor`)*
+
+### P4-CAT-6 — See a category inherit its parent's colour
+A category with no colour of its own opens showing the colour it inherits, so the user
+can see what it will actually look like before deciding to override it.
+*(`Category.InheritedColor` in `SetCategory`)*
+
+### P4-CAT-7 — Be shown, in the same window, that they've chosen a transfer instead
+The list of categories also offers "transfer to/from" each open account. Choosing one
+switches the window into a mode where type and description don't apply and aren't
+offered, because a transfer isn't a category.
+*(`SetTransfer`, `Add` early return)*
+
+### P4-CAT-8 — Be told why the window opened
+The window can carry a one-line message at the top explaining the context it was opened
+in — for example, that the category they typed doesn't exist yet — and highlight the
+part of the name that needs their attention.
+*(`CategoryDialog.Message`, `Select(string)`)*
+
+### P4-CAT-9 — Say where a deleted category's history should go
+Deleting a category that still has transactions doesn't just remove it: the user is
+told how many transactions use it and made to choose the category those transactions
+move to before the deletion proceeds.
+*(`MergeCategoryDialog`, `CategoriesControl.Delete` → `Merge` — but see Open
+Question 8)*
+
+### P4-CAT-10 — Fold one category into another
+The same window serves a deliberate merge: pick the category to fold this one into,
+narrowing a long list by typing part of the full path. Confirming isn't possible until
+a destination is chosen.
+*(`MergeCategoryDialog.OnCategorySelected`, `ComboBoxForCategory_FilterChanged`)*
+
+### P4-CAT-11 — Recategorize everything they're currently looking at
+The user can move every transaction in the list they have on screen to a different
+category in one step, with the category they're moving away from shown, read-only, so
+they can see what they're about to change.
+*(`RecategorizeDialog`, `TransactionsView` recategorize-all command)*
+
+---
+
+## 4.6 Renaming payees and building rename rules
+
+### P4-PAYEE-1 — Rename a party, or fold it into another
+The user says what to rename from and what to rename to, choosing the destination from
+their existing parties or typing a new name that gets created for them. Every matching
+transaction is moved across in one operation.
+*(`RenamePayeeDialog`, `MyMoney.ApplyAlias`)*
+
+### P4-PAYEE-2 — Match a family of messy names with one rule
+Rather than an exact name, the user can tick a box to treat what they typed as a
+pattern, so one rule can catch all the variants a bank sends.
+*(`checkBoxUseRegex`, `AliasType.Regex` — but see Open Question 9)*
+
+### P4-PAYEE-3 — Decide whether this is a one-off or an ongoing rule
+The user chooses whether the rename applies only to what's already recorded, or is kept
+as a standing rule that also renames future downloads.
+*(`checkBoxAuto` → `Aliases.AddAlias` vs a throwaway `Alias`)*
+
+### P4-PAYEE-4 — See which existing rules a new one would swallow
+As the user types an ongoing rule, the product lists the existing rules that the new
+one would make redundant, so they can see the consequence before committing.
+*(`CheckConflicts`, `MyMoney.FindSubsumedAliases`)*
+
+### P4-PAYEE-5 — Be warned when a broad rule would sweep up unrelated parties
+If the rules being swallowed point at several *different* parties, the user is told how
+many and named some of them, and has to confirm that they really mean to collapse them
+all into one.
+*(`OnOkButton_Click` conflict confirmation)*
+
+### P4-PAYEE-6 — Be warned when a rule matches nothing
+If nothing at all would change, the user is told and asked whether to keep the rule
+anyway, rather than silently saving a rule that does nothing.
+*(`MyMoney.FindAliasMatches` empty-result confirmation)*
+
+### P4-PAYEE-7 — Have a rule applied to what they're editing, not just what's saved
+Transactions currently open and being edited on screen are included in what the rule
+matches and renames, so the user doesn't get inconsistent results depending on what
+they happen to have open.
+*(`TransactionCollection` concatenated into the candidate set)*
+
+### P4-PAYEE-8 — Clean up a shouty bank name with one click
+A button turns the messy source name into ordinary capitalisation and puts it in the
+"rename to" box, so the common case takes one click instead of retyping.
+*(`CamelCaseButton_Click`, `string.CamelCase()` — but see Open Question 10)*
+
+---
+
+## 4.7 Paperwork attached to a transaction
+
+### P4-ATT-1 — Keep receipts and documents with the transaction they belong to
+The user opens a window showing everything filed against the selected transaction —
+photographs and scans as images, typed or pasted notes as editable rich text, and
+anything else as a file with its own icon.
+*(`AttachmentDialog`, `AttachmentDialogImageItem`/`DocumentItem`/`FileItem`)*
+
+### P4-ATT-2 — Keep the paperwork window open while working through the register
+The attachments window isn't modal: it stays open beside the register and follows the
+user's selection, so they can walk down a statement filing receipts without reopening
+it for each row. Minimising or closing the main window takes it with them.
+*(`ScanAttachments`, `OnSelectionChanged`, `OnAppWindowStateChanged`, `OnAppClosed`)*
+
+### P4-ATT-3 — File a document by dropping it on the window
+Dropping files onto the window files them against the current transaction and marks
+that transaction as having paperwork. Anything that can't be copied is reported by name
+rather than failing silently.
+*(`OnDrop` — but see Open Question 11)*
+
+### P4-ATT-4 — Paste in whatever is on the clipboard
+The user can paste a screenshot, a picture, formatted text or plain text straight into
+the window and have it become an attachment.
+*(`Paste`)*
+
+### P4-ATT-5 — Tidy up a photographed receipt
+The user can rotate a crooked scan either way, drag a frame to crop it, or let the
+product find the document's edges within the photograph and propose the crop itself.
+*(`RotateLeft`/`RotateRight`, `Resizer`, `AutoCrop`, `CannyEdgeDetector`)*
+
+### P4-ATT-6 — Read small print by zooming in
+The user can magnify and shrink what they're looking at, with the crop frame staying
+attached to the right part of the image as they do.
+*(`ZoomIn`/`ZoomOut`, `MoveResizer`)*
+
+### P4-ATT-7 — Type a note as an attachment and edit it in place
+A pasted or created text attachment is editable right there in the window, and can be
+made wider or narrower so it reads the way the user wants.
+*(`AttachmentDialogDocumentItem`, `LiveResizable`)*
+
+### P4-ATT-8 — Print an attachment
+The user can send the selected attachment to a printer through the normal print dialog.
+*(`Print`, `CloneContent`)*
+
+### P4-ATT-9 — Move, copy or remove an attachment
+Cut, copy, paste and delete work on the selected attachment by menu, toolbar or the
+usual keystrokes, so paperwork can be moved between transactions.
+*(the window's command bindings — but see Open Question 12)*
+
+### P4-ATT-10 — Not lose edits by closing the window
+Rotations and crops are written back automatically when the window closes, and the
+transaction's paperwork indicator is refreshed at the same moment.
+*(`OnClosing` → `Save`, `AttachmentManager.FindAttachments`)*
+
+### P4-ATT-11 — Open an attachment in the application that owns it
+Double-clicking an attachment opens it in whatever program normally handles that kind
+of file, so a PDF statement opens in a PDF reader rather than being shown as an icon.
+*(`OnDoubleClickItem`)*
+
+---
+
+## 4.8 Giving a transaction a date for tax purposes
+
+### P4-TAXDATE-1 — Record a different date for tax than the one it happened on
+The user picks a date on a calendar to use for tax purposes on the selected
+transaction, with the window's title and prompt explaining what's being set.
+*(`PickYearDialog` in `PickDateDialog.xaml`, `SetTitle`/`SetPrompt`)*
+
+### P4-TAXDATE-2 — Take that override off again
+A "remove" button clears the chosen date so the transaction goes back to using its real
+date, distinguishing "no override" from "cancel".
+*(`OnRemove` clearing the picker, `SelectedDate` returning null)*
+
+---
+
+## 4.9 Rental property
+
+### P4-RENT-1 — Describe a rental property
+The user records a property's name, address and free-text notes.
+*(`RentalDialog`)*
+
+### P4-RENT-2 — Record who owns it and in what shares
+Two owners and their percentages are recorded on their own tab.
+*(`RentBuilding.OwnershipName1`/`2`, `OwnershipPercentage1`/`2`)*
+
+### P4-RENT-3 — List the units within the property and who rents each
+A table on its own tab holds each unit's number, its current renter and a note.
+*(`RentBuilding.Units`, `RentUnit` — but see Open Question 13)*
+
+### P4-RENT-4 — Say which categories make up the property's economics
+On a third tab the user nominates the categories that represent the property's income
+and its taxes, interest, repairs, maintenance and management, choosing "not applicable"
+for any that don't apply.
+*(`RentalDialog.Categories` with a synthetic not-applicable entry)*
+
+---
+
+## 4.10 Where the data lives, and who can open it
+
+### P4-DB-1 — Create a new local file for their books
+The user gives the new file a display name and a location — typed or chosen with a file
+browser — and is told if either is missing rather than getting a half-made file.
+*(`NewSqliteDatabaseDialog`)*
+
+### P4-DB-2 — Keep their books on a database server instead
+The user names a server (picking from servers already known, or typing a new one) and a
+catalog, plus the display name they'll see it under.
+*(`NewSqlServerDatabaseDialog`)*
+
+### P4-DB-3 — Reopen a set of books they've used before
+The user picks from a list of the databases they've registered, most recently used
+first, and can open one by double-clicking it.
+*(`OpenDatabaseDialog`, `DatabaseRegistry`)*
+
+### P4-DB-4 — Get a new server ready for the product
+If the product doesn't yet know how to reach a server, it asks the user for the
+server administrator's password — explaining which server and why — and sets the server
+up rather than just failing.
+*(`SaCredentialDialog`, `ISaCredentialPrompt`, `SqlServerBootstrapper`)*
+
+### P4-DB-5 — Let someone else sign in to shared books
+The user creates an additional sign-in for a server-hosted set of books, entering a
+user name and a password twice. Mismatched or empty entries are refused with an
+explanation, and a rejection from the server is shown in its own words.
+*(`AddLoginDialog`, `SqlServerDatabase.AddLogin`)*
+
+### P4-DB-6 — Protect their data with a password, and prove it later
+The same window both sets the password that protects a set of books and asks for it on
+the way in, showing whether what's been typed matches and refusing an empty one unless
+the password is explicitly optional.
+*(`PasswordWindow`, `Optional`, `RealPassword`)*
+
+---
+
+## 4.11 Bringing data in from elsewhere
+
+### P4-IMPORT-1 — Merge another copy of their books into this one
+The user selects one or more other data files and the product works through them
+account by account, matching each incoming transaction against what's already there and
+either filling in the gaps on the existing record or adding it as new.
+*(`MoneyFileImportDialog.Import`/`ImportAccount`, `Transaction.Merge`)*
+
+### P4-IMPORT-2 — Watch the merge happen and see what changed where
+While it runs, the user sees a row per account with its own progress bar and a running
+count of how many rows that account gained or had updated, and a tick when it's done.
+*(`AccountImportState`, the account list template)*
+
+### P4-IMPORT-3 — Jump from an account's result to the transactions it changed
+Clicking an account in that list takes the user to exactly the transactions the merge
+touched, so they can check the work rather than trusting the count.
+*(`OnRowSelected` → `IViewNavigator.ViewTransactions`)*
+
+### P4-IMPORT-4 — Open a password-protected file they're importing
+If the incoming file is protected, the user is prompted for its credentials, with the
+prompt worded for the file being imported rather than for their own data.
+*(`ProcessFile` reusing `PasswordWindow` with a rewritten prompt)*
+
+### P4-IMPORT-5 — Stop a long merge, and be asked before losing one
+Closing the window while a merge is running asks whether to cancel; saying no leaves it
+running. Closing the main window closes the merge window with it.
+*(`OnClosing`, `CancellationTokenSource`, `OnOwnerClosed`)*
+
+### P4-IMPORT-6 — Bring the paperwork and statements across too
+Attachments and statement documents belonging to the incoming transactions are brought
+over alongside the transactions themselves.
+*(`AttachmentManager.ImportAttachments`, `StatementManager.ImportStatements` — but
+see Open Question 14)*
+
+### P4-IMPORT-7 — Teach the product what a spreadsheet's columns mean
+When importing a delimited file, the user is shown each column heading as it appears in
+their file and chooses which piece of a transaction it represents, narrowing a list of
+possible fields by typing.
+*(`CsvImportDialog`, `CsvMap`, `CsvFieldMap`)*
+
+### P4-IMPORT-8 — Be caught out before importing a broken mapping
+Mapping two columns to the same thing is refused with the offending field named.
+Leaving some fields unmapped is allowed, but only after the user confirms they meant to.
+*(`CsvImportDialog.Validate`)*
+
+### P4-IMPORT-9 — Flip the sign of a file that records spending as positive
+A single toggle handles the common case of a bank that exports amounts the opposite way
+round from the product's convention.
+*(`CsvMap.Negate`)*
+
+### P4-IMPORT-10 — Not have to redo the mapping every time
+A mapping the user has already built for a given source is loaded back into the window
+so they only have to adjust it, not rebuild it.
+*(`CsvImportDialog.SetMap`, `WpfBusinessLayerUiCallback.PromptForCsvFieldMapping`)*
+
+---
+
+## 4.12 Saying what a report or export should cover
+
+### P4-REPORT-1 — Choose the period a chart covers
+The user picks a start and end date for the history chart beside their account, and,
+where it applies, whether the period is broken down by day, month or year.
+*(`ReportRangeDialog`, opened from the trend chart's own menu — but see Open
+Question 16)*
+
+### P4-REPORT-2 — Not be asked about a breakdown that doesn't apply
+Where the thing being configured has no notion of intervals, that choice is hidden
+rather than shown and ignored.
+*(`ReportRangeDialog.ShowInterval` — but see Open Question 15)*
+
+### P4-REPORT-3 — Limit the period to the categories they care about
+The window can offer a tick-list of categories, all ticked to begin with, so the user
+can exclude the ones they don't want included. *No scenario claims this reaches the
+user today* — nothing switches it on; see Open Question 16.
+*(`EnableCategoriesSelection`, `Categories`, `CheckItem`)*
+
+### P4-REPORT-4 — Say which tax year an export is for
+The user enters the year, in full or as two digits. Anything that isn't a number
+prevents them confirming rather than producing an empty export.
+*(`TaxReportDialog.Year`, `YearText_TextChanged`)*
+
+### P4-REPORT-5 — Work to a tax year that doesn't start in January
+The user picks the month their financial year starts, pre-set to whatever they've
+configured for their books.
+*(`TaxReportDialog.Month`, `FiscalStartMonthCombo`)*
+
+### P4-REPORT-6 — Choose how investment sales are grouped for tax
+The user says whether holdings should be consolidated by the date they were acquired or
+the date they were sold, and can limit the export to investment activity only.
+*(`ConsolidateSecuritiesOnDateSold`, `InvestmentsOnly`)*
+
+---
+
+## 4.13 Working directly with the stored data
+
+### P4-SQL-1 — Run a query against their own data and see the rows
+A power user can type a query, run it, and get the resulting rows in a table, with the
+query and the results each taking as much of the window as they drag them to. A blank
+query, or one the database rejects, is reported rather than swallowed.
+*(`FreeStyleQueryDialog` — but see Open Question 17)*
+
+### P4-SQL-2 — See what the product last wrote to the database
+The same window is reused, pre-filled, to show the log of recent changes the storage
+layer has recorded.
+*(`MainWindow.OnCommandShowLastUpdate`, `IDatabase.GetLog`)*
+
+### P4-SQL-3 — Save query results for use elsewhere
+The rows that came back can be written to a file, schema included, so they can be taken
+into another tool.
+*(`OnMenuItemSave_Clicked`, `DataSet.WriteXml`)*
+
+---
+
+## 4.14 Trying the product out with realistic data
+
+### P4-SAMPLE-1 — Generate a believable set of books to explore
+Before the product builds sample data, the user says which spending profile to base it
+on, the name of the fictitious employer, the size of the fortnightly pay cheque, an
+annual inflation rate and how many years to simulate — so the sample resembles their own
+situation closely enough to be worth exploring.
+*(`SampleDatabaseOptions`, `SampleDatabase`)*
+
+### P4-SAMPLE-2 — Be told which entry is wrong before generating anything
+Each value is checked as it's typed and the single reason confirmation is unavailable
+is shown in words — a missing profile file, a non-numeric year count, an unparseable pay
+cheque or inflation figure.
+*(`EnableButtons`, the message line)*
+
+---
+
+## 4.15 What every dialog does the same way
+
+### P4-DLG-1 — Have windows look like part of the product
+Dialogs take the product's own colours, including in dark mode, rather than the
+system's defaults.
+*(`BaseDialog` — but see Open Question 18)*
+
+### P4-DLG-2 — Get help about the window they're in
+The windows that cover a substantial subject carry their own help topic, so pressing
+help in an account, online-banking, attachment or sample-data window lands on the page
+about that subject rather than on the product's front page.
+*(`HelpService.HelpKeyword` on `AccountDialog`, `OnlineAccountDialog`,
+`AttachmentDialog`, `SampleDatabaseOptions` — but see Open Question 19)*
+
+### P4-DLG-3 — Have a dialog open over the window it came from
+Dialogs open centred on the window that opened them and stay in front of it, rather
+than appearing elsewhere on the desktop or behind the main window.
+*(`Owner` assignment at every call site, plus
+`WindowStartupLocation="CenterOwner"` on 14 of the 24 windows with XAML — but see
+Open Question 30)*
+
+### P4-DLG-4 — Not have dialogs clutter the taskbar
+Subordinate windows don't appear as separate taskbar entries, so the product reads as
+one application.
+*(`ShowInTaskbar="False"` on 13 windows plus the attachments window in code — see
+Open Question 30)*
+
+### P4-DLG-5 — Confirm or back out with the keyboard
+Enter confirms and Escape backs out without reaching for the mouse.
+*(`IsDefault`/`IsCancel`, `RecategorizeDialog.OnPreviewKeyDown`,
+`AttachmentDialog.OnPreviewKeyDown` — but see Open Question 20)*
+
+### P4-DLG-6 — Keep typing while the window catches up
+Choosing a category, a tax line, a party, a holding or an institution is done by typing
+part of what they want and seeing the list narrow, rather than scrolling thousands of
+entries.
+*(`FilteringComboBox` + a `FilterChanged` handler in `CategoryDialog`, `LoanDialog`,
+`MergeCategoryDialog`, `RecategorizeDialog`, `CsvImportDialog`, and the hand-rolled
+equivalent in `OnlineAccountDialog`)*
+
+### P4-DLG-7 — Have a dialog notice the data changing underneath it
+Where something can change while a dialog is open — a new institution connection, a new
+exchange rate, a new party — the dialog updates itself rather than showing stale
+choices.
+*(`AccountDialog.OnMoneyChanged`, `RenamePayeeDialog.OnPayees_Changed`)*
+
+---
+
+## Phase 4 coverage checklist
+
+Every file in `Source/WPF/MyMoney/Dialogs/`. "Not user-facing" entries are shared
+bases, view models, plumbing or dead code the user never perceives.
+
+### Dialog classes
+
+| File(s) | Class | Status |
+|---|---|---|
+| `AccountDialog.xaml` + `.xaml.cs` | `AccountDialog` | P4-ACCT-1…P4-ACCT-9 |
+| `LoanDialog.xaml` + `.xaml.cs` | `LoanDialog` | P4-ACCT-10 — see Open Questions 3, 4 |
+| `SelectAccountDialog.xaml` + `.xaml.cs` | `SelectAccountDialog` | P4-ACCT-11 |
+| `SelectAccountDialog.xaml.cs` | `AccountHelper` | P4-ACCT-11, P4-ACCT-12 — the static "pick an account, or make one" helper every importer and the online-account flow share |
+| `OnlineAccountDialog.xaml` + `.xaml.cs` | `OnlineAccountDialog` | P4-ONLINE-1…P4-ONLINE-12 |
+| `OnlineAccountDialog.xaml.cs` | `AccountListItem` | P4-ONLINE-8…P4-ONLINE-10 — the per-account row's view model; **its `ToolTipMessage` setter is broken**, see Open Question 21 |
+| `PasswordWindow.xaml` + `.xaml.cs` | `PasswordWindow` | P4-AUTH-1, P4-AUTH-2, P4-AUTH-7, P4-DB-6, P4-IMPORT-4 — the shared credential window every other sign-in window is built from |
+| `PasswordWindow.xaml.cs` | `OkEventArgs` | **Not user-facing** — how a subclass vetoes confirmation and supplies the reason |
+| `OfxLoginDialog.cs` | `OfxLoginDialog` | P4-AUTH-1, P4-AUTH-2 |
+| `MfaChallengeDialog.cs` | `MfaChallengeDialog` | P4-AUTH-3 |
+| `AuthTokenDialog.cs` | `AuthTokenDialog` | P4-AUTH-4 — see Open Question 6 |
+| `ChangePasswordDialog.cs` | `ChangePasswordDialog` | P4-AUTH-5 |
+| `OnlineServiceDialog.xaml` + `.xaml.cs` | `OnlineServiceDialog` | P4-QUOTES-1…P4-QUOTES-5 — see Open Question 7 |
+| `CategoryDialog.xaml` + `.xaml.cs` | `CategoryDialog` | P4-CAT-1…P4-CAT-8 |
+| `MergeCategoryDialog.xaml` + `.xaml.cs` | `MergeCategoryDialog` | P4-CAT-9, P4-CAT-10 — see Open Question 8 |
+| `RecategorizeDialog.xaml` + `.xaml.cs` | `RecategorizeDialog` | P4-CAT-11 |
+| `RenamePayeeDialog.xaml` + `.xaml.cs` | `RenamePayeeDialog` | P4-PAYEE-1…P4-PAYEE-8 — see Open Questions 9, 10 |
+| `AttachmentDialog.xaml` + `.xaml.cs` | `AttachmentDialog` | P4-ATT-1…P4-ATT-11 |
+| `AttachmentDialog.xaml.cs` | `AttachmentDialogItem` (abstract) | **Not user-facing** — the contract each kind of attachment implements |
+| `AttachmentDialog.xaml.cs` | `AttachmentDialogImageItem` | P4-ATT-1, P4-ATT-5, P4-ATT-8 |
+| `AttachmentDialog.xaml.cs` | `AttachmentDialogDocumentItem` | P4-ATT-1, P4-ATT-4, P4-ATT-7 |
+| `AttachmentDialog.xaml.cs` | `AttachmentDialogFileItem` | P4-ATT-1, P4-ATT-11 — **but its `Save` and `Copy` are empty**, see Open Question 12 |
+| `AttachmentDialog.xaml.cs` | `WiaErrorCode` (enum) | **Not user-facing** — scanner error codes for a scan feature that is entirely commented out; see Open Question 22 |
+| `PickDateDialog.xaml` + `.xaml.cs` | `PickYearDialog` | P4-TAXDATE-1, P4-TAXDATE-2 — note the class/file name mismatch |
+| `RentalDialog.xaml` + `.xaml.cs` | `RentalDialog` | P4-RENT-1…P4-RENT-4 — see Open Questions 13, 23 |
+| `NewSqliteDatabaseDialog.xaml` + `.xaml.cs` | `NewSqliteDatabaseDialog` | P4-DB-1 |
+| `NewSqlServerDatabaseDialog.xaml` + `.xaml.cs` | `NewSqlServerDatabaseDialog` | P4-DB-2 — see Open Question 24 |
+| `OpenDatabaseDialog.xaml` + `.xaml.cs` | `OpenDatabaseDialog` | P4-DB-3 |
+| `SaCredentialDialog.xaml` + `.xaml.cs` | `SaCredentialDialog` | P4-DB-4 |
+| `AddLoginDialog.xaml` + `.xaml.cs` | `AddLoginDialog` | P4-DB-5 |
+| `MoneyFileImportDialog.xaml` + `.xaml.cs` | `MoneyFileImportDialog` | P4-IMPORT-1…P4-IMPORT-6 — see Open Questions 14, 25 |
+| `MoneyFileImportDialog.xaml.cs` | `AccountImportState` | P4-IMPORT-2, P4-IMPORT-3 — the per-account row's view model, including the timer that throttles progress updates |
+| `MoneyFileImportDialog.xaml.cs` | `DemoList` | **Not user-facing** — five fruit-named placeholder rows so the list has content in the visual designer; cleared in the constructor before the window is ever shown |
+| `CsvImportDialog.xaml` + `.xaml.cs` | `CsvImportDialog` | P4-IMPORT-7…P4-IMPORT-10 |
+| `ReportRangeDialog.xaml` + `.xaml.cs` | `ReportRangeDialog` | P4-REPORT-1, P4-REPORT-2 — despite the name, its only caller is the history chart, not any report; see Open Questions 15, 16 |
+| `ReportRangeDialog.xaml.cs` | `CheckItem` | **Not user-facing** — a tickable wrapper round a category, for a list nothing populates |
+| `TaxReportDialog.xaml` + `.xaml.cs` | `TaxReportDialog` | P4-REPORT-4…P4-REPORT-6 |
+| `FreeStyleQueryDialog.xaml` + `.xaml.cs` | `FreeStyleQueryDialog` | P4-SQL-1…P4-SQL-3 — see Open Questions 17, 26 |
+| `SampleDatabaseOptions.xaml` + `.xaml.cs` | `SampleDatabaseOptions` | P4-SAMPLE-1, P4-SAMPLE-2 — see Open Question 27 |
+| `BaseDialog.cs` | `BaseDialog` | P4-DLG-1 — **not itself user-facing**; a 12-line `Window` subclass whose entire job is to take the product's page background and text brushes |
+
+### Dialog members that are not user-facing
+
+| Member | Reason |
+|---|---|
+| `AttachmentDialog.Scan`, `GetScannerAsync`, the `WIA.Device`/`CommonDialog` statics | **Dead** — the whole scanner feature is commented out, including its toolbar button |
+| `AttachmentDialog.GetWiaErrorMessage` | **Dead** — live code, but its only caller was the commented-out `Scan` method; nothing calls it now |
+| `AttachmentDialog.Browse` | **Dead** — a folder browser for changing the attachment directory that no button or menu item invokes |
+| `AttachmentDialog.ClearSelection`, `ItemCount` | Internal bookkeeping around save and selection |
+| `CategoryDialog.comboBoxType_SelectionChanged` | **Dead** — an empty handler; the XAML wires no `SelectionChanged` on that control |
+| `CategoryDialog.ColorPicker` | **Not user-facing** — reaches a non-public `Content` property on the colour flyout by reflection, the same class of workaround as Phase 3's `SymbolIconHackery` |
+| `LoanDialog.onlineAccounts`, `newOnlineAccounts`, `InsertAccount`, `GetMatchingOnlineAccount` | **Dead** — the loan window builds and sorts a list of institution connections that no control in its XAML is bound to (the grid cell where one would go is `Visibility="Collapsed"` and empty), so `OnCancel`'s cleanup loop is always over an empty list |
+| `AccountDialog.GetMatchingOnlineAccount(string name)` | Its `name` parameter is ignored — the body compares `editingAccount.OnlineAccount.Name` instead. Harmless today because the only call site passes exactly that, but it is not the function its signature claims |
+| `OnlineAccountDialog.OnShowXml` | **Dead** — a hyperlink handler no XAML references |
+| `OnlineAccountDialog.MeasureListString`, `typeface` | **Dead** — a text-measuring helper nothing calls; the column sizing is done by `ResizeListColumns` instead |
+| `OnlineAccountDialog.ResizeListColumns` | **Not user-facing** — a documented workaround for a list-column sizing bug |
+| `OnlineServiceDialog.Apply` | **Deliberately empty**, with a comment saying so — see Open Question 7 |
+| `OnlineServiceDialog.Settings`, `SelectedSettings` | Read by the caller after the window closes; not things the user perceives |
+| `RentalDialog.UpdateUI` | **Dead** — an empty method called twice |
+| `FreeStyleQueryDialog.myMoney` | **Dead** — the constructor takes and stores the whole financial model and never reads it |
+| `MoneyFileImportDialog.ShowMessage`/`ShowOutput`/`ShowProgress` | **Not user-facing** — the status-service interface implemented with empty bodies so the storage layer has somewhere to report to while loading the incoming file; the window shows its own progress instead |
+| `PasswordWindow.OnCancel` | Calls `Hide()` without setting a result; backing out works because the button is also marked as the window's cancel button. Fragile rather than wrong |
+| `AttachmentDialog.OnItemChanged` | Dereferences the *selected* item rather than the item that changed; only ever called for the selected one today |
+
+---
+
+## Open questions from Phase 4
+
+Things a human should double-check, because the call was a judgement rather than
+obvious from the code — and, where noted, because they look like real defects.
+
+1. **Nine dialogs, one shared credential window — and it is the riskiest thing here.**
+   `PasswordWindow` is simultaneously the "set a password on my data" window, the
+   "prove you know it" window, the online-banking sign-in, the multi-factor
+   questionnaire, the authentication-token prompt and the change-password flow, each
+   subclass bending it by adding fields and rewriting its prose at runtime. It is
+   captured as several scenarios because those are genuinely different user goals, but
+   a redesign should decide deliberately whether they stay one window.
+
+2. **The account window's aliases are edited live, not on a working copy.** Everything
+   else in `AccountDialog` is edited on a copy and only committed on OK (P4-ACCT-3),
+   but adding an alias calls `money.AccountAliases.AddAlias` immediately and the little
+   close box calls `container.RemoveAlias` immediately. Cancelling the window does not
+   undo either. P4-ACCT-6 therefore describes what the user can do, not a
+   cancel-safe edit. Worth confirming this is intentional; it is a visible
+   inconsistency within one window.
+
+3. **The loan window's web-site button throws on an empty address.** `LoanDialog.
+   ButtonGoToWebSite` calls `this.editingAccount.WebSite.ToLower()` *before* its
+   `string.IsNullOrWhiteSpace` guard — the two statements are in the opposite order
+   from the working version in `AccountDialog.OnButtonGoToWebSite`. Clicking `>>` on a
+   loan with no web site recorded is a null reference, i.e. the app's unhandled-exception
+   path. P4-ACCT-5 describes the account window's behaviour only.
+
+4. **The loan window validates nothing.** Unlike the account window (P4-ACCT-2), it has
+   no name check at all, so OK will happily write an empty name onto the account, and
+   it has no help topic. It also copies `OpeningBalance` on OK while offering no field
+   to edit it. It reads as an older copy of `AccountDialog` that stopped being
+   maintained.
+
+5. **The institution window shows fields that don't apply for half the account types.**
+   `ShowHideFieldsForAccountType` has cases for chequing/savings/money-market/credit-line,
+   credit card, brokerage and retirement — and no `default`. For a cash, asset, loan or
+   any other account type, the bank, branch *and* broker identifier fields all stay
+   visible with their XAML defaults. P4-ONLINE-3 claims only that the fields are
+   tailored where the product tailors them.
+
+6. **The authentication-token prompt can end up with a blank label.** `AuthTokenDialog`
+   computes a fallback label ("Authentication token") when the institution supplies
+   none — and then passes `info.AuthTokenLabel` (the empty one) to the field anyway,
+   never using `label`. A bank that sends no label gives the user an unlabelled box.
+   One-line copy-paste bug; P4-AUTH-4 describes the intent.
+
+7. **Cancelling the market-data settings window keeps the changes.** `OnlineServiceDialog.
+   Apply()` is empty with the comment *"apply has nothing to do since we don't yet have a
+   proper cancel that restores the edited settings on cancel"*, and `OnCancel` just closes.
+   Access keys, request limits and the two capability toggles are written straight to the
+   live settings objects as the user edits them. So Cancel is a lie in this one window.
+   Flagged rather than captured as a scenario.
+
+8. **The merge-category window's OK button is declared as its Cancel button.** Both
+   buttons in `MergeCategoryDialog.xaml` carry `IsCancel="True"` and neither carries
+   `IsDefault`, so Escape is ambiguous and Enter confirms nothing. Its two call sites in
+   `CategoriesControl` also test the outcome differently — the delete path uses
+   `ShowDialog() == false || SelectedCategory == null`, the merge path uses
+   `ShowDialog() == true && SelectedCategory != null` — which is the shape you get when
+   one of them was written around a result that couldn't be relied on. Worth someone
+   running both paths: if the framework's cancel handling wins over the click handler,
+   confirming a category merge silently does nothing.
+
+9. **The known malformed-pattern crash in the rename window is confirmed here.**
+   `CLAUDE.md` already records that `Alias`'s setters build the regular expression
+   eagerly. `RenamePayeeDialog.CheckConflicts` does exactly that
+   (`new Alias() { Pattern = …, AliasType = … }`) and, worse, runs it from a delayed
+   timer callback 50 ms after the user types — so a half-typed pattern with "use regular
+   expressions" ticked throws from a timer, not from a button press, with nothing in the
+   dialog catching it. P4-PAYEE-2 describes the capability; this remains an open,
+   unfixed robustness gap.
+
+10. **Two buttons in the rename window both claim to be the default.** `CamelCaseButton`
+    and `okButton` are both `IsDefault="True"`. The same pattern appears in
+    `OnlineAccountDialog` (Connect *and* OK) and three times over in
+    `OnlineServiceDialog` (Browse, Disable *and* OK). What Enter does in those windows
+    is at best unpredictable and at worst destructive — Disable clears an access key.
+    P4-DLG-5 describes the intent; this is the counter-example.
+
+11. **Dropping several files at once files the first one N times.**
+    `AttachmentDialog.OnDrop` iterates `foreach (var file in files)` but then copies
+    `files[0]` on every pass — it takes the *extension* from `file` and the *content*
+    from `files[0]`. Dropping three receipts gives three copies of the first, two of
+    them with the wrong extension. P4-ATT-3 describes single-file drops honestly.
+
+12. **Saving an attachment destroys any non-image, non-text attachment.**
+    `AttachmentDialog.Save` runs over *every* item whenever anything is dirty (including
+    automatically on close, P4-ATT-10). For each it asks for a fresh unique file name —
+    which, because the old file still exists, is always a *different* name — deletes the
+    old file, then calls `item.Save(newName)`. `AttachmentDialogFileItem.Save` is an empty
+    method. So a PDF or Word statement filed against a transaction is deleted and not
+    rewritten the first time the user rotates any other attachment in that window.
+    `AttachmentDialogFileItem.Copy` is also empty, and `Cut` is implemented as copy-then-delete —
+    so cutting one of those attachments deletes it and puts nothing on the clipboard.
+    Confirmed by reading `AttachmentManager.GetUniqueFileName` (returns the first
+    non-existent name) and `TempFilesManager.DeleteFile` (deletes immediately). This is
+    the most serious thing Phase 4 found and is worth verifying by hand before anyone
+    trusts the attachments feature with a PDF.
+
+13. **Unit edits in the rental window survive Cancel.** `RentBuilding.ShallowCopy` is a
+    `MemberwiseClone`, so the working copy and the real property share the *same* list of
+    units. The units table is bound to that shared list, and `ButtonOk` copies name,
+    address, note, ownership and the six categories back — but never the units, because
+    it doesn't need to. The consequence is that editing a renter's name and then
+    cancelling keeps the change, while editing the property's name and cancelling
+    discards it. P4-RENT-3 describes the capability without claiming Cancel undoes it.
+
+14. **Imported attachments are filed against the wrong transaction.**
+    `MoneyFileImportDialog.ImportAccount` calls `myAttachments.ImportAttachments(t, …)`
+    where `t` is the transaction from the *incoming* file. In the merge branch that is
+    harmless (the two share an id). In the new-transaction branch the local transaction
+    `u` has a different id, so the attachment is copied into the user's attachment folder
+    under the incoming file's transaction id and the new transaction never shows it; the
+    `HasAttachment` flag is also set on the throwaway source object rather than on `u`.
+    P4-IMPORT-6 describes the intent.
+
+15. **Re-showing the report interval doesn't re-show the control.**
+    `ReportRangeDialog.ShowInterval`'s `false` branch hides both the label and the combo;
+    its `true` branch shows only the label. Since the constructor makes both visible, this
+    only bites a caller that sets it false then true on the same instance — but the
+    asymmetry is plainly unintended.
+
+16. **The "Report" window is not used by any report, and half of it is unreachable.**
+    `ReportRangeDialog` has exactly **one** caller in the whole product —
+    `TrendGraph.OnSetRange`, the range command on the history chart strip — which
+    retitles it "Graph Range" and sets `ShowInterval = false`. No report opens it; reports
+    configure themselves in the side panel instead (Phase 3's P3-PANEL-1). And its
+    category tick-list is dead in both directions: `CategoriesPicker` is collapsed in
+    XAML, `EnableCategoriesSelection` is never set by anything, and the `Categories`
+    setter that would populate the list is never called — so the list is simultaneously
+    hidden and empty. P4-REPORT-1 and P4-REPORT-2 describe the chart-range use;
+    P4-REPORT-3 is explicitly marked as not reaching the user. The window's name, its
+    title, its help-free state and its dead half all point at a feature that was
+    repurposed and never tidied.
+
+17. **The Adhoc SQL Query menu item does nothing on a SQLite file.**
+    `MainWindow.OnCommandAdhocQuery` casts the open database to `SqlServerDatabase` and
+    returns silently if it isn't one — and SQLite is the default local format.
+    `MenuQueryAdhoc` has no `CanExecute`, so the item is always enabled and simply
+    doesn't respond. Same shape as Phase 2's unreachable Backup command. (The adjacent
+    "Show Last Update" item works on any database.) P4-SQL-1 is therefore only reachable
+    for server-hosted books.
+
+18. **Four windows don't inherit the product's theme.** `SaCredentialDialog`,
+    `OpenDatabaseDialog`, `NewSqliteDatabaseDialog` and `NewSqlServerDatabaseDialog`
+    derive from `Window`, not `BaseDialog` — so in dark mode they appear as white system
+    dialogs. These are also the four newest dialogs in the folder (the database-registry
+    work), which suggests the convention wasn't obvious to whoever added them. Directly
+    relevant to a UI redesign.
+
+19. **Only four windows have a help topic.** `AccountDialog`, `OnlineAccountDialog`,
+    `AttachmentDialog` and `SampleDatabaseOptions` carry a `HelpKeyword`; the other
+    twenty-five do not, including the loan, category, rename-payee and online-service
+    windows, which are at least as likely to need explaining. P4-DLG-2 describes what
+    exists, not a general guarantee.
+
+20. **Enter and Escape are handled four different ways.** Some windows use
+    `IsDefault`/`IsCancel`; `RecategorizeDialog` and `AttachmentDialog` intercept key
+    presses themselves; `AccountDialog` has to swallow Enter in its alias box so it
+    doesn't close the window; and the windows in Open Question 10 have several competing
+    defaults. `RecategorizeDialog`'s interception is window-wide, so pressing Enter while
+    still typing into its category box commits the whole recategorize-everything
+    operation. Worth settling as one convention in a redesign.
+
+21. **The online-account list's tooltips never update.**
+    `AccountListItem.ToolTipMessage`'s setter raises a change notification for
+    `"WarningMessage"` — a property that does not exist. The list's tooltip binding is to
+    `ToolTipMessage`, so it never refreshes. `OnIconButtonClick` works around this by
+    assigning `e.ToolTip` directly on three of its five branches, which is presumably how
+    it went unnoticed.
+
+22. **Document scanning was built and then switched off.** The scan toolbar button, the
+    scanner-selection code and the acquire-image flow are all commented out in
+    `AttachmentDialog`, but the WIA error-code enumeration and the error-message
+    translator survive as live, uncalled code. Given the dialog's own class comment still
+    says "Interaction logic for ScanDialog.xaml", scanning receipts was clearly the
+    original point of this window. If the redesign wants it back, the intent is written
+    down; if not, there is a block of dead code to remove.
+
+23. **The rental window can't edit half of what the model stores.** Phase 1's P1-RENT-1
+    records purchase date, purchase price, land value and current estimated value on a
+    property; `RentalDialog` offers none of them. Either they're maintained somewhere
+    else, or they can only be set by importing. Worth checking before a redesign assumes
+    the existing window is the complete property editor.
+
+24. **The "Test database" tick-box is hidden for SQLite and not for SQL Server.**
+    `NewSqliteDatabaseDialog` collapses it under `#if !DEBUG`; `NewSqlServerDatabaseDialog`
+    shows it always and reads it always. So a release build shows end users a developer
+    affordance in one of the two new-database windows and not the other.
+
+25. **"Money File Import" only imports one kind of money file.** Despite the name and the
+    multi-file selection, `ProcessFile` accepts only `.db`/`.mmdb` and answers anything
+    else with "Import only supports sqllite money files" (sic) before stopping the whole
+    batch. Captured under P4-IMPORT-1 without claiming broader reach; the wording and the
+    scope are both worth revisiting.
+
+26. **Six of the eight menu items in the query window do nothing.** `FreeStyleQueryDialog`'s
+    File menu offers New, Open…, (a blank item), Save, Save as…, Export… and Exit, of
+    which only Save has a handler; the others have no `Click` and no `Command`. P4-SQL-3
+    covers Save only.
+
+27. **The sample-data window opens with OK disabled about half the time.** Its profile
+    field defaults to the bare relative name `SampleData.xml`, which `File.Exists` resolves
+    against the working directory, so the window shows "Template file not found" and a
+    disabled OK unless the caller supplies a real path first. The one live caller
+    (`SampleDatabase`) does extract the embedded file and set the path, so the real flow is
+    fine — but the default is misleading and the dialog is unusable if opened any other way.
+
+28. **The boundary with Phases 5 and 6.** `TaxReportDialog` and `ReportRangeDialog` are
+    captured here as *option collection* (P4-REPORT-*); what the resulting tax export or
+    chart actually contains is Phase 7 and Phase 5. `CsvImportDialog` and
+    `MoneyFileImportDialog` are captured here as the *conversation with the user*; the
+    parsing, matching and writing behind them is Phase 6. `OnlineAccountDialog`'s protocol
+    exchange with a bank is Phase 6 or Phase 8; only what the user sees and decides is here.
+    If a later phase finds a user-visible decision that only exists inside one of these
+    windows, it belongs here.
+
+29. **Modal windows also live outside `Dialogs/`.** This phase's scope was that one folder,
+    but the product puts modal UI elsewhere too — `MessageBoxEx` (the product's own
+    replacement for the system message box, already referenced by Phase 2), the print
+    dialog, and the native file and folder pickers used by at least eight of these windows.
+    None is catalogued here. `MessageBoxEx` in particular carries real product behaviour
+    (Phase 3 and `CLAUDE.md` both record that it posts rather than blocks) and is a
+    cross-cutting Phase 8 item.
+
+30. **None of the shared dialog conventions is actually shared.** Counted across the 29
+    classes: the themed base class is used by 24 of the 28 that aren't `BaseDialog`
+    itself, a help topic by 4, `CenterOwner` by 14
+    of the 24 with XAML, `ShowInTaskbar="False"` by 13 (plus one set in code), and
+    Enter/Escape handling is done four different ways (Open Question 20). Each of
+    P4-DLG-1 through P4-DLG-5 is therefore a description of the *majority* convention,
+    not an invariant — a dialog picked at random has a fair chance of missing two or
+    three of them. This is directly relevant to the redesign that this catalog exists to
+    drive: the cheapest single improvement available in this folder is one real shared
+    base that carries all five. It is also the same class of problem as the recently
+    fixed "two dialogs opening disconnected from the app window" on this branch, which
+    suggests the gaps are still being found one at a time.
