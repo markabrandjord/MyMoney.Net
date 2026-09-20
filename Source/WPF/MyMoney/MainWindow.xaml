@@ -117,8 +117,8 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <!-- Menu -->
-        <ColumnDefinition Width="81.296" />
-        <ColumnDefinition Width="314.707"/>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto"/>
         <!-- spacer -->
         <ColumnDefinition Width="*" />
         <!--Toolbar buttons on the right side-->
