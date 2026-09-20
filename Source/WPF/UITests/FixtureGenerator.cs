@@ -49,7 +49,7 @@ namespace Walkabout.UITests
             db.Save(money);
 
             Assert.That(File.Exists(outputPath), Is.True);
-            TestContext.WriteLine($"Wrote fixture to {outputPath}");
+            TestContext.Out.WriteLine($"Wrote fixture to {outputPath}");
         }
     }
 }

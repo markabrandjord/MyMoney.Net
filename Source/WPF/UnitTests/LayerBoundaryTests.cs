@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
-using NUnit.Framework.Legacy;
 
 namespace Walkabout.Tests
 {
@@ -26,8 +25,9 @@ namespace Walkabout.Tests
         {
             var assembly = typeof(Walkabout.Data.MyMoney).Assembly;
             var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
-            CollectionAssert.IsEmpty(
+            Assert.That(
                 referenced.Where(n => AllWpfAssemblyNames.Contains(n)).ToList(),
+                Is.Empty,
                 $"MyMoney.Business referenced a WPF assembly: {string.Join(", ", referenced)}");
         }
 
@@ -36,8 +36,9 @@ namespace Walkabout.Tests
         {
             var assembly = typeof(Walkabout.Data.SqliteDatabase).Assembly;
             var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
-            CollectionAssert.IsEmpty(
+            Assert.That(
                 referenced.Where(n => AllWpfAssemblyNames.Contains(n)).ToList(),
+                Is.Empty,
                 $"MyMoney.Data referenced a WPF assembly: {string.Join(", ", referenced)}");
         }
 
