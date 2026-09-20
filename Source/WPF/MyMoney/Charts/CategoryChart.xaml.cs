@@ -178,7 +178,7 @@ namespace Walkabout.Charts
                         decimal subtotal = s.Amount;
                         if (s.Transfer != null)
                         {
-                            willTally = this.WillTally(t, t.amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
+                            willTally = this.WillTally(t, t.Amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
                         }
                         else if (this.MatchesFilter(s.Category))
                         {
@@ -193,7 +193,7 @@ namespace Walkabout.Charts
                 }
                 else if (t.Transfer != null)
                 {
-                    willTally = this.WillTally(t, t.amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
+                    willTally = this.WillTally(t, t.Amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
                 }
                 else if (this.MatchesFilter(t.Category))
                 {
@@ -248,7 +248,7 @@ namespace Walkabout.Charts
                             decimal subtotal = s.Amount;
                             if (s.Transfer != null)
                             {
-                                tallied = this.Tally(t, t.amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
+                                tallied = this.Tally(t, t.Amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
                             }
                             else if (this.MatchesFilter(s.Category))
                             {
@@ -263,7 +263,7 @@ namespace Walkabout.Charts
                     }
                     else if (t.Transfer != null)
                     {
-                        tallied = this.Tally(t, t.amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
+                        tallied = this.Tally(t, t.Amount < 0 ? this.transferredOut : this.transferredIn, amount, isExpenses);
                     }
                     else if (this.MatchesFilter(t.Category))
                     {

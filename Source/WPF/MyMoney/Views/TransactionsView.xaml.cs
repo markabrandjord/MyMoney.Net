@@ -4245,14 +4245,14 @@ namespace Walkabout.Views
                             var found = match[0];
                             string message = "Account:  " + found.AccountName + '\n';
                             message += "Date:  " + found.Date + '\n';
-                            message += "Amount:  " + found.amount + '\n';
+                            message += "Amount:  " + found.Amount + '\n';
                             message += "Category:  " + found.CategoryFullName + '\n';
                             message += "Memo:  " + found.Memo + '\n';
                             message += "\nMerge into a transfer transaction?";
 
                             if (MessageBoxEx.Show(message, "Found a matching transfer", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                             {
-                                if (t.amount > 0)
+                                if (t.Amount > 0)
                                 {
                                     // Money was transferred from the external account to this account
                                     this.TransformTwoTransactionIntoTransfer(found, t);
@@ -4285,7 +4285,7 @@ namespace Walkabout.Views
                             string foundThese = "";
                             foreach (var found in match)
                             {
-                                foundThese += found.AccountName + ' ' + found.Date + ' ' + found.amount;
+                                foundThese += found.AccountName + ' ' + found.Date + ' ' + found.Amount;
                             }
 
                             MessageBoxEx.Show(foundThese, "Found " + match.Count + " matching transfers", MessageBoxButton.OK, MessageBoxImage.Warning);

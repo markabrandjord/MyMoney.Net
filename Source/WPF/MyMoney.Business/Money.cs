@@ -9586,7 +9586,7 @@ namespace Walkabout.Data
             for (--i; i > 0; i--)
             {
                 Transaction w = tc[i];
-                if (w.amount == 0 || w.Status == TransactionStatus.Void)
+                if (w.Amount == 0 || w.Status == TransactionStatus.Void)
                 {
                     continue;
                 }
@@ -9657,7 +9657,7 @@ namespace Walkabout.Data
         private static bool IsPotentialDuplicate(Transaction t, Transaction u, int dayRange)
         {
             return !u.IsFake && !t.IsFake &&
-                u != t && u.amount == t.amount && u.PayeeName == t.PayeeName &&
+                u != t && u.Amount == t.Amount && u.PayeeName == t.PayeeName &&
                 // they must be in the same account (which they may not be if on the multi-account view).
                 u.Account == t.Account &&
                 IsSameString(u.Number, t.Number) &&
@@ -9872,7 +9872,7 @@ namespace Walkabout.Data
             Transaction best = null;
             foreach (Transaction u in this.transactions.Values)
             {
-                if (!u.IsDeleted && u.Account == account && u.amount == amount && InvestmentDetailsMatch(t, u) && !excluded.ContainsKey(u.Id))
+                if (!u.IsDeleted && u.Account == account && u.Amount == amount && InvestmentDetailsMatch(t, u) && !excluded.ContainsKey(u.Id))
                 {
                     TimeSpan diff = dt - u.Date;
                     if (Math.Abs(diff.Days) < 30)
@@ -10658,7 +10658,7 @@ namespace Walkabout.Data
                    filter.MatchSubstring(t.Memo) ||
                    filter.MatchDate(t.Date) ||
                    filter.MatchString(t.Number) ||
-                   filter.MatchDecimal(t.amount);
+                   filter.MatchDecimal(t.Amount);
         }
 
         public static bool IsSplitsMatching(Splits splits, FilterLiteral filter)
@@ -10890,7 +10890,7 @@ namespace Walkabout.Data
         private long id = -1;
         private Account account; // that this transaction originated.
         private DateTime date;
-        public decimal amount;
+        private decimal amount;
         private decimal salesTax;
         private TransactionStatus status;
         private string memo;
@@ -13818,10 +13818,10 @@ namespace Walkabout.Data
                         money.Transfer(s, a);
                     }
                 }
-                if (s.amount != o.amount)
+                if (s.Amount != o.Amount)
                 {
                     changed = true;
-                    s.Amount = o.amount;
+                    s.Amount = o.Amount;
                 }
                 if (s.CategoryName != o.CategoryName)
                 {
@@ -13873,7 +13873,7 @@ namespace Walkabout.Data
         private int id = -1;
         private Category category;
         private Payee payee;
-        public decimal amount; // so we can keep transfer's in sync
+        private decimal amount; // so we can keep transfer's in sync
         private Transfer transfer;
         private string memo;
         public Account to; // for debugging only
@@ -14673,13 +14673,13 @@ namespace Walkabout.Data
                 // looking for the original unsplit cost basis at the date of this transaction.                
                 decimal proceeds = this.UnitPrice * this.Units;
 
-                if (this.transaction.amount != 0)
+                if (this.transaction.Amount != 0)
                 {
                     // We may have paid more for the stock than "price" in a buy transaction because of brokerage fees and
                     // this can be included in the cost basis.  We may have also received less than "price" in a sale
-                    // transaction, and that can also reduce our capital gain, so we use the transaction amount if we 
+                    // transaction, and that can also reduce our capital gain, so we use the transaction amount if we
                     // have one.
-                    return Math.Abs(this.transaction.amount);
+                    return Math.Abs(this.transaction.Amount);
                 }
 
                 // But if the sale proceeds were not recorded for some reason, then we fall back on the proceeds.
