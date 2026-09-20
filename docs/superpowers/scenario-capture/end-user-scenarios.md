@@ -22,7 +22,10 @@ user-facing.
 | 5 | Reports + charts | `Reports/`, `Charts/` (+ `Views/GraphGenerators.cs` and `FlowDocumentView`'s report-hosting path, deferred here by Phase 3) | **Done** |
 | 6 | Import/export | `Importers/`, `Ofx/`, CSV/QIF/XML storage formats | **Done** |
 | 7 | Taxes | `Taxes/` (really `MyMoney.Business/Taxes/`) — tax-line association, capital-gains treatment, bracket estimation, TXF export | **Done** |
-| 8 | Cross-cutting | Online banking, attachments, printing, settings | Not started |
+| 8 | Cross-cutting | Attachments and statements, market data and exchange rates, settings persistence, storage, app-wide modal UI, theming, logging, updates, printing — plus the final completeness sweep for anything Phases 1–7 left unclaimed | **Done** |
+
+**All eight phases are complete.** See the "Catalog complete" note at the end of this
+document for totals and for where the defects this audit found were filed.
 
 ### How to extend this catalog
 
@@ -6950,3 +6953,1241 @@ user could get wrong by trusting them.
     "how does this product ship reference data" question, which touches the stock-quote and
     institution-directory caches too; it is recorded here because the money at stake is
     tax money, but the answer probably belongs with those.
+
+---
+
+# Phase 8: Cross-Cutting
+
+**Source examined (in full):**
+
+| File(s) | Lines |
+|---|---|
+| `Source/WPF/MyMoney/Attachments/AttachmentManager.cs` (`AttachmentManager`, `AttachmentWatcher`) | 692 |
+| `Source/WPF/MyMoney/Attachments/StatementManager.cs` (`StatementManager`, `StatementIndex`, `StatementItem`) | 676 |
+| `Source/WPF/MyMoney.Business/StockQuotes/` — `StockQuoteManager.cs`, `IStockQuoteService.cs`, `StockQuoteCache.cs`, `ExchangeRateService.cs`, `IOnlineService.cs`, `IStockDownloadLog.cs`, `StockQuoteThrottle.cs`, `ThrottledStockQuoteService.cs`, `Yahoo.cs`, `Polygon.cs`, `TwelveData.cs`, `MarketStack.cs` | ~4,600 |
+| `Source/WPF/MyMoney/Utilities/Settings.cs` (`Settings`, `GraphState`, `FileAssociation`) | 1,206 |
+| `Source/WPF/MyMoney.Business/DatabaseSettings.cs` | 144 |
+| `Source/WPF/MyMoney/Utilities/MessageBox/MessageBoxEx.xaml` + `.xaml.cs` | full |
+| `Source/WPF/MyMoney/Setup/` — `ChangeInfoReport.cs`, `ChangeListRequest.cs`, `DirectorySetup.cs`, `changes.xml`, `LatestVersion.xslt` | 250 + 120 + 85 + data |
+| `Source/WPF/MyMoney.Business/Utilities/Logger.cs` (`ILogger`, `Log`, `CrashReport`) | 239 |
+| `Source/WPF/MyMoney.Business/Utilities/QuickFilterParser.cs` (`QuickFilterParser<T>`, `Filter<T>` and its five subclasses, `FilterLiteral`) | 558 |
+| `Source/WPF/MyMoney.Business/AutoCategorization.cs` + `Utilities/KNearestNeighbor.cs` | 165 + 122 |
+| `Source/WPF/MyMoney.Business/Encryption.cs` | 159 |
+| `Source/WPF/MyMoney.Business/UsHolidays.cs` | 260 |
+| `Source/WPF/MyMoney.Business/SampleDataLoader.cs`, `SampleDataGenerator.cs`; `MyMoney/Database/SampleDatabase.cs` | 60 + 842 + 98 |
+| `Source/WPF/MyMoney/Utilities/` — `AppTheme.cs`, `TempFileCollection.cs`, `Clipboard.cs`, `ClipboardClients.cs`, `ClipboardMonitor.cs`, `DragAndDrop.cs`, `Sounds.cs`, `FileHash.cs`, `FileHelpers.cs`, `FileIcons.cs`, `InternetExplorer.cs`, `ApplicationDeployment.cs`, `EdgeDetector.cs`, `Colors.cs`, `HlsColor.cs`, `AxisTicker.cs`, `XamlHelpers.cs`, `adorners.cs`, `MouseUtilities.cs`, `PerfTimer.cs`, `CompiledPropertySetter.cs`, `WpfAnnotations.cs`, `UiThreadEventHandler.cs`, `ExponentialDoubleAnimation.cs`, `PointCollectionAnimation.cs` | ~2,900 |
+| `Source/WPF/MyMoney/Themes/` — `Light.xaml`, `Dark.xaml`, `Compact.xaml`, `generic.xaml` | markup |
+| `Source/WPF/MyMoney/Controls/` — everything no earlier phase claimed: `Calculator/` (`CalculatorPopup`, `CalculatorControl`, `Parser`), `WpfConverters.cs`, `MoneyDataGrid.cs`, `MoneyDatePicker.cs`, `FilteringComboBox.cs`, `ColorPickerPanel`, `PasswordControl`, `HandyTextBox.cs`, `HandyFlowDocumentScrollViewer.cs`, `SingleLineTextBlock.cs`, `StackedBar.cs`, `Resizer.cs`, `RoundedButton`, `CustomizableButton.cs`, `ProgressDots`, `TabCloseBox` | ~3,900 |
+| `Source/WPF/MyMoney/Interop/MoneyDataObject.cs` | 107 |
+| `Source/WPF/MyMoney/Database/` — `DataEngineStartup.cs`, `SecurityService.cs`, `WpfDataLayerUiCallback.cs`, `SampleData.xml`, `SampleStockQuotes.zip`, `StripSampleStockQuotes.xslt` | 73 + 18 + 13 + data |
+| `Source/WPF/MyMoney.Business/` — `DatabaseLifecycle.cs`, `IDatabase.cs`, `Mapping.cs`, `AsyncSqlQuery.cs`, `ISettingsMigrationSource.cs`, `Query.cs` | ~1,200 |
+| `Source/WPF/MyMoney.Business/Utilities/` — `Dispatcher.cs`, `DelayedAction.cs`, `EventHandlerCollection.cs`, `FilteredObservableCollection.cs`, `Hashset.cs`, `IStatusService.cs`, `MathHelpers.cs`, `NativeMethods.cs`, `ProcessHelper.cs`, `SimpleGraph.cs`, `StringHelpers.cs`, `DescendingComparer.cs`, `UiThreadHandler.cs`, `UiThreadPropertyChangedHandler.cs`, `XmlHelpers.cs` | ~1,700 |
+| `Source/WPF/MyMoney/Design/`, `Icons/`, `Properties/`, `GlobalSuppressions.cs`, `dataengine.config.template.json` | assets/build |
+
+> **Path/naming notes, continuing the run every phase has hit.**
+> - `AttachmentManager.cs` declares **two** classes: the manager and `AttachmentWatcher`,
+>   the background scanner `CLAUDE.md` warns about. Searching for a file named after the
+>   watcher finds nothing.
+> - `Settings.cs` is in `Utilities/` but declares `namespace Walkabout.Configuration`, and
+>   it also contains `FileAssociation` — the class that registers the product as the handler
+>   for `.qif`/`.qfx`/`.ofx`/`.mmdb` — which has nothing to do with settings.
+> - `TempFileCollection.cs` contains no type called `TempFileCollection`; the class is
+>   `TempFilesManager`. Same trap as Phase 7's `CapitalGains.cs`.
+> - `Logger.cs` lives in `MyMoney.Business/Utilities/` (not `MyMoney/Utilities/`, where
+>   `CLAUDE.md`'s `AppCrashGuard` note might lead you), and declares `namespace
+>   Walkabout.Utilities` alongside a `CrashReport` type.
+> - `Interop/MoneyDataObject.cs` declares `namespace Walkabout.Database` while the folder
+>   called `Database/` declares `namespace Walkabout.Data`, `Walkabout.Assistance` and
+>   `Walkabout.Setup`. Neither folder name matches its namespace.
+> - `EdgeDetector.cs` in `Utilities/` is a full Canny edge-detection implementation; its
+>   only live use is the attachment window's auto-crop button.
+> - `Encryption.cs` and `UsHolidays.cs` sit at the root of `MyMoney.Business` with no folder
+>   suggesting they are the file-password and market-calendar implementations.
+
+**What this phase covers and deliberately does not.** Phases 1–7 each owned a feature
+area. This phase owns everything those areas *rest on*: where documents and statements
+are filed, where prices and exchange rates come from, where preferences live, how the
+product asks a question or reports a failure, how it is themed, how it keeps itself
+up to date, and the shared conveniences that appear in many places at once. The rule
+used throughout is the same one earlier phases used for shared code: if a capability is
+only visible *through* a surface an earlier phase catalogued, that phase keeps the
+scenario and this phase records the mechanism; if the capability is only describable by
+reading the shared code, it gets a scenario here.
+
+---
+
+## Part 1: the completeness sweep
+
+Before writing anything new, every top-level folder under `Source/WPF/MyMoney/` and
+`Source/WPF/MyMoney.Business/` was listed and cross-referenced against what Phases 1–7
+say they examined. The result:
+
+| Folder | Claimed by | Phase 8 action |
+|---|---|---|
+| `MyMoney/Views/` | Phase 3 (and Phase 5 for `GraphGenerators.cs`, `FlowDocumentView`) | nothing left |
+| `MyMoney/View Selectors/` | Phase 3 | nothing left |
+| `MyMoney/Dialogs/` | Phase 4 | nothing left |
+| `MyMoney/Reports/` | Phase 5 | **except `Reports/`-adjacent `Setup/ChangeInfoReport.cs`** — claimed here |
+| `MyMoney/Charts/` | Phase 5 | nothing left |
+| `MyMoney/Ofx/` | Phase 6 | nothing left |
+| `MyMoney/Commands/` | Phase 2 (`AppCommands`) | nothing left |
+| `MyMoney/Controls/` | **partially** — Phase 2 took `Accordion`, `AppSettings`, `QuickFilterControl`, `OutputPane`, `CloseBox`, `DownloadControl`; Phase 3 took `QueryViewControl`; Phase 5 took `TrendGraph`. Phase 2's checklist explicitly pushed the rest to "Phase 3/4", and **neither took them** | **claimed here** — the calculator, money grid, date picker, filtering combo, colour picker, password box, stacked bar, resizer, progress dots, tab close box, the button/text primitives and `WpfConverters.cs` |
+| `MyMoney/Attachments/` | **nobody** | **claimed here** |
+| `MyMoney/Utilities/` | **partially** — Phase 2 took `RecentFilesMenu`, `HelpService`, `AppTheme` (named only), `AnimatedMessage`, `UndoManager`; Phase 4 referenced `MessageBoxEx` and pushed it here | **claimed here** — the other 26 files |
+| `MyMoney/Setup/` | **nobody** (Phase 2 and Phase 5 both bounced `ChangeInfoReport.cs` here) | **claimed here** |
+| `MyMoney/Themes/` | **nobody** | **claimed here** |
+| `MyMoney/Database/` | **nobody** (`SampleDatabase` was named in Phase 4's P4-SAMPLE traceability but the folder was never examined) | **claimed here** |
+| `MyMoney/Interop/` | **nobody** | **claimed here** |
+| `MyMoney/Design/` | **nobody** | **not user-facing** — 16 mock-up screenshots and a `.pptx`/`.pdf` of an abandoned Metro-style redesign, referenced by no code or markup. Historical design material, not product behaviour. Directly interesting to the redesign this catalog exists for, but not a scenario |
+| `MyMoney/Icons/` | **nobody** | mixed: `Flags/` (271 country flags) is user-facing and claimed here; `App.ico`, `setup.ico`, `Excel.png`, `TurboTax.png`, `Ding.wav` are assets supporting scenarios recorded here and in Phases 5–7; `Icon.pptx` is **build/design material** |
+| `MyMoney/Properties/` | **nobody** | **not user-facing / build infrastructure** — `AssemblyInfo.cs` and ClickOnce `PublishProfiles/` |
+| `MyMoney/` root files | Phase 2 (`App.xaml.cs`, `MainWindow.*`), Phase 6 (`WpfBusinessLayerUiCallback.cs`) | `GlobalSuppressions.cs` and `dataengine.config.template.json` are **build/configuration infrastructure**; `App.xaml` is markup for the theming of 8.12 |
+| `MyMoney.Business/Importers/`, `Ofx/` | Phase 6 | nothing left |
+| `MyMoney.Business/Taxes/` | Phase 7 | nothing left |
+| `MyMoney.Business/StockQuotes/` | **nobody** (Phase 1 and Phase 5 both said "acquisition is Phase 8") | **claimed here** |
+| `MyMoney.Business/Utilities/` | **nobody** (Phase 6 named `ProcessHelper.cs` in passing) | **claimed here** |
+| `MyMoney.Business/Properties/` | **nobody** | **not user-facing / generated** — `Resources.Designer.cs` is generated from `Resources.resx`; the strings it holds are quoted by scenarios here and in Phase 6 |
+| `MyMoney.Business/` root files | Phase 1 (`Money.cs`, `Money_Loans.cs`), Phase 5 (`Payments.cs`), Phase 6 (`IBusinessLayerUiCallback.cs`), Phase 7 (`CostBasis.cs`) | **claimed here**: `AutoCategorization.cs`, `DatabaseSettings.cs`, `DatabaseLifecycle.cs`, `Encryption.cs`, `IDatabase.cs`, `ISettingsMigrationSource.cs`, `Mapping.cs`, `AsyncSqlQuery.cs`, `Query.cs`, `SampleDataGenerator.cs`, `SampleDataLoader.cs`, `UsHolidays.cs` |
+
+**Two things the sweep found that nobody had guessed at.** First, **`Controls/` fell
+through a hand-off**: Phase 2 explicitly listed sixteen controls as "Phase 3/4's", and
+Phase 3's checklist claims exactly one of them. Second, **the quick-filter search box has
+a real expression language** — `and`/`or`/`not`, `&`/`|`/`!`, parentheses, quoted
+phrases, sign-insensitive amounts and date matching — implemented in
+`MyMoney.Business/Utilities/QuickFilterParser.cs`, which no phase examined; Phase 3's
+P3-FIND-1 describes it only as "filters it down as the user types". That is now
+P8-FIND-1…P8-FIND-5.
+
+**One deliberate boundary.** `Source/WPF/MyMoney.Data/` is a *third* project and was
+outside the sweep's stated scope (`MyMoney/` and `MyMoney.Business/`). Phase 4 owns the
+windows that choose a storage location (P4-DB-*), Phase 6 owns `CsvStore`, and Phase 6
+marked `XmlStore`/`BinaryXmlStore` as "Phase 4 / Phase 8". This phase therefore claims
+the *storage-choice concepts a user perceives* (8.6) and reads `XmlStore`'s encryption
+path, but does **not** claim the ~10,000 lines of engine implementation in
+`SqlDatabase.cs`, `SqlServerStoredProcDatabase.cs`, `SqliteDatabase.cs` and
+`SqlCeDatabase.cs`. See Open Question 25 — that is the one place where "all source
+processed" is scoped rather than absolute.
+
+---
+
+## 8.1 Paperwork filed against a transaction
+
+### P8-ATT-1 — Keep receipts and documents with the transaction they belong to
+The user files scanned receipts, photographs, statements and documents against individual
+transactions, and the product keeps them so that opening that transaction again always
+brings back the same paperwork.
+*(`AttachmentManager`, the per-transaction file naming in `GetUniqueFileName`)*
+
+### P8-ATT-2 — Have paperwork stored beside the financial file, not inside it
+Documents live in an ordinary folder next to the user's financial file, named after it, so
+they can be backed up, browsed and copied with normal tools rather than being locked
+inside the product.
+*(`AttachmentManager.SetupAttachmentDirectory` → `<database>.Attachments`)*
+
+### P8-ATT-3 — Keep paperwork organised by account
+Within that folder, each account gets its own subfolder, so a user looking at the files
+directly can tell which account a document belongs to.
+*(`GetUniqueFileName`/`FindAttachments` combining the attachment directory with the
+account name)*
+
+### P8-ATT-4 — Put the paperwork somewhere else if they want to
+The user can choose a different location for their documents. If documents already exist,
+they are offered the chance to move them rather than being stranded; if the new location
+doesn't exist, they are offered the chance to create it.
+*(`AttachmentManager.MoveAttachments(string)`, the two confirmations it raises. **See Open
+Question 3** — those confirmations don't always reach the user.)*
+
+### P8-ATT-5 — Have paperwork follow the transaction when it moves
+When the user turns a transaction into a transfer, re-points a transfer at a different
+account, or moves a transaction between accounts, its documents move with it rather than
+being orphaned in the old account's folder.
+*(`MoveAttachments(Transaction, Transaction)`, `MoveAttachments(Transaction, Account)`,
+`OnBeforeTransferChanged`, `OnBeforeSplitTransferChanged`)*
+
+### P8-ATT-6 — Have paperwork follow an account rename
+Renaming an account renames its document folder too, so nothing is lost and nothing has to
+be re-filed.
+*(`AttachmentWatcher.OnRenameAccount`, the remembered original-name map)*
+
+### P8-ATT-7 — See the paperclip appear without having to do anything
+The product notices documents that were dropped into the folder from outside, or that
+arrived with an import, and marks the affected transactions as having paperwork — in the
+background, without blocking whatever the user is doing.
+*(`AttachmentWatcher.ScanDirectory`/`QueueAccount`/`QueueTransaction` on a background
+task; `CLAUDE.md` records the lag this causes)*
+
+### P8-ATT-8 — Not end up with two copies of the same receipt
+When documents arrive with imported data, one that is byte-for-byte identical to a
+document already filed against that transaction is recognised and skipped.
+*(`ImportAttachments` with `HashedFile.HashEquals`/`DeepEquals`)*
+
+### P8-ATT-9 — Have files that can't be deleted right now cleaned up later
+A document that is locked by another program when the product tries to remove it is
+remembered and deleted on the next opportunity, including the next time the product
+starts, rather than being left behind forever.
+*(`TempFilesManager` — the delayed retry, the saved list and the startup sweep)*
+
+---
+
+## 8.2 Bank statements filed against an account
+
+### P8-STMT-1 — Keep the statement itself, not just the closing balance
+When the user balances an account, they can file the actual statement document alongside
+the date and closing balance, so the evidence for a reconciliation is kept with it.
+*(`StatementManager.AddStatement`/`UpdateStatement`, `StatementItem`)*
+
+### P8-STMT-2 — Look back at what any past statement said
+For any account the user can retrieve the statement of a given date — its closing balance
+and the document it came from.
+*(`GetStatements`, `GetStatement`, `GetStatementBalance`, `GetStatementFullPath`)*
+
+### P8-STMT-3 — Have statements stored beside the financial file, per account
+Statements live in their own folder next to the financial file, one subfolder per account,
+each with a small index recording the date, balance and document for every statement.
+*(`SetupStatementsDirectory` → `<database>.Statements`, `index.xml`, `StatementIndex`)*
+
+### P8-STMT-4 — Not store the same statement twice when one covers several accounts
+When a bank issues one document covering several accounts, filing it against each of them
+keeps a single copy and points every account at it, rather than duplicating it.
+*(`FindBundledStatement`, `IsBundledStatement`, content hashing)*
+
+### P8-STMT-5 — Have statements follow an account rename
+Renaming an account renames its statement folder and repairs every reference from other
+accounts that pointed into it.
+*(`OnRenameAccountFolder`, `UpdateBundledPointers`)*
+
+### P8-STMT-6 — Be told when a filed statement has been changed underneath them
+The product records a fingerprint of each filed statement and notices when the file on
+disk has been modified since it was filed.
+*(`CheckFileHashes`, `StatementItem.Hash`/`FileModified`)*
+
+### P8-STMT-7 — Bring statements across when merging another copy of the books
+When the user merges a second financial file, the statements recorded in it are brought
+across to the matching accounts.
+*(`ImportStatements`. **See Open Question 2** — what arrives today is the dates and
+balances without the documents.)*
+
+---
+
+## 8.3 Getting prices, splits and exchange rates from outside
+
+### P8-QUOTE-1 — Have holdings priced without typing prices in
+The user's holdings are valued using market prices the product fetches for them, so
+balances, net worth and the portfolio are current without manual entry.
+*(`StockQuoteManager.UpdateQuotes` → `Security.Price`/`PriceDate`)*
+
+### P8-QUOTE-2 — Choose where market data comes from, and prove the key works
+The user picks among several market-data providers, supplies the credential that provider
+issued them, and can test it before relying on it.
+*(`StockQuoteManager.GetServiceForSettings` over `YahooFinance`, `PolygonStocks`,
+`TwelveData`, `MarketStack`; `TestApiKeyAsync`. The window that collects this is Phase 4's
+P4-QUOTES-*)*
+
+### P8-QUOTE-3 — Not be asked to configure anything they haven't asked for
+If no provider has been configured, nothing is fetched and the user is told plainly that a
+market-data service needs setting up, rather than seeing silent failures.
+*(`GetQuoteService` returning nothing → the "configure a stock quote service" message)*
+
+### P8-QUOTE-4 — Have new holdings priced automatically as they are created
+When a holding with a ticker is added or its ticker is corrected, the product fetches a
+price for it without being asked again.
+*(`StockQuoteManager.OnMoneyChanged` tracking inserted/changed securities)*
+
+### P8-QUOTE-5 — Not re-fetch what was already fetched today
+The product remembers what it has already asked for and does not ask again for the same
+trading day, so a user who opens the product repeatedly isn't burning through their
+provider's quota.
+*(`DownloadLog`, `DownloadInfo.Downloaded`, the most-recent-trading-day comparison)*
+
+### P8-QUOTE-6 — Stop asking for a ticker that doesn't exist
+A symbol the provider says it has never heard of is remembered as unknown and not
+requested again; the user is told which symbols those were, in one message rather than one
+per symbol.
+*(`OnSymbolNotFound`, `DownloadInfo.NotFound`, the combined "unknown stock quotes"
+message)*
+
+### P8-QUOTE-7 — Get a second chance after switching providers
+Changing to a different market-data provider clears the "this symbol doesn't exist"
+verdicts, because the new provider may well know the symbol the old one didn't.
+*(`ActiveStockServiceChanged` resetting `history.NotFound`)*
+
+### P8-QUOTE-8 — Build up a price history, not just today's price
+Beyond the latest price, the product accumulates a day-by-day price history for each
+holding and fills in the gaps it notices, which is what makes historical valuations and
+price charts possible.
+*(`HistoryDownloader.BeginFetchHistory`, `StockQuoteHistory`,
+`GetMissingDataRanges`, `MergeQuote`)*
+
+### P8-QUOTE-9 — Keep that history usable offline
+Price history is kept on disk beside the financial file and read back from there, so
+charts and valuations still work with no connection and without re-downloading.
+*(`StockQuoteHistory.Load`/`Save` per symbol, `DownloadLog.Load`/`Save`)*
+
+### P8-QUOTE-10 — Ask what a holding was worth on a particular past date
+Anything that needs a historical valuation can ask what one share was worth on a given
+day; if the market was shut that day, the most recent prior trading day is used, and if
+there is no downloaded price at all, the user's own recorded trade prices stand in.
+*(`StockQuoteCache.GetSecurityMarketPrice`, `StockQuoteIndex.GetQuote` walking back up to
+a month, `LoadIndexFromHistory` seeding from the user's own trades)*
+
+### P8-QUOTE-11 — Get the right historical price despite stock splits
+Downloaded histories are expressed in today's share terms; the product converts them back
+to what a share actually cost on the day, using the splits it knows about, so a historical
+valuation matches what the user actually paid.
+*(the split-reversal loop in `StockQuoteIndex.GetQuote`; the splits themselves are Phase
+1's P1-INV-10)*
+
+### P8-QUOTE-12 — Have stock splits discovered rather than hand-entered
+Where the provider supports it, the product looks up the splits for a holding and records
+them, one holding at a time so that expanding a whole list doesn't flood the service.
+*(`StockSplitDownloader`, `IStockQuoteService.UpdateStockSplits`)*
+
+### P8-QUOTE-13 — Not be punished for a provider's rate limit
+Requests are paced against the provider's stated per-minute, per-day and per-month
+allowances. A per-minute limit makes the product wait and tell the user it is waiting; a
+daily or monthly allowance that has run out stops the fetch with a plain explanation
+rather than a stream of failures. The counts survive restarting the product, so closing
+and reopening it doesn't hand the user a fresh allowance they don't have.
+*(`StockQuoteThrottle.GetSleep`, `StockQuoteThrottledException`, the saved throttle file,
+`ThrottledStockQuoteService`, the `Suspended` event and its "Zzzz!" progress message)*
+
+### P8-QUOTE-14 — Have foreign-currency amounts converted at a current rate
+Exchange rates are refreshed daily from an online rate service and applied to the
+currencies the user holds, so foreign accounts and holdings total correctly without
+the user maintaining rates by hand.
+*(`ExchangeRateService.UpdateRates`/`UpdateCurrencyInfo` → `Currency.Ratio`; the currency
+concept itself is Phase 1's P1-CUR-*. **See Open Question 12.**)*
+
+### P8-QUOTE-15 — Have a new currency's rate filled in as soon as it is named
+When the user starts using a currency they haven't used before, its rate is filled in from
+the rates already fetched rather than being left at nothing.
+*(`ExchangeRateService.CreateOrUpdate`)*
+
+### P8-QUOTE-16 — Have "up to date" mean the last day the market was actually open
+Freshness is judged against the most recent trading day — weekends, public holidays, Good
+Friday and a list of known unscheduled closures all counted — so the product doesn't
+report itself stale on a Sunday or chase prices that were never published.
+*(`UsHolidays`, `StockQuoteHistory.IsMarketOpen`, `KnownClosures`)*
+
+### P8-QUOTE-17 — Ask a provider only for what it is good at
+Each configured provider records whether it should be used for price history and for
+split history at all, so a provider the user keeps only for latest prices isn't asked for
+things it charges extra for or does badly.
+*(`OnlineServiceSettings.HistoryEnabled`/`SplitHistoryEnabled`)*
+
+---
+
+## 8.4 Remembering how the user likes to work
+
+### P8-PREF-1 — Have the product come back the way they left it
+Window position and size, panel widths and heights, which screen was showing, what was
+selected on it, the chart set-up and the last search are all remembered between sessions
+without the user saving anything.
+*(`Settings` and its per-view state slots; what is restored is Phase 2's P2-START-1)*
+
+### P8-PREF-2 — Keep preferences in one place, separate from the financial data
+Preferences live in their own file, so they survive switching between financial files,
+and a financial file carries no trace of one machine's window layout.
+*(`Settings.Load`/`Save` over an XML settings file, `Settings.TheSettings`)*
+
+### P8-PREF-3 — Not have a preference file lose settings it doesn't understand
+Settings written by a newer or older build, including the saved state of screens that
+weren't opened this session, are carried through untouched rather than being dropped on
+the next save.
+*(`viewStateNodes` round-tripping unrecognised view state, the `map`-based reader)*
+
+### P8-PREF-4 — Have old preferences carried forward when something is renamed or moved
+When the product reorganises where a setting lives, the user's existing value is migrated
+rather than reset — including settings that moved from being per-user to being per
+financial file.
+*(`AttachmentDialogSize` absorbing the old `ReceiptDialogSize`, `Connection` being split
+into server/database/user, `MigrateFiscalYearStart`/`MigrateRentalManagement`)*
+
+### P8-PREF-5 — Not have their password sitting in a settings file
+A password stored by an older build is discarded when the settings file is read, and never
+written back.
+*(the `"Password"` case in `Settings.ReadXml`, which reads and drops it)*
+
+### P8-PREF-6 — Say how far back to look for duplicates and transfers
+The user controls how many days either side the product searches when it tries to match a
+transfer, and how far back it looks when deciding whether something is a duplicate.
+*(`Settings.TransferSearchDays`, `Settings.DuplicateRange`; the matching itself is Phase
+1's P1-IMPORT-*)*
+
+### P8-PREF-7 — Say whether closed accounts and reconciled entries stay in view
+Two standing choices — whether closed accounts appear in lists, and whether already
+reconciled entries can be accepted — apply everywhere rather than having to be set per
+screen.
+*(`Settings.DisplayClosedAccounts`, `Settings.AcceptReconciled`)*
+
+### P8-PREF-8 — Turn confirmation sounds on or off
+The user chooses whether the product makes a sound when something finishes.
+*(`Settings.PlaySounds`, `Sounds.PlaySound` over the bundled chime)*
+
+### P8-PREF-9 — Start with a clean slate when something goes wrong
+The user can start the product without loading their saved preferences at all, which is
+the way out of a layout or state that has become unusable.
+*(`Settings(bool save)` with persistence off — the `/nosettings` switch of Phase 2's
+P2-START-4)*
+
+---
+
+## 8.5 Settings that belong to one set of books
+
+### P8-BOOK-1 — Have per-file choices travel with the file
+Choices that describe the books themselves rather than the person — the fiscal year, the
+currency figures are shown in, whether rental tracking is switched on — are stored beside
+the financial file, so opening those books on another machine or alongside another set of
+books gives the same answers.
+*(`DatabaseSettings` written to `<database>.settings`)*
+
+### P8-BOOK-2 — Say when their financial year starts
+The user sets the month their financial year begins, and every figure that is reported
+"for a year" — tax summaries, the reconstructed pay record, the cash-flow report, the
+history chart's year buckets, the tax-year a transaction falls in — follows that choice
+rather than assuming January.
+*(`DatabaseSettings.FiscalYearStart`, consumed by `TaxReport`, `W2Report`,
+`CashFlowReport`, `HistoryBarChart`, `TransactionExtras.MigrateTaxYears` and the `.txf`
+export; Phase 7's P7-SUM-4/P7-TXF-5 describe the tax consequence)*
+
+### P8-BOOK-3 — Choose the currency everything is totalled in
+The user picks the currency their combined figures are expressed in, and can choose
+whether the currency is spelled out alongside amounts at all.
+*(`DatabaseSettings.DisplayCurrency`/`ShowCurrency` → `Currencies.DefaultCurrency`)*
+
+### P8-BOOK-4 — Switch off a whole feature area they don't use
+A user with no rental property can turn rental tracking off, and the parts of the product
+that serve it stop appearing.
+*(`DatabaseSettings.RentalManagement` → `MainWindow.UpdateRentalManagement`)*
+
+### P8-BOOK-5 — Have a change to these take effect at once and be kept
+Changing one of these settings is reflected immediately — charts re-bucket, reports
+regenerate, totals re-denominate — and the change is written out without the user
+saving.
+*(`DatabaseSettings.PropertyChanged` → `MainWindow.DatabaseSettings_PropertyChanged` and
+its delayed save)*
+
+---
+
+## 8.6 Where the data lives, and who can open it
+
+### P8-STORE-1 — Not have to care what the data is stored in
+The user works with "my financial file"; whether that is a local file, a file in an older
+format or a database on a server is a detail the product resolves from what they picked.
+*(`DatabaseLifecycle`/`IDatabaseFactory` choosing an engine from the path, `DbFlavor`)*
+
+### P8-STORE-2 — Keep several sets of books and move between them
+The product remembers every set of books the user has opened, which engine each one uses
+and when it was last used, so switching between them is a choice from a list rather than a
+re-setup.
+*(`DatabaseRegistry`; the windows that present it are Phase 4's P4-DB-3 and Phase 2's
+P2-FILE-3)*
+
+### P8-STORE-3 — Put a password on a financial file
+The user can protect an exported financial file with a password, without which its
+contents cannot be read.
+*(`Encryption.EncryptFile`/`DecryptFile` behind `XmlStore`; the prompt is Phase 4's
+P4-DB-6. **See Open Question 9.**)*
+
+### P8-STORE-4 — Have their documents and statements found automatically for a file
+Opening a set of books locates its documents and statements folders from the file's own
+name and location, so those never have to be re-pointed when switching files.
+*(`AttachmentManager.SetupAttachmentDirectory`, `StatementManager.SetupStatementsDirectory`)*
+
+### P8-STORE-5 — Have the product's own files kept somewhere predictable
+Logs, crash reports, downloaded price histories, the hand-off list used when a file is
+opened from outside and the list of files still waiting to be deleted all live in known
+per-user locations rather than scattered.
+*(`ProcessHelper` for the application data and log folders, `TempFilesManager.TempFileList`,
+`Log`'s folder, the stock-quote log path)*
+
+### P8-STORE-6 — Be told, not crashed at, when storage isn't available
+A server that can't be reached, a login that has been revoked or a set of books that has
+been removed since it was last used leaves the product running and able to open something
+else.
+*(`DataEngineStartup.TryAutoLoad`'s fall-through, `IDataLayerUiCallback.ShowWarning`.
+**See Open Question 24** — this particular path only exists in a debug build.)*
+
+### P8-STORE-7 — Run a query against the stored data without freezing the product
+Where the books are held on a server, a long-running query runs in the background and can
+be abandoned, rather than locking the window.
+*(`AsyncSqlQuery`; the window is Phase 4's P4-SQL-1)*
+
+### P8-STORE-8 — Be helped past a permissions problem rather than stopped by it
+When the account a server runs under can't write to the folder the user chose, the user is
+told plainly what permission is missing and given the chance to grant it.
+*(`DirectorySetup.AddWritePermission` via `SecurityService`. **See Open Question 6** — this
+is currently advice, not action.)*
+
+---
+
+## 8.7 Being told something, and being asked
+
+### P8-TELL-1 — Get the product's own message, not the system's
+Questions, warnings and failures are presented in the product's own window, matching its
+appearance and dimming what's behind it, rather than in a system dialog that looks like it
+came from somewhere else.
+*(`MessageBoxEx` and the main window's dimming overlay; Phase 2's P2-STATUS-4 is the
+dimming, Phase 4's Open Question 29 pushed the window itself here)*
+
+### P8-TELL-2 — Read a long explanation without it filling the screen
+A message never grows beyond two-thirds of the screen, and a message with a technical
+explanation behind it keeps that explanation folded away until the user asks for it.
+*(the max-width/max-height clamp, the "details" disclosure and its text box)*
+
+### P8-TELL-3 — Take a message away with them
+The user can copy any message, with its title, to the clipboard — which is what makes it
+possible to paste a failure into a bug report or a search.
+*(the Ctrl+C / Ctrl+Insert handler in `MessageBoxEx`)*
+
+### P8-TELL-4 — Follow a link out of a message
+Where a message offers a link, following it opens the page in the user's browser.
+*(the hyperlink branch of `CreateMessage` → `InternetExplorer.OpenUrl`)*
+
+### P8-TELL-5 — Tell at a glance what kind of message this is
+Every message carries a mark that distinguishes a question from a warning, a failure or a
+plain notice, and a question that was raised without one is given one.
+*(`SetImageStyle`, the `MessageBoxImage.Question` default for yes/no messages)*
+
+### P8-TELL-6 — Hear when something long has finished
+Where the user has asked for it, a completed save or download is confirmed by a sound as
+well as by the status line.
+*(`Sounds.PlaySound` gated on `Settings.PlaySounds`)*
+
+---
+
+## 8.8 Narrowing a list by typing
+
+### P8-FIND-1 — Ask for more than one thing at once
+The search box above a list understands "this and that", "this or that" and "not this" —
+in words or as `&`, `|` and `!` — so a user can narrow to exactly what they mean in one
+expression rather than searching twice.
+*(`QuickFilterParser`, `FilterAnd`/`FilterOr`/`FilterNot`)*
+
+### P8-FIND-2 — Group parts of a search
+Parentheses let the user say "this and either of those" without ambiguity.
+*(`FilterParens` and the parser's precedence handling)*
+
+### P8-FIND-3 — Search for a phrase, including one containing a keyword
+Putting words in quotes searches for them together, which is also how a user searches for
+a party whose name happens to contain the word "and" or "or".
+*(the quoted-literal branch of `GetFilterTokens`; words are only treated as operators
+where an operator could legally appear)*
+
+### P8-FIND-4 — Type an amount without worrying about the sign
+Typing a figure finds it whether it was money in or money out, so the user doesn't have to
+remember which way round the entry was recorded.
+*(`FilterLiteral.MatchDecimal` comparing both signs. **See Open Question 10** for a date
+counterpart that doesn't behave consistently.)*
+
+### P8-FIND-5 — Keep typing without the search breaking
+A half-typed expression — a dangling "and", an unclosed bracket — narrows the list as best
+it can instead of showing an error or emptying the list.
+*(the parser's error-recovery `Combine`, and the null-tolerant `IsMatch` on every filter
+node)*
+
+---
+
+## 8.9 Moving things around inside the product
+
+### P8-CLIP-1 — Copy and paste between the product and everything else
+Whatever the user has selected — text in a field, a row in a list, a report — copies to
+the clipboard in a form other programs can read, and text can be pasted in from them.
+*(`IClipboardClient` and its per-control implementations; the routing is Phase 2's
+P2-CMD-5)*
+
+### P8-CLIP-2 — Copy a record and paste it back as a real record
+A copied account, party or category carries the product's own description of itself
+alongside the plain text, so pasting it back into the product recreates the record rather
+than a line of text.
+*(`MoneyDataObject` offering the same record as text, as XML and as itself.
+**See Open Question 21.**)*
+
+### P8-CLIP-3 — Have paste offered only when there is something to paste
+The paste command reflects whether the clipboard actually holds something the current
+place can accept, updating as the clipboard changes outside the product.
+*(`ClipboardMonitor` raising clipboard-changed notifications)*
+
+### P8-CLIP-4 — Drag something onto where it belongs
+The user drags a record onto another record to reorganise — a category under another
+category, a transaction onto an account — and sees while dragging whether the drop will be
+accepted.
+*(`DragAndDrop` with its validate/complete callbacks and `AdornerDropTarget` feedback)*
+
+---
+
+## 8.10 Staying up to date
+
+### P8-VER-1 — Be told when a newer version exists
+The product checks for a newer release and tells the user when one is available, rather
+than leaving them on an old build indefinitely.
+*(`ChangeListRequest.BeginGetChangeList` comparing the published version with the running
+one; the toolbar affordance is Phase 2's P2-STATUS-7)*
+
+### P8-VER-2 — Read what actually changed before updating
+The user is shown the list of changes, version by version with dates, split into what they
+already have and what the update would bring — so "should I update" is an informed
+decision rather than a leap.
+*(`ChangeInfoReport.Generate` over `changes.xml`; the two headings and the
+already-installed/now-available split)*
+
+### P8-VER-3 — Install the update from where they read about it
+The offer to install sits directly in the change list the user is reading, rather than
+sending them elsewhere to find it.
+*(`ChangeInfoReport`'s install button and the event it raises)*
+
+### P8-VER-4 — Not be nagged about changes they already have
+The install offer only appears when the running build is genuinely behind.
+*(`HasLatestVersion`, `IsSameOrOlder`. **See Open Question 22.**)*
+
+### P8-VER-5 — Have a check for updates fail quietly
+No connection, a missing change list or an unreadable one leaves the product working
+normally with no error in the user's way.
+*(the catch-everything paths in `GetChangeList`/`GetDocument`)*
+
+### P8-VER-6 — Open their financial files by double-clicking them
+The product registers itself as the program that opens the file types it understands, so a
+statement downloaded from a bank or a financial file in a folder opens straight into it.
+*(`FileAssociation.Associate` for `.qif`, `.qfx`, `.ofx` and `.mmdb`; what happens next is
+Phase 2's P2-START-3)*
+
+---
+
+## 8.11 When something goes wrong
+
+### P8-DIAG-1 — Have the product keep a record of what it did
+The product writes a dated log of what it was doing, so a problem that only shows up
+occasionally can still be investigated afterwards.
+*(`Log` writing one file per day to the per-user log folder, off the interface thread)*
+
+### P8-DIAG-2 — Be told where that record is when it matters
+When the user is asked to report a problem, the message tells them where the logs are and
+where to send them, rather than assuming they know.
+*(`Log.ReportLogging`, quoted by the failure paths)*
+
+### P8-DIAG-3 — Have a crash survive the crash
+When the product fails in a way it can't recover from, the details are written out before
+it goes, and shown to the user the next time it starts.
+*(`Log.FatalUnhandledException` → `CrashReport.Save`; `CrashReport.Load` on the next start
+is Phase 2's P2-STATUS-5. **See Open Question 7.**)*
+
+### P8-DIAG-4 — See what a failed download actually said
+Failures from the outside world keep the raw response alongside the plain-English summary,
+so a user or a helper can see what the other end really replied.
+*(the log files each market-data and statement service writes to the log folder; the
+statement side is Phase 6's P6-FILE-5)*
+
+### P8-DIAG-5 — Not lose work to a background failure
+Work happening in the background — scanning for documents, fetching prices, loading
+statement indexes — fails silently and locally rather than taking the product down or
+interrupting the user.
+*(the guarded background paths in `AttachmentWatcher.ScanDirectory`,
+`StatementManager.LoadIndexFile`, `StockSplitDownloader.ProcessPending`. **See Open
+Question 23** — "silently" is doing real work in that sentence.)*
+
+---
+
+## 8.12 How the product looks
+
+### P8-LOOK-1 — Choose a light or dark appearance
+The user switches the whole product between a light and a dark appearance, and the choice
+is remembered.
+*(`AppTheme.SetTheme` over `Themes/Light.xaml`/`Themes/Dark.xaml`, `Settings.Theme`; the
+switch itself is Phase 2's P2-PREF-1)*
+
+### P8-LOOK-2 — Have the switch take effect everywhere at once
+Changing appearance re-colours everything, including the parts of the product that were
+drawn in code rather than described in markup, without reopening anything.
+*(the new dictionary being merged before the old one is removed;
+`AppTheme.GetThemedBrush`/`UpdateDynamicBrushes` for code-created visuals)*
+
+### P8-LOOK-3 — Get one consistent look rather than a system default
+A single shared set of styles defines how every list, grid, button, field and scrollbar in
+the product looks, so surfaces built years apart still match.
+*(`Themes/generic.xaml` merged at application start)*
+
+### P8-LOOK-4 — Recognise a category by its colour, consistently
+A category keeps the same colour everywhere it appears — the tree, the register stripe,
+the pie chart — including categories the user never picked a colour for, which are given a
+stable one derived from their name.
+*(`Colors`/`HlsColor`/`CategoryToBrush`, `CategoryData`'s name-derived colour; Phase 5's
+P5-CHART-4 is the chart half)*
+
+### P8-LOOK-5 — Recognise a currency or a foreign account by its country
+Where a currency is shown, the flag of the country it belongs to is shown with it.
+*(`WpfConverters`' flag-path converter and `AccountsControl`'s, over the 271 bundled flag
+images)*
+
+---
+
+## 8.13 Trying the product out with realistic data
+
+### P8-SAMPLE-1 — See what the product looks like with a life's worth of data in it
+A new user can fill an empty set of books with a realistic synthetic history — accounts,
+a salary, recurring bills, investments with real price histories, a rental property — so
+they can judge the product without entering their own data first.
+*(`SampleDataGenerator.Create` driven by `SampleData.xml`; the options window is Phase 4's
+P4-SAMPLE-*)*
+
+### P8-SAMPLE-2 — Shape the sample to something like their own situation
+The user says how many years of history, what inflation to assume, who their employer is
+and what a paycheque looks like, so the sample resembles a plausible life rather than a
+fixed demo.
+*(the years/inflation/employer/paycheque inputs passed to `SampleDataGenerator.Create`)*
+
+### P8-SAMPLE-3 — Have sample holdings priced like real ones
+Sample investments come with genuine historical prices bundled with the product, so
+sample charts and portfolio figures look like real ones rather than flat lines.
+*(`SampleDataLoader.LoadEmbeddedSampleData` extracting the bundled price archive into the
+download log)*
+
+---
+
+## 8.14 Putting something on paper
+
+### P8-PRINT-1 — Print a receipt or document filed against a transaction
+The user can print an attached document, choosing a printer as they would from any other
+program.
+*(the one `Print` command in `AttachmentDialog`)*
+
+### P8-PRINT-2 — *(not reached)* Print anything else
+There is no print command for a report, a register, a statement or a chart anywhere in the
+product. Recorded as an absence rather than a capability. **See Open Question 20.**
+
+---
+
+## 8.15 Small conveniences that show up everywhere
+
+### P8-AID-1 — Work out a number where the number goes
+Anywhere an amount is entered, the user can type an expression instead of a figure and
+have it worked out in place, with a calculator appearing to show what is happening.
+*(`CalculatorPopup`/`CalculatorControl`/`Parser`; the surfaces that enable it are Phase 3's
+P3-EDIT-9. **See Open Question 17.**)*
+
+### P8-AID-2 — Type a date the short way and get the date they meant
+Date fields accept the user's own regional separators, fill in the month from a bare day
+number, and — when a partial date would otherwise land in the future — assume the user
+meant the year just gone, which is what someone finishing December's entries in January
+actually means.
+*(`MoneyDatePicker.AutoCompleteDate`)*
+
+### P8-AID-3 — Pick from a long list by typing
+Lists of parties, categories and holdings narrow as the user types, so choosing from
+thousands of entries is a few keystrokes.
+*(`FilteringComboBox`)*
+
+### P8-AID-4 — Have a category's colour chosen visually
+Where a colour is set, the user picks it from a palette rather than typing a code.
+*(`ColorPickerPanel`)*
+
+### P8-AID-5 — Type a password without it being read over their shoulder
+Credential fields mask what is typed, and offer a deliberate way to reveal it when the
+user needs to check it.
+*(`PasswordControl`; the windows that host it are Phase 4's P4-AUTH-*)*
+
+### P8-AID-6 — Straighten and trim a photographed receipt
+A photographed document can have its edges found automatically so the user crops to the
+receipt rather than to the table it was lying on.
+*(`CannyEdgeDetector` behind the attachment window's auto-crop; `Resizer` for the handles)*
+
+### P8-AID-7 — See a document they can't display as the file it is
+A filed document the product can't render inline is shown with the icon the system uses
+for that file type, so the user can still tell a PDF from a spreadsheet.
+*(`FileIcons.Extract`)*
+
+### P8-AID-8 — Have a long list stay responsive
+Lists of tens of thousands of entries scroll, sort and filter without the product
+stalling, and a background change to the data updates the list without the user losing
+their place.
+*(`MoneyDataGrid`, `FilteredObservableCollection`, `DelayedActions` coalescing bursts of
+changes, `UiThreadHandler`/`UiThreadPropertyChangedHandler` marshalling background updates)*
+
+---
+
+## Phase 8 coverage checklist
+
+Every file and top-level type in the folders Part 1's sweep assigned to this phase.
+"Not user-facing" entries are plumbing, shared primitives, build infrastructure or dead
+code the user never perceives.
+
+### `MyMoney/Attachments/`
+
+| Type | Status |
+|---|---|
+| `AttachmentManager` | P8-ATT-1…P8-ATT-6, P8-ATT-8 — and the "move my attachments folder" flow of P8-ATT-4. See Open Questions 3, 13, 14 |
+| `AttachmentWatcher` | P8-ATT-7, P8-ATT-6 — the background scan, the queues and the account-rename folder move |
+| `StatementManager` | P8-STMT-1…P8-STMT-7. See Open Questions 1, 2, 14 |
+| `StatementIndex` / `StatementItem` | P8-STMT-3, P8-STMT-6 — the per-account index and one statement's date, balance, document and fingerprint |
+
+### `MyMoney.Business/StockQuotes/`
+
+| File | Type | Status |
+|---|---|---|
+| `StockQuoteManager.cs` | `StockQuoteManager` | P8-QUOTE-1…P8-QUOTE-7, P8-QUOTE-12 |
+| `StockQuoteManager.cs` | `DownloadLog`, `DownloadInfo` | P8-QUOTE-5, P8-QUOTE-6, P8-QUOTE-9. **See Open Question 5** |
+| `StockQuoteManager.cs` | `HistoryDownloader` | P8-QUOTE-8 — one symbol at a time, newest request first |
+| `StockQuoteManager.cs` | `StockSplitDownloader` | P8-QUOTE-12 |
+| `IStockQuoteService.cs` | `IStockQuoteService`, `DownloadCompleteEventArgs` | **Not user-facing** — the contract every provider implements; its guarantees are what P8-QUOTE-11 relies on |
+| `IStockQuoteService.cs` | `StockQuote`, `StockQuoteHistory`, `DateRange` | P8-QUOTE-8, P8-QUOTE-9, P8-QUOTE-16 — one price, one symbol's history, and the gap-finding. **See Open Question 11** |
+| `StockQuoteCache.cs` | `StockQuoteCache`, `StockQuoteIndex` | P8-QUOTE-10, P8-QUOTE-11 |
+| `ExchangeRateService.cs` | `ExchangeRateService`, `CurrencyCode`, `FastForexResponse` | P8-QUOTE-14, P8-QUOTE-15. **See Open Question 12** |
+| `IOnlineService.cs` | `OnlineServiceSettings`, `IOnlineService` | P8-QUOTE-2, P8-QUOTE-13, P8-QUOTE-17 — the per-provider name, address, credential, allowances and capability switches |
+| `StockQuoteThrottle.cs` | `StockQuoteThrottle`, `StockQuoteThrottledException` | P8-QUOTE-13 |
+| `ThrottledStockQuoteService.cs` | `ThrottledStockQuoteService` | P8-QUOTE-13 — the shared queue, retry and suspend behaviour every provider inherits |
+| `Yahoo.cs`, `Polygon.cs`, `TwelveData.cs`, `MarketStack.cs` | the four providers | P8-QUOTE-2 — individually **not user-facing** beyond being a name in a list; what they enable is captured above |
+| `IStockDownloadLog.cs` | `IStockDownloadLog` | **Not user-facing** — the seam that lets the cache read histories without knowing where they came from |
+| `Design.dgml` | — | **Not user-facing** — a developer diagram of this folder |
+
+### `MyMoney/Utilities/`
+
+| File | Status |
+|---|---|
+| `Settings.cs` — `Settings` | P8-PREF-1…P8-PREF-9 |
+| `Settings.cs` — `GraphState` | P8-PREF-1 — the remembered chart set-up (Phase 2's P2-PANE-3) |
+| `Settings.cs` — `FileAssociation` | P8-VER-6 |
+| `MessageBox/MessageBoxEx.xaml` + `.xaml.cs` | P8-TELL-1…P8-TELL-5. **See Open Questions 3 and 4** |
+| `AppTheme.cs` | P8-LOOK-1, P8-LOOK-2 |
+| `Colors.cs` (`CategoryToBrush` + the palette), `HlsColor.cs` | P8-LOOK-4 |
+| `TempFileCollection.cs` (`TempFilesManager`) | P8-ATT-9. **See Open Question 8** |
+| `Clipboard.cs` (`IClipboardClient`), `ClipboardClients.cs` | P8-CLIP-1 |
+| `ClipboardMonitor.cs` | P8-CLIP-3 |
+| `DragAndDrop.cs`, `adorners.cs` (`AdornerDropTarget`) | P8-CLIP-4 |
+| `Sounds.cs` | P8-PREF-8, P8-TELL-6 |
+| `FileHash.cs` (`HashedFile`) | P8-ATT-8 |
+| `FileHelpers.cs` | P8-STMT-3, P8-STMT-5 — relative paths and file comparison behind the statement index |
+| `FileIcons.cs` | P8-AID-7 |
+| `InternetExplorer.cs` | P8-TELL-4 — and every other "open this in my browser"; badly named, it shells out to the user's default handler. Phase 5's Open Question 25 already flagged the duplication with `NativeMethods.ShellExecute` |
+| `ApplicationDeployment.cs` | P8-VER-1 — how the running build reports its own version when installed as a click-once deployment |
+| `EdgeDetector.cs` (`CannyEdgeDetector`, `EdgeDetectedEventArgs`) | P8-AID-6 |
+| `HelpService.cs`, `RecentFilesMenu.cs`, `AnimatedMessage.cs`, `UndoManager.cs` | **Phase 2** (P2-HELP-1, P2-FILE-3, P2-STATUS-2, P2-HIST-1) |
+| `AxisTicker.cs` (`AxisTickSpacer`) | **Not user-facing on its own** — chooses round numbers for chart axis labels; the axes are Phase 5's |
+| `XamlHelpers.cs` (`WpfHelper`), `MouseUtilities.cs`, `CompiledPropertySetter.cs`, `UiThreadEventHandler.cs`, `WpfAnnotations.cs` | **Not user-facing** — visual-tree search, a documented workaround for unreliable drag-time mouse positions, a reflection-free property setter, an event-marshalling wrapper, and a marker that tells the unused-style scanner a resource is used from code |
+| `PerfTimer.cs` | **Not user-facing** — developer timing |
+| `ExponentialDoubleAnimation.cs`, `PointCollectionAnimation.cs` | **Not user-facing** — animation primitives used by the charts (Phase 5) |
+
+### `MyMoney/Setup/`
+
+| File | Status |
+|---|---|
+| `ChangeInfoReport.cs` | P8-VER-2, P8-VER-3, P8-VER-4 — deferred here by both Phase 2 and Phase 5. **See Open Question 22** |
+| `ChangeListRequest.cs` | P8-VER-1, P8-VER-5 |
+| `changes.xml` | P8-VER-2 — the shipped change list, ~300 entries newest first |
+| `DirectorySetup.cs` | P8-STORE-8. **See Open Question 6** |
+| `LatestVersion.xslt` | **Not user-facing** — a stylesheet for rendering the deployment's version document; referenced by no code in this project |
+
+### `MyMoney/Themes/` and `App.xaml`
+
+| File | Status |
+|---|---|
+| `Light.xaml`, `Dark.xaml` | P8-LOOK-1, P8-LOOK-2 — the two appearances the user can choose |
+| `generic.xaml` | P8-LOOK-3 — the shared control styles, merged at startup |
+| `Compact.xaml` | **Not reachable** — a density style sheet, commented as imported from another project, that nothing merges and no setting selects. See Open Question 18 |
+
+### `MyMoney/Controls/` (the part no earlier phase claimed)
+
+| File | Status |
+|---|---|
+| `Calculator/CalculatorPopup.cs`, `CalculatorControl.xaml` + `.xaml.cs`, `Parser.cs` | P8-AID-1 (behaviour: Phase 3's P3-EDIT-9). **See Open Question 17** |
+| `Calculator/states.dgml` | **Not user-facing** — a developer diagram of the expression parser |
+| `MoneyDatePicker.cs` | P8-AID-2 |
+| `FilteringComboBox.cs` | P8-AID-3 |
+| `ColorPickerPanel.xaml` + `.xaml.cs` | P8-AID-4 |
+| `PasswordControl.xaml` + `.xaml.cs` | P8-AID-5 — including the show/hide toggle and the automation identity that follows it |
+| `Resizer.cs` | P8-AID-6 — the drag handles used to crop an attachment |
+| `MoneyDataGrid.cs` | P8-AID-8 |
+| `WpfConverters.cs` | P8-LOOK-5 (the flag path) plus the display formatting every list relies on — **individually not user-facing**, collectively the reason amounts, dates and states read the way they do |
+| `HandyTextBox.cs`, `HandyFlowDocumentScrollViewer.cs`, `SingleLineTextBlock.cs`, `CustomizableButton.cs`, `RoundedButton.xaml` + `.xaml.cs`, `ProgressDots.xaml` + `.xaml.cs`, `TabCloseBox.xaml` + `.xaml.cs`, `StackedBar.cs` | **Not user-facing individually** — presentation primitives; their visible effects belong to the surfaces that host them (Phase 2's P2-STATUS-3 for the progress dots, Phase 3's P3-ACCT-1 for the stacked bar) |
+| `Accordion`, `AppSettings`, `QuickFilterControl`, `OutputPane`, `CloseBox`, `DownloadControl`, `DownloadControlProgressReporter` | **Phase 2** |
+| `QueryViewControl` | **Phase 3** |
+| `TrendGraph` | **Phase 5** |
+
+### `MyMoney/Interop/`, `MyMoney/Database/`, `MyMoney/Icons/`, `MyMoney/Design/`, `MyMoney/Properties/`
+
+| File | Status |
+|---|---|
+| `Interop/MoneyDataObject.cs` | P8-CLIP-2. **See Open Question 21** |
+| `Database/SampleDatabase.cs` | P8-SAMPLE-1, P8-SAMPLE-2, P8-SAMPLE-3 |
+| `Database/SampleData.xml`, `SampleStockQuotes.zip` | P8-SAMPLE-1, P8-SAMPLE-3 — the bundled template and its price archive |
+| `Database/StripSampleStockQuotes.xslt` | **Not user-facing** — a build-time helper for trimming the bundled price archive |
+| `Database/SecurityService.cs`, `WpfDataLayerUiCallback.cs` | P8-STORE-6, P8-STORE-8 — the two places the storage layer reaches back into the interface |
+| `Database/DataEngineStartup.cs` | P8-STORE-6. **Debug builds only** — see Open Question 24 |
+| `Icons/Flags/` (271 images) | P8-LOOK-5 |
+| `Icons/App.ico`, `setup.ico`, `Ding.wav`, `Excel.png`, `TurboTax.png` | Supporting assets for P8-VER-3, P8-TELL-6, Phase 5's P5-VIEW-7 and Phase 7's P7-TXF-1 |
+| `Icons/Icon.pptx` | **Not user-facing / design material** |
+| `Design/` (16 images, `Map.pdf`, `Icon`/`Map` source files) | **Not user-facing / design material** — mock-ups of a Metro-style redesign that was never built, referenced by no code or markup. Of historical interest to this catalog's purpose; no scenario |
+| `Properties/AssemblyInfo.cs`, `Properties/PublishProfiles/` | **Not user-facing / build infrastructure** |
+| `GlobalSuppressions.cs`, `dataengine.config.template.json` | **Not user-facing / build and deployment configuration** |
+
+### `MyMoney.Business/` root files claimed here
+
+| File | Type | Status |
+|---|---|---|
+| `AutoCategorization.cs` | `AutoCategorization` | The engine behind Phase 3's P3-EDIT-7 auto-fill; **claimed here** because no phase owned the file. Its one capability not visible from Phase 3's description is that it learns across *all* accounts a party has appeared in, not just the current one — see P8-AID list note below |
+| `Utilities/KNearestNeighbor.cs` | `KNearestNeighbor<T>` | **Not user-facing** — the nearest-amount lookup `AutoCategorization` uses |
+| `DatabaseSettings.cs` | `DatabaseSettings` | P8-BOOK-1…P8-BOOK-5 |
+| `ISettingsMigrationSource.cs` | `ISettingsMigrationSource` | P8-PREF-4 — the seam the one-time migration uses |
+| `DatabaseLifecycle.cs` | `DatabaseConnectionInfo`, `IDatabaseFactory`, `DatabaseLifecycle` | P8-STORE-1 |
+| `IDatabase.cs` | `IDatabase`, `DbFlavor`, `IAggregateRoot` | P8-STORE-1 — **the interface itself is not user-facing**; `DbFlavor` is the set of storage choices a user can end up with |
+| `Mapping.cs` | `TableMapping`, `ColumnMapping`, `MappingEngine`, `SqlAscii` | **Not user-facing** — how the object graph maps onto stored columns, including the schema upgrade it drives |
+| `AsyncSqlQuery.cs` | `AsyncSqlQuery`, `SqlQueryResultArgs` | P8-STORE-7 |
+| `Encryption.cs` | `Encryption` | P8-STORE-3. **See Open Question 9** |
+| `Query.cs` | `QueryRow`, `Field`, `Operation`, `Conjunction` | The vocabulary behind Phase 3's P3-FIND-4 and Phase 1's P1-FIND-1/2; **claimed here** because no phase owned the file. `CLAUDE.md` already records two of its surprises (an inclusive "greater than", a payment always compared as positive) |
+| `SampleDataGenerator.cs` | `SampleDataGenerator`, `SampleData`, `SampleSecurity`, … | P8-SAMPLE-1, P8-SAMPLE-2 |
+| `SampleDataLoader.cs` | `SampleDataLoader` | P8-SAMPLE-3 |
+| `UsHolidays.cs` | `UsHolidays` | P8-QUOTE-16 |
+
+### `MyMoney.Business/Utilities/`
+
+| File | Status |
+|---|---|
+| `QuickFilterParser.cs` (`QuickFilterParser<T>`, `Filter<T>`, `FilterKeyword`, `FilterAnd`, `FilterOr`, `FilterNot`, `FilterParens`, `FilterLiteral`) | P8-FIND-1…P8-FIND-5. **See Open Question 10** |
+| `Logger.cs` (`ILogger`, `Log`, `CrashReport`) | P8-DIAG-1, P8-DIAG-2, P8-DIAG-3. **See Open Questions 7 and 23** |
+| `Dispatcher.cs` (`UiDispatcher`) | **Not user-facing** — but it is *why* Open Questions 3 and 23 behave as they do: it runs a posted action immediately when already on the interface thread and posts it otherwise |
+| `DelayedAction.cs` (`DelayedActions`) | P8-AID-8, P8-BOOK-5 — coalescing bursts of work so the product doesn't thrash |
+| `FilteredObservableCollection.cs` | P8-AID-8, P8-FIND-1 — the list shape every quick filter runs against |
+| `UiThreadHandler.cs`, `UiThreadPropertyChangedHandler.cs`, `EventHandlerCollection.cs` | **Not user-facing** — the cross-thread event marshalling that keeps background work from corrupting the interface |
+| `ProcessHelper.cs` | P8-STORE-5 — where the product's own folders and embedded resources come from |
+| `NativeMethods.cs` | P8-ATT-3, P8-STMT-3 (turning an account name into a safe folder name), plus the shell "open this file" used throughout |
+| `IStatusService.cs` | **Phase 2** (P2-STATUS-2/3) — the contract behind the status line |
+| `StringHelpers.cs`, `MathHelpers.cs`, `XmlHelpers.cs`, `Hashset.cs`, `DescendingComparer.cs`, `SimpleGraph.cs` | **Not user-facing** — parsing, rounding, XML and collection helpers. `SimpleGraph` also serialises a parsed search expression for diagnostics |
+
+### `MyMoney.Business/Properties/`
+
+| File | Status |
+|---|---|
+| `Resources.resx` | The user-visible strings quoted by P8-QUOTE-3, P8-QUOTE-6 and P8-QUOTE-13, and by Phase 6's P6-OFX-6 |
+| `Resources.Designer.cs` | **Not user-facing / generated** |
+
+### Supporting files owned by other phases
+
+| File / member | Status |
+|---|---|
+| `Dialogs/AttachmentDialog.xaml.cs` | **Phase 4** (P4-ATT-*) for the window; what it files and where is P8-ATT-*. The data-loss defect in it is GitHub issue #54 and is deliberately not re-litigated here |
+| `View Selectors/BalanceControl.xaml.cs` | **Phase 3** (P3-RECON-*) for the balancing panel; the statement it files is P8-STMT-1 |
+| `Controls/AppSettings.xaml.cs` | **Phase 2** (P2-PREF-*) for the panel; what it writes to is P8-PREF-* and P8-BOOK-* |
+| `Dialogs/OnlineServiceDialog.xaml.cs` | **Phase 4** (P4-QUOTES-*) for the window; what it configures is P8-QUOTE-2/13/17 |
+| `Dialogs/SampleDatabaseOptions.xaml.cs` | **Phase 4** (P4-SAMPLE-*) for the window; what it generates is P8-SAMPLE-* |
+| `MainWindow.xaml.cs` — `SetupOnlineServices`, `UpdateCurrencyRates`, `CheckLastVersion`, `ShowChangeInfo`, `OnCommandBackup` | **Phase 2** for the shell's side; the behaviour is P8-QUOTE-*, P8-VER-* |
+| `MyMoney.Data/XmlStore.cs`, `SqliteDatabase.cs`, `SqlDatabase.cs`, `SqlServerStoredProcDatabase.cs`, `SqlCeDatabase.cs`, `DatabaseRegistry.cs`, `DatabaseFactory.cs`, `SqlServerBootstrapper.cs`, `DataEnginePasswordGenerator.cs`, `DatabaseSecurityPasswordStore.cs` | **Scoped out** — see Part 1's boundary note and Open Question 25. `XmlStore`'s encryption path is read and captured as P8-STORE-3; `DatabaseRegistry` is captured as P8-STORE-2 |
+| `MyMoney.Data/CsvStore.cs` | **Phase 6** |
+
+---
+
+## Open questions from Phase 8
+
+Things a human should double-check, because the call was a judgement rather than obvious
+from the code — and, where noted, because they look like real defects. The first nine are
+ordered by how much a user could lose by trusting them.
+
+1. **Filing a second statement with the same file name silently overwrites the first.**
+   `StatementManager.GetUniqueStatementName` is meant to find a name that isn't taken. It
+   builds `fullPath` from the target directory, then loops testing
+   `if (!File.Exists(fileName))` — `fileName` being the bare *parameter*, a leaf name like
+   `statement.pdf` resolved against the process's working directory, which is never the
+   statements folder. That test is therefore effectively always true, so the method returns
+   `<dir>\statement0.pdf` on its first iteration **every time**, no matter how many times
+   that name has already been used. `ComputeHash` then calls
+   `File.Copy(statementFile, newName, true)` — overwrite enabled. The consequence: a user
+   who downloads their statements from a bank that names every one `statement.pdf` (which
+   is most of them) files the first as `statement.pdf`, the second as `statement0.pdf`,
+   and the **third overwrites the second** — while the second statement's index entry
+   still points at that file and still carries the second statement's fingerprint. The
+   user has lost a document, the index now lies about what is in it, and nothing says so.
+   Testing `fullPath` instead of `fileName` is the whole fix. This is the most serious
+   thing Phase 8 found and is the same family as the attachment data loss already filed as
+   issue #54.
+
+2. **Merging another copy of the books brings statement dates across but silently drops
+   every statement document.** `StatementManager.ImportStatements` passes `item.Filename`
+   — a path *relative to the other file's index* — as the `statementFile` argument to
+   `AddStatement`. `ComputeHash` guards on `File.Exists(statementFile)`, which resolves
+   that relative path against the working directory and fails, so the whole body is
+   skipped: the new `StatementItem` is added with its date and balance but with no
+   document and no fingerprint at all. There is no error, no count and no warning. A user
+   merging a laptop copy into a desktop copy keeps their reconciliation history and loses
+   the evidence behind it.
+
+3. **A question asked from a background thread answers itself.** `MessageBoxEx.Show`
+   builds and shows the window inside `UiDispatcher.BeginInvoke` and then does
+   `return result;`. On the interface thread `BeginInvoke` runs the delegate synchronously,
+   so this works. Off it, `BeginInvoke` *posts* and `Show` returns
+   `MessageBoxResult.None` immediately — before the user has seen the window, let alone
+   answered it. Every `MessageBoxEx.Show(...) == MessageBoxResult.OK` test in the product
+   is therefore a coin toss decided by which thread the caller happens to be on. The
+   confirmations of P8-ATT-4 ("would you like to move the existing attachments
+   directory?", "the storage location does not exist, would you like to create it?") and
+   P8-STORE-8 are all of this shape. `CLAUDE.md` already records the non-blocking
+   behaviour as the reason a crash dialog doesn't halt a FlaUI test; this is the same
+   mechanism doing something worse.
+
+4. **The product's own message box makes a hidden button the default.**
+   `SetButtonVisibility` works out which button should be the default, stores it in a local
+   called `defaultButton` — and then never uses it, unconditionally setting
+   `this.ButtonYes.IsDefault = true` and giving `ButtonYes` the accent background. For an
+   OK-only or OK/Cancel message that button is collapsed, so the emphasis lands on nothing
+   the user can see and Enter's behaviour is at best undefined. Separately, Escape always
+   produces a "cancel" answer even on a message whose only button is OK. Three lines from
+   the local that was meant to be used.
+
+5. **Today's price is never merged into the stored history, and the code that would do it
+   would crash if it ran.** `DownloadLog.OnQuoteAvailable` records a downloaded quote with
+   `this._downloadedQuotes.TryUpdate(quote.Symbol, quote, existing)` — `TryUpdate` only
+   updates a key that already exists, and nothing ever adds one, so the dictionary stays
+   permanently empty and every call returns false. The only reader is in `GetHistory`,
+   which does `if (this._downloadedQuotes.TryGetValue(symbol, out var quote)) {
+   if (history.MergeQuote(quote)) … }` — and sits *after* the branch that leaves `history`
+   null when no history file exists. So the feature is dead, and the accident that killed
+   it is also what stops it dereferencing null. The visible effect is that a chart or
+   historical valuation for today's date falls back to the security's current price
+   (P8-QUOTE-10's `!found` branch) rather than using the quote that was just downloaded.
+
+6. **The "grant the server permission to this folder" step doesn't grant anything.**
+   `DirectorySetup.AddWritePermission` ends by building a `FileSystemAccessRule` and
+   calling `security.AddAccessRule(...)` — which mutates an in-memory `FileSecurity`
+   object. It never calls `SetAccessControl`, so nothing is written to the folder. (It also
+   constructs a `FileSecurity` for what is a *directory* path.) What actually happens today
+   is the fallback: a message box asking the user to go and set the permission themselves
+   in Explorer — and the commented-out recursive re-check right after it shows the author
+   knew the verification was missing. P8-STORE-8 describes the intent.
+
+7. **A second crash report corrupts the first.** `CrashReport.Save` opens the file with
+   `File.OpenWrite`, which does not truncate. Serializing a *shorter* report over a longer
+   one leaves the tail of the previous one behind, producing invalid XML.
+   `CrashReport.Load` then throws, swallows the exception and deletes the file — so the
+   user is never shown the crash that just happened, and the previous one is gone too.
+   `File.Create` is the one-word fix. (`Save` also writes to
+   `Path.GetDirectoryName(folder)` — the *parent* of the log folder — which is deliberate
+   but reads as a bug.)
+
+8. **Removing a file from the pending-delete list throws.**
+   `TempFilesManager.RemoveTempFile` iterates `Instance.files` with `foreach` and calls
+   `Instance.files.Remove(path)` inside the loop, which invalidates the enumerator — so
+   every call that actually *finds* a match raises `InvalidOperationException`. Its two
+   callers are in the attachment window, on the path where a temporary file has just been
+   promoted to a real attachment. Related, in the same class: `SaveTempFileList` does
+   `doc.Save(TempFileList)` with no `Directory.CreateDirectory` first, so on a machine where
+   that folder doesn't yet exist, shutdown throws.
+
+9. **File encryption uses a fixed salt, a fixed initialisation vector, SHA-1 and two
+   iterations.** `Encryption` hard-codes `saltValue = "Money Rocks"` and
+   `initVector = "*B5good!+027XYZ."`, derives the key with `PasswordDeriveBytes` (the
+   deprecated PBKDF1) over SHA-1 with `passwordIterations = 2`, and comments that these
+   "cannot change". Every encrypted file the product has ever written therefore shares one
+   salt and one IV, and the key derivation offers essentially no resistance to a
+   brute-force attempt. A user who password-protects an exported financial file is getting
+   much less protection than the feature implies. Changing it breaks every existing file,
+   which is presumably why the comment is there — a versioned format is the way out.
+   Security exposure of the same class as the findings already filed as issue #56.
+
+10. **The very first row a search is tested against is judged by a different rule from
+    every other row.** `FilterLiteral` caches whether the typed text parses as a date. On
+    the *first* call, `MatchDate` finds `_date` null, tries to parse, fails, sets
+    `notDate = true` and returns `false`. On every call after that, the `notDate` branch at
+    the top returns `MatchSubstring(dateTime.ToShortDateString())` instead — i.e. it
+    matches the date *as text*. Since one `FilterLiteral` is deliberately shared across the
+    whole filtering pass, searching a register for "25" can miss the first row in the list
+    on the strength of its date and match the rest. Low impact, trivially fixable, and
+    exactly the kind of thing that makes a user distrust a search box.
+
+11. **A hard-coded debugging branch shipped inside the price-history gap finder.**
+    `StockQuoteHistory.GetMissingDataRanges` contains
+    `if (current.Start.Year == 2025 && current.Start.Month == 1 && current.Start.Day == 8
+    && this.Symbol == "MSFT") { Debug.WriteLine("???"); }`. Harmless at runtime, but it is
+    live code in a shipped release and a marker of where someone was last debugging this
+    algorithm. The same method also silently caps itself at ten ranges and falls back to
+    one whole-history request past five, which is a real behavioural rule with no user
+    explanation attached.
+
+12. **Exchange rates are anchored to the US dollar whatever the user's own currency is.**
+    `ExchangeRateService` requests `fetch-all?from=USD` and stores `Currency.Ratio = 1 /
+    rate`, so every currency is expressed against the dollar. P8-BOOK-3 lets the user pick
+    any currency to see their totals in, and `DatabaseSettings.DisplayCurrency` defaults to
+    `"USD"`. Whether a non-US user's figures come out right depends entirely on how
+    `Currency.Ratio` is interpreted downstream (Phase 1's P1-CUR-*), and nothing in either
+    place states the convention. Worth someone with two real currencies checking a total by
+    hand. Related: the service's name, address and monthly allowance are hard-coded in
+    `GetDefaultSettings` and the constructor overwrites whatever address was saved, so
+    unlike the four market-data providers this one cannot be pointed anywhere else.
+
+13. **Deleting a transaction deletes its paperwork with no warning.**
+    `AttachmentManager.OnMoneyChanged`'s delete branch calls `DeleteAttachments(t)` and
+    carries the comment *"todo: would be nice to warn the user they are losing them…"* —
+    twice, in two different handlers. Deleting a transaction that has a receipt filed
+    against it destroys the receipt immediately and silently. Since the product otherwise
+    treats deleting a transaction as an easily-made, low-stakes action, this is a real
+    asymmetry a redesign should decide about deliberately.
+
+14. **Documents and statements are filed by account *name*, and two accounts can collide.**
+    Both managers build a folder path from `NativeMethods.GetValidFileName(account.Name)`.
+    Renames are handled (P8-ATT-6, P8-STMT-5), but two accounts whose names differ only in
+    characters that get stripped — `"Visa: Joint"` and `"Visa / Joint"`, say — resolve to
+    the same folder, and every document in it is then matched to transactions by id across
+    both accounts. `StatementManager` additionally keys its whole in-memory index by the raw
+    account name, so two accounts with the *same* name (which the model permits) share one
+    statement index outright. Using the account's identifier rather than its name would
+    remove a whole class of problem, at the cost of folders a human can no longer read —
+    which is exactly the trade-off P8-ATT-3 exists to describe.
+
+15. **Preferences are written by a reflection-driven reader that throws on anything it
+    doesn't recognise.** `Settings.ReadXml`/`WriteXml` walk the class's own properties by
+    name and handle nine specific types, ending in `throw new Exception("…encountered
+    unsupported property type…")`. Adding a preference of any other shape breaks reading
+    *and* writing the whole file. There is also no try/catch around `Settings.Load` in this
+    class, so a truncated or hand-edited preferences file is a startup failure rather than a
+    reset. P8-PREF-3 describes the round-tripping that does work; this is the edge it sits
+    on.
+
+16. **`Settings.BackupPath` is a live, saved preference for a command the user cannot
+    invoke.** Phase 2's Open Question 5 established that backup is implemented and bound but
+    reachable from no menu, button or gesture. This phase confirms the other half: the
+    preference behind it is read, written and migrated like any other. So the product
+    persistently remembers where the user's backups should go and offers no way to make
+    one. Given that P8-ATT-2 and P8-STMT-3 put irreplaceable documents in folders *beside*
+    the financial file, "there is no backup" is a bigger gap here than it looks from
+    Phase 2.
+
+17. **The in-place calculator doesn't appear for the minus key most people press.**
+    `CalculatorPopup.TextBoxPreviewKeyDown` opens the popup for `Add`, `Subtract`,
+    `Multiply`, `Divide` (all numeric-keypad keys) and `OemPlus`, but **not** `OemMinus` —
+    the `-` on the main keyboard row. Typing `100-20` therefore computes correctly on Enter
+    (the handler is attached to the text box regardless of the popup) but shows no
+    calculator, while `100+20` shows one. Cosmetic, but it makes the feature look
+    unreliable. In the same area, `CalculatorControl.OnKeyDown` is a fourteen-case switch in
+    which **every case is an empty `break`** — pure dead code.
+
+18. **A third appearance exists that nothing can select.** `Themes/Compact.xaml` is a
+    complete density style sheet, commented as imported from another project, that no code
+    merges and no setting names; only `Light.xaml` and `Dark.xaml` are reachable
+    (`MainWindow` hard-codes the two paths). Phase 3 recorded that the transaction register
+    has its own row-height setting; whether a product-wide compact mode was intended and
+    abandoned, or is simply vendored material, is worth establishing before a redesign
+    invents one.
+
+19. **Theming is only complete for code that asks for it.** `AppTheme.GetThemedBrush`
+    exists because a brush obtained normally is frozen and won't follow a theme change;
+    anything drawn in code that *doesn't* go through it keeps its original colour until
+    restart. `MessageBoxEx.SetImageStyle` does exactly that, with the comment *"these are
+    blending colors so they don't need to be themed"*. `UpdateDynamicBrushes` also throws
+    outright if a themed resource turns out not to be a solid colour, and writes a debug
+    line — not a user-visible warning — when a brush named by code is missing from the new
+    theme. A redesign introducing a third theme would find these one at a time.
+
+20. **Nothing prints, and this phase confirms it from the other side.** The only
+    `PrintDialog` in the entire product is in `AttachmentDialog`. There is no print
+    command, no print infrastructure, no page setup and no print-specific layout anywhere
+    else — not for a report, a register, a statement, a balance or a chart. Phase 5's Open
+    Question 6 raised this from the reports side; the cross-cutting sweep finds no shared
+    printing layer that a redesign could build on. This is a build-from-nothing item, not a
+    wiring-up item.
+
+21. **The product's own clipboard format can be read but not written.**
+    `MoneyDataObject` implements every `SetData` overload as
+    `throw new NotImplementedException()`. It works today because it is only ever
+    constructed around an already-serialized record, but it is a public
+    `IDataObject` implementation that throws on half its interface — and it means the
+    format is one-directional by construction. Relevant to Phase 3's finding that several
+    panels advertise cut and paste and implement neither.
+
+22. **The update check only ever looks at the newest entry.**
+    `ChangeInfoReport.HasLatestVersion` opens a `foreach` over every change entry and
+    `return`s unconditionally at the end of the first iteration — so the loop is a
+    convoluted way of reading `Root.Elements("change").First()`. That is probably the
+    intended behaviour given the file is newest-first, but written this way it is
+    impossible to tell intent from accident, and it silently assumes an ordering the file
+    format doesn't enforce.
+
+23. **Background failures are swallowed completely, including into an empty `catch`.**
+    `AttachmentWatcher.ScanDirectory` wraps its entire body in `try { … } catch { }` with
+    no logging at all; `StatementManager.LoadIndexFile` catches, writes to the debugger and
+    carries a `// TODO: fix corrupt files?`; `StockSplitDownloader.ProcessPending` catches
+    everything and comments that it should perhaps record the failure. So a permissions
+    problem on the attachments folder, a corrupted statement index or a provider that
+    consistently fails for one holding all present to the user as "the feature quietly
+    doesn't work". Since P8-DIAG-1 gives the product a perfectly good log, routing these
+    into it costs three lines and would turn three invisible failures into diagnosable
+    ones.
+
+24. **Reconnecting to a server database on startup is a debug-build-only feature.** The
+    whole of `DataEngineStartup` is inside `#if DEBUG`. A release build therefore never
+    auto-reopens a SQL Server set of books; the user must go through the File menu every
+    time. Whether that is a deliberate safety measure or an unfinished feature that never
+    graduated is worth establishing — P8-STORE-6 describes the behaviour the code
+    implements, which most users will never see.
+
+25. **Where the `MyMoney.Data` line was drawn — the one scoped-out area.** This phase's
+    sweep was scoped by its brief to `MyMoney/` and `MyMoney.Business/`. The third project,
+    `MyMoney.Data`, holds the five storage engines (~10,400 lines across `SqlDatabase.cs`,
+    `SqlServerStoredProcDatabase.cs`, `SqliteDatabase.cs`, `SqlCeDatabase.cs`,
+    `XmlStore.cs`) plus the registry, factory, bootstrapper and password-store files. Phase
+    4 owns the windows that drive them, Phase 6 owns `CsvStore`, and this phase owns the
+    user-perceivable concepts (P8-STORE-1…P8-STORE-3, P8-STORE-7). **What is not covered
+    anywhere is the engines' internal behaviour** — schema upgrade, save batching,
+    concurrency conflict detection, and the SQL Server bootstrap sequence. The judgement is
+    that almost none of that is user-facing (the user perceives "my work was saved", which
+    is Phase 1's P1-WHOLE-2/P1-WHOLE-4), and that the area already has its own design
+    document and its own completed work stream — `docs/superpowers/specs/
+    2026-09-16-persistence-concurrency-design.md`, issues #20/#26/#27/#41. **A human
+    should confirm that judgement**, because it is the only place in this catalog where
+    "all source processed" means "assessed and deliberately scoped out" rather than "read
+    in full". If a design panel wants the storage layer's user-visible edges — what happens
+    when two copies of the product have the same file open, what a schema upgrade looks
+    like to the user, what a failed save leaves behind — that is a short Phase 9 over one
+    folder, not a re-run of anything here.
+
+26. **Two capabilities in this phase are described by Phase 3 but only visible here.**
+    `AutoCategorization` searches the *current* account first and then every other account
+    the same party has appeared in (via the payee index), so the product's category
+    suggestion can come from a completely different account — which Phase 3's P3-EDIT-7
+    doesn't say and a user would not guess. And `Query.cs`'s vocabulary (the fields,
+    comparisons and conjunctions of Phase 3's P3-FIND-4) is where `CLAUDE.md`'s two
+    documented surprises live. Both files are claimed here without new scenarios, on the
+    judgement that the *user goal* is already catalogued and only the mechanism was
+    unowned; if a redesign wants "why did it suggest that category", the cross-account
+    behaviour is the answer and it should get a scenario of its own.
+
+---
+
+# Catalog complete
+
+All eight phases are done. Every file under `Source/WPF/MyMoney/` and
+`Source/WPF/MyMoney.Business/` has been read and either mapped to a scenario or recorded
+as not user-facing, with the single scoped-out exception named in Phase 8's Open Question
+25 (`Source/WPF/MyMoney.Data/`'s storage-engine internals).
+
+**What is here**
+
+| | |
+|---|---|
+| Scenarios | **791** across eight phases — 161 (core model), 70 (shell), 153 (views), 106 (dialogs), 90 (reports and charts), 71 (import/export), 41 (taxes), 99 (cross-cutting) |
+| Open questions | **169** — judgement calls, boundary decisions and suspected defects a human should confirm |
+| Phases | 8 of 8 complete |
+
+**Where the bugs went.** This audit was a source-code read, not a test pass, but it kept
+finding things that were plainly wrong rather than merely undecided. Those have been
+triaged into GitHub issues so that a design panel reading this catalog isn't also acting
+as a bug tracker:
+
+- **[#52](https://github.com/markabrandjord/MyMoney.Net/issues/52)** — general findings
+  (dead commands, unreachable UI, convention drift, "nothing prints a report")
+- **[#53](https://github.com/markabrandjord/MyMoney.Net/issues/53)** — an entire
+  rent-entry surface that nothing in the product can open
+- **[#54](https://github.com/markabrandjord/MyMoney.Net/issues/54)** — *high priority*:
+  saving an attachment destroys non-image attachments
+- **[#55](https://github.com/markabrandjord/MyMoney.Net/issues/55)** — *high priority*:
+  retirement-projection and tax-report calculation defects
+- **[#56](https://github.com/markabrandjord/MyMoney.Net/issues/56)** — *high priority*:
+  import/export data corruption and security exposure
+- **[#57](https://github.com/markabrandjord/MyMoney.Net/issues/57)** — *high priority*:
+  tax calculation errors
+
+Phase 8's own first-ranked findings — statement documents being silently overwritten
+(Open Question 1) and silently dropped on merge (Open Question 2) — belong with #54 as
+the same "paperwork the user believes is filed is not" family, and are not yet filed.
+
+**How to read this catalog.** Each scenario is a *user goal*, deliberately written without
+naming a control, a class or a screen, so that a redesign can satisfy it any way it likes.
+The italic note under each one is traceability back to the source, for anyone who needs to
+check what the current product actually does — it is not part of the requirement. The
+per-phase coverage checklists are the proof of completeness; the per-phase open questions
+are where the current product's intent is genuinely unclear, and are the shortest list of
+decisions a redesign has to make before it starts.
