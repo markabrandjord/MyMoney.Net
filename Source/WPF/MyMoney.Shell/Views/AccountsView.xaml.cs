@@ -1,9 +1,11 @@
 // Source/WPF/MyMoney.Shell/Views/AccountsView.xaml.cs
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using MyMoney.Shell.Services;
 using MyMoney.Shell.ViewModels;
 using Walkabout.Business.AppServices;
+using Walkabout.Data;
 
 namespace MyMoney.Shell.Views;
 
@@ -13,16 +15,28 @@ public partial class AccountsView : UserControl
     private readonly IDialogService dialogService;
     private readonly IStatusService statusService;
     private readonly AddAccountService addAccountService;
+    private readonly EditAccountService editAccountService;
+    private readonly DeleteAccountService deleteAccountService;
 
     public AccountsView(AccountsListViewModel listViewModel, IDialogService dialogService,
-        IStatusService statusService, AddAccountService addAccountService)
+        IStatusService statusService, AddAccountService addAccountService,
+        EditAccountService editAccountService, DeleteAccountService deleteAccountService)
     {
         InitializeComponent();
         this.listViewModel = listViewModel;
         this.dialogService = dialogService;
         this.statusService = statusService;
         this.addAccountService = addAccountService;
+        this.editAccountService = editAccountService;
+        this.deleteAccountService = deleteAccountService;
         this.DataContext = listViewModel;
+    }
+
+    private void AccountsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        bool hasSelection = this.AccountsListView.SelectedItem is AccountRowViewModel;
+        this.EditAccountButton.IsEnabled = hasSelection;
+        this.DeleteAccountButton.IsEnabled = hasSelection;
     }
 
     private async void AddAccountButton_Click(object sender, RoutedEventArgs e)
@@ -67,6 +81,78 @@ public partial class AccountsView : UserControl
                 // line; LogActivity is the durable entry behind the Activity button.
                 this.statusService.ShowStatus($"Account added: {addViewModel.Name}");
                 this.statusService.LogActivity($"Added account '{addViewModel.Name}'");
+                return;
+            }
+
+            // else: loop and re-show with the same (now error-carrying) view model.
+        }
+    }
+
+    private async void EditAccountButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (this.AccountsListView.SelectedItem is not AccountRowViewModel selected)
+        {
+            return;
+        }
+
+        // Same fresh-per-click / shared-within-retry-loop shape as AddAccountButton_Click.
+        var editViewModel = new EditAccountViewModel(
+            this.editAccountService, selected.Id, selected.Name,
+            Enum.Parse<AccountType>(selected.Type), selected.Currency);
+
+        while (true)
+        {
+            var content = new EditAccountView(editViewModel);
+            var outcome = await this.dialogService.ShowAsync(content, "Edit Account", "Save");
+
+            if (outcome != DialogOutcome.Committed)
+            {
+                return;
+            }
+
+            editViewModel.CommitCommand.Execute(null);
+
+            if (editViewModel.Succeeded)
+            {
+                await this.listViewModel.LoadCommand.ExecuteAsync(null);
+                this.statusService.ShowStatus($"Account updated: {editViewModel.Name}");
+                this.statusService.LogActivity($"Updated account '{editViewModel.Name}'");
+                return;
+            }
+
+            // else: loop and re-show with the same (now error-carrying) view model.
+        }
+    }
+
+    private async void DeleteAccountButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (this.AccountsListView.SelectedItem is not AccountRowViewModel selected)
+        {
+            return;
+        }
+
+        // No retry-with-typed-values concern here (there is nothing to type), but the same
+        // loop-the-show shape applies: a rare concurrency conflict re-shows the confirmation
+        // with the error visible rather than silently closing.
+        var deleteViewModel = new DeleteAccountViewModel(this.deleteAccountService, selected.Id, selected.Name);
+
+        while (true)
+        {
+            var content = new DeleteAccountView(deleteViewModel);
+            var outcome = await this.dialogService.ShowAsync(content, "Delete Account", "Delete");
+
+            if (outcome != DialogOutcome.Committed)
+            {
+                return;
+            }
+
+            deleteViewModel.CommitCommand.Execute(null);
+
+            if (deleteViewModel.Succeeded)
+            {
+                await this.listViewModel.LoadCommand.ExecuteAsync(null);
+                this.statusService.ShowStatus($"Account deleted: {deleteViewModel.AccountName}");
+                this.statusService.LogActivity($"Deleted account '{deleteViewModel.AccountName}'");
                 return;
             }
 

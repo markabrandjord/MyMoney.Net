@@ -9,11 +9,20 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <ui:Button x:Name="AddAccountButton" AutomationProperties.AutomationId="AddAccountButton"
-                   Grid.Row="0" Content="+ Add Account" Appearance="Primary"
-                   HorizontalAlignment="Left" Margin="0,0,0,8" Click="AddAccountButton_Click"/>
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <ui:Button x:Name="AddAccountButton" AutomationProperties.AutomationId="AddAccountButton"
+                       Content="+ Add Account" Appearance="Primary"
+                       Margin="0,0,8,0" Click="AddAccountButton_Click"/>
+            <ui:Button x:Name="EditAccountButton" AutomationProperties.AutomationId="EditAccountButton"
+                       Content="Edit" IsEnabled="False"
+                       Margin="0,0,8,0" Click="EditAccountButton_Click"/>
+            <ui:Button x:Name="DeleteAccountButton" AutomationProperties.AutomationId="DeleteAccountButton"
+                       Content="Delete" IsEnabled="False"
+                       Click="DeleteAccountButton_Click"/>
+        </StackPanel>
         <ListView x:Name="AccountsListView" AutomationProperties.AutomationId="AccountsListView"
-                  Grid.Row="1" ItemsSource="{Binding Accounts}">
+                  Grid.Row="1" ItemsSource="{Binding Accounts}"
+                  SelectionChanged="AccountsListView_SelectionChanged">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="200"/>

@@ -19,6 +19,8 @@ public partial class MainWindow : FluentWindow
     private readonly IDialogService dialogService;
     private readonly IMoneyQuery query;
     private readonly AddAccountService addAccountService;
+    private readonly EditAccountService editAccountService;
+    private readonly DeleteAccountService deleteAccountService;
 
     public MainWindow(IThemeService themeService, IStatusService statusService,
         INavigationService navigationService, IDialogService dialogService, IMoneyQuery query, IMoneyStore store)
@@ -31,6 +33,8 @@ public partial class MainWindow : FluentWindow
         this.dialogService = dialogService;
         this.query = query;
         this.addAccountService = new AddAccountService(store, query);
+        this.editAccountService = new EditAccountService(store, query);
+        this.deleteAccountService = new DeleteAccountService(store, query);
 
         this.statusService.Changed += this.OnStatusChanged;
         this.RefreshStatus();
@@ -58,7 +62,8 @@ public partial class MainWindow : FluentWindow
             if (route == RouteId.Accounts)
             {
                 var viewModel = new AccountsListViewModel(this.query);
-                this.ContentHost.Content = new AccountsView(viewModel, this.dialogService, this.statusService, this.addAccountService);
+                this.ContentHost.Content = new AccountsView(viewModel, this.dialogService, this.statusService,
+                    this.addAccountService, this.editAccountService, this.deleteAccountService);
                 viewModel.LoadCommand.Execute(null);
             }
         };
