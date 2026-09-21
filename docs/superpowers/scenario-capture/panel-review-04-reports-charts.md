@@ -9,7 +9,7 @@ those catalog sections, and in several cases went back to the source, before opi
 | | Decision | Recommendation | Needs your decision |
 |---|---|---|---|
 | D-16 | How is a report or chart scoped, and is there still a shared range dialog? | One inline scope model, no modal; category filtering as a declared per-surface capability | **Partly** — the category-filter half |
-| D-17 | What is a shareable report, and is HTML it? | Paginated print/PDF as the share format; HTML export retired unless made self-contained | **Partly** — whether HTML survives |
+| D-17 | What is a shareable report, and is HTML it? | Paginated print/PDF as the share format; HTML export retired unless made self-contained | **Resolved** — Print/PDF replaces HTML entirely via a Markdown-intermediate → window-render → Print-to-PDF redesign, tracked in [#72](https://github.com/markabrandjord/MyMoney.Net/issues/72); see D-17's "Owner decision" |
 | D-18 | Does every report export, and to what? | Export becomes a framework guarantee, moved to the report's command surface | No |
 | D-19 | What should a mixed-currency total say? | Always normalise to a stated display currency; never silently drop a subtotal | **Resolved** — minimal/best-effort (current-rate basis), tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70); see D-19's "Owner decision" |
 | D-20 | Should generated category colours be persisted? | Stable-hash into a curated, theme-aware palette; persist only explicit user choices | No |
@@ -379,13 +379,55 @@ B-30, the export that closes the file before the report has finished writing to 
 B-35, the tax report's unbalanced table. If HTML export survives even one more release,
 those two make it produce truncated files today.
 
+### Owner decision
+
+**Resolved 2026-09-20.** Print/PDF replaces HTML export entirely, ratifying the panel's
+recommended **Alternative B**. The owner frames this as bigger than a like-for-like format
+swap, though: the reporting subsystem needs to be **re-imagined**, not patched.
+
+> "Print PDF replaces HTML Report entirely. The reporting subsystem needs to be
+> re-imagined. Microsoft supports a PDF printer driver that will print to a PDF file. We
+> just need to be able to format a report to a window (maybe by writing the report as a
+> markdown file, and then print the report to the MS printer. Easily built and tested. I
+> think that there are even 3rd party tools that can evaluate the quality of the PDF file."
+
+The proposed shape: generate each report as **Markdown** as an intermediate representation,
+render that Markdown to a window for on-screen viewing, and print via the built-in Windows
+"Microsoft Print to PDF" driver to produce PDF output — no third-party PDF library
+dependency required. Third-party tooling to evaluate the resulting PDF's quality is noted as
+an optional additional check, not a requirement.
+
+This directly answers the Test Engineer's dissent recorded above (B was flagged as "the
+hardest to assert... a printed page is verified by eye or by image comparison; neither fits
+`dotnet test`"): a Markdown intermediate is plain text, trivially diffable and
+unit-testable — tests can assert against the generated Markdown directly, without touching a
+printer or a rendered document — with the window-render and Print-to-PDF stages layered on
+top as a thin final step. That resolves the panel's previously-unresolved testability
+trade-off without giving up B's advantage of getting charts "for free" because they're real
+elements in the document.
+
+This is a genuine reporting-subsystem redesign, not something built now as part of this
+decision-review pass. It's tracked as the starting design direction for that future work in
+**GitHub issue [#72](https://github.com/markabrandjord/MyMoney.Net/issues/72)** ("Reporting
+subsystem redesign: report → Markdown → Print-to-PDF (replaces HTML export)").
+
+**Cross-reference:** D-35's still-open question in
+[`panel-review-05-data-engine-security.md`](panel-review-05-data-engine-security.md#owner-guidance)
+— "where should common control logic, import/export logic, and reporting-output logic live
+in the new architecture" — is not answered here, but this Markdown-intermediate approach is
+directly relevant input for that future discussion and should be considered when it's taken
+up.
+
 ### Needs your decision
 
-**Partly.** The panel is confident that *HTML export in its current form is not the answer*
-and should not be repaired incrementally. It is **not** confident which replacement you
-want, because that depends on something only you know: **do you actually hand these
-reports to anyone?** If yes → B (print/PDF). If no, and the `.txf` export plus CSV covers
-your real hand-off → C (delete it), and D-52 can stay unanswered.
+**Resolved 2026-09-20 — see "Owner decision" above, tracked in
+[#72](https://github.com/markabrandjord/MyMoney.Net/issues/72).**
+
+Original flag, kept for context: **Partly.** The panel is confident that *HTML export in its
+current form is not the answer* and should not be repaired incrementally. It is **not**
+confident which replacement you want, because that depends on something only you know: **do
+you actually hand these reports to anyone?** If yes → B (print/PDF). If no, and the `.txf`
+export plus CSV covers your real hand-off → C (delete it), and D-52 can stay unanswered.
 
 **Panel flags: would benefit from the recipient's expertise** — an accountant or tax
 preparer's view of what format they actually want to receive would settle this in one
