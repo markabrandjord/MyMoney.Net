@@ -21,6 +21,7 @@
     <!-- Deliberately NOT ..\MyMoney\MyMoney.csproj - see spec section 2.1 item 2.
          Task 22 adds TestsBusiness_DoesNotReferenceTheWpfUiProject to enforce this. -->
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
+    <ProjectReference Include="..\MyMoney.TestKit\MyMoney.TestKit.csproj" />
   </ItemGroup>
 
 </Project>
