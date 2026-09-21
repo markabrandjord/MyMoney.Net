@@ -182,11 +182,16 @@ into an implementation plan. Each needs a yes/no or a pick from you.
    `OnTransientChanged`; `ChangeTracker.OnMoneyChanged` stops registering a `ChangeList`
    entry for `None`/`TransientChanged`). Full reasoning and the rejected full-view-model
    alternative (B) are in `panel-review-01-domain-model-taxes.md` on `docs/scenario-capture`.
-5. **Accessibility gap**, flagged by the panel itself on D-6, D-7 and D-15: no accessibility
+5. ~~Accessibility gap, flagged by the panel itself on D-6, D-7 and D-15: no accessibility
    expertise reviewed the density-control removal, the theming/High-Contrast story, or the
-   Window→`ContentDialog` conversion's screen-reader/focus-trapping behavior. Real gap, not
-   a formality — worth deciding whether to get real accessibility input before or during
-   implementation. Still open.
+   Window→`ContentDialog` conversion's screen-reader/focus-trapping behavior.~~ **Resolved
+   2026-09-21 — ship on WPF-UI's built-in behavior; treat accessibility issues as a
+   fast-follow, fixed as bugs when found, rather than front-loading a dedicated
+   contrast/screen-reader/High-Contrast verification pass before building Accounts.**
+   Explicitly accepted risk: if the `ContentDialog`-based dialog pattern (D-15) turns out to
+   have a real screen-reader/focus-trapping problem, that surfaces only after multiple
+   dialogs are already built on it, and fixing it then means revisiting all of them, not
+   one. No further action needed before `writing-plans`.
 
 ## Non-goals
 
