@@ -227,6 +227,24 @@ stated as an assumption throughout this document — is now the settled answer, 
 (`MyMoney.Data.Sqlite`, `MyMoney.TestKit`, etc.), not by a tree path, so it never hedged on this
 question in the first place.
 
+**Revision 11 (2026-09-20, same day).** A recording revision, not a design one: the owner answered
+§4 item 3 — *must SQL Server stay at feature parity throughout the rebuild* — the last open item on
+the original list, closing it out entirely.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| *(the general parity question, given earlier in this conversation)* "We can prototype functionality on SQLite, and use that to develop the scrum features. But it would be best to upgrade the SQL Server library in the same feature checkin. If it lags a bit, we can live with that, but we need to keep them as similar as we can, otherwise we cannot test reliably." | §4 item 3 (now resolved, not open) |
+| *(asked directly whether that principle extends to the query layer specifically)* "Same principle for the query layer too." | §4 item 3; explicitly closes revision 7's "may now be stale" flag on the "lag the query surface" recommendation |
+
+**The outcome, in one line:** no carve-out for `IMoneyQuery` or any other query-surface capability.
+Default practice is to update SQL Server's implementation of a new store capability in the **same
+feature check-in** as SQLite's — prototyping on SQLite first when useful is fine, occasional lag is
+tolerable but not planned for, and the two engines stay as close together as practical throughout,
+because divergence undermines the shared `DatabaseContractTests`-style suite's reliability. This
+closes the open-items list: of §4's original seven items plus item #8, **all eight are now resolved
+by the owner**. See §4 item 3 for the full reasoning, §4.1 for the closed stale-framing flag, and §8
+for the updated closing summary.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -2594,9 +2612,27 @@ technical panel cannot legitimately answer.
    none to the schema/store shape, because R-CRUD-4 already assumed version-checked writes — the
    consequence is entirely in the new business-layer retry loop and its test-tier support).
 
-3. **Must SQL Server stay at feature parity throughout the rebuild?** Every new store capability
-   (starting with `IMoneyQuery`) implemented twice and contract-tested twice, or may the SQL Server
-   tier lag and be caught up at milestones? The cost is real, recurring, and paid on every slice.
+3. ~~**Must SQL Server stay at feature parity throughout the rebuild?**~~ **Resolved — same
+   principle as everything else, extended explicitly to the query layer.** The owner's general
+   parity answer, given earlier in this conversation (before this was formally item #3), verbatim:
+   **"We can prototype functionality on SQLite, and use that to develop the scrum features. But it
+   would be best to upgrade the SQL Server library in the same feature checkin. If it lags a bit,
+   we can live with that, but we need to keep them as similar as we can, otherwise we cannot test
+   reliably."** Asked directly whether that principle extends to the query layer specifically —
+   given revision 7 made `IMoneyQuery` the whole application's read path, not just reports' — the
+   owner confirmed, verbatim: **"Same principle for the query layer too."**
+
+   This closes the loop revision 7 flagged (§4.1's "Net after revision 7" note, below): the panel's
+   original recommendation — *lag `IMoneyQuery` and other read-side capabilities on SQL Server while
+   schema management does not, on the premise that the query surface mainly served reports* — is
+   **not adopted as written**, because the premise it rested on (query-surface-as-reports-only) no
+   longer holds. The owner's answer is uniform rather than surface-specific: default practice is to
+   implement and contract-test a new store capability — schema management, CRUD, and now the query
+   surface alike — **on both engines in the same feature check-in**; prototyping on SQLite first
+   when useful is fine; occasional lag is tolerable but not planned for; and the two engines are
+   kept as close together as practical throughout, specifically because divergence undermines the
+   shared `DatabaseContractTests`-style suite's reliability. No special carve-out survives for
+   `IMoneyQuery` just because it was originally motivated by reports.
 
 4. ~~**Does whole-graph `Load()` survive?**~~ **Resolved in revision 7 — no.** The `MyMoney`
    object graph with its `PersistentObject` change tracking assumed "load everything at startup,
@@ -2692,7 +2728,7 @@ Today's guidance touches four of the seven. Stated explicitly, per the revision'
 |---|---|---|
 | 1 — in place vs. parallel tree | **Reframed, and materially de-risked.** The strongest argument for a parallel tree was always *"the existing database format must keep working while the new one is built."* S-0 removes it: there is no data to preserve and no user to keep shippable for. That does not *decide* the question — build-breakage and reviewability arguments survive untouched — but it takes the scariest constraint off the table, and it strengthens §7's assumption of *in place, incrementally*. Still the owner's call. *(Resolved by the owner, revision 10 — see below: in place.)* | Unchanged. |
 | 2 — SQLite file lease | Unchanged. Nothing today bears on it. | **Resolved — no lease, ever, on the shipped path.** See §4 item 2 and §1.6a. The owner's simultaneous human+AI-agent goal rules a lease out; version-checked concurrency with business-layer retry is the permanent model. |
-| 3 — SQL Server feature parity throughout | **Sharpened, and partly answered by implication.** "The process should be more or less the same on SQLite and SQL Server" is a parity requirement, but specifically about *schema management*, and it is a stronger claim than round 1's framing: §1.5's step list, ledger and verify semantics must be parity **from slice 2**, not caught up at a milestone, because a ledger that only one engine has is not a ledger. The question the owner still owns is narrower than round 1 posed it: **may `IMoneyQuery` and other read-side capabilities lag on SQL Server while schema management does not?** The panel's recommendation is yes — lag the query surface, never the schema surface. | Unchanged. |
+| 3 — SQL Server feature parity throughout | **Sharpened, and partly answered by implication.** "The process should be more or less the same on SQLite and SQL Server" is a parity requirement, but specifically about *schema management*, and it is a stronger claim than round 1's framing: §1.5's step list, ledger and verify semantics must be parity **from slice 2**, not caught up at a milestone, because a ledger that only one engine has is not a ledger. The question the owner still owns is narrower than round 1 posed it: **may `IMoneyQuery` and other read-side capabilities lag on SQL Server while schema management does not?** The panel's recommendation is yes — lag the query surface, never the schema surface. *(Resolved by the owner, revision 11 — see §4 item 3: no — the same-check-in principle applies uniformly, no query-surface carve-out.)* | Unchanged. |
 | 4 — does whole-graph `Load()` survive | Unchanged, and worth saying why, since it's easy to assume otherwise: nuke-and-pave makes *schema* change cheap; it says nothing about whether the in-memory `MyMoney` object graph remains the domain model. Still the biggest fork in the rebuild, still undecided, and §1 still works either way. | Unchanged. |
 | 5 — `XmlStore` as a day-one export format | **Arguably resolved, in the direction of "yes, sooner."** Under nuke-and-pave, an XML export is the only thing that lets a developer keep a hand-built scenario across a re-pave. That is a genuine new argument for it being early rather than deferred — but it is a scope call, so it stays on the list with a recommendation attached rather than being ticked off unilaterally. | Unchanged. |
 | 6 — credential storage | Unchanged. Panel still recommends now. | Unchanged. |
@@ -2746,6 +2782,9 @@ query surface on SQL Server would mean the SQL Server tier can't serve ordinary 
 not just stale reports, while schema management races ahead. Item #3 remains open and is not
 resolved here; the panel's recommendation may need revisiting in light of this, but that is the
 panel's or the owner's call to make separately, not something this recording pass decides.
+**Resolved in revision 11** — see §4 item 3. The owner's answer removes the premise this
+recommendation rested on rather than revisiting it in isolation: no query-surface carve-out
+survives, under the same-check-in principle that already governs everything else in this document.
 
 **Net after revision 8: items #5, #6 and #7 all move to resolved by the owner**, which takes the
 original seven down to **two still open** (#1, #3) plus #8. Two of the three were pure recordings;
@@ -2804,6 +2843,17 @@ removing the "existing format must keep working" argument for a parallel tree) t
 easy. Nothing in this design's shape changes as a result: §7 already assumed *in place,
 incrementally* throughout, and §5's slice plan was already assembly-named rather than tree-path-named,
 so neither needed an edit beyond this recording.
+
+**Net after revision 11: item #3 moves from open to resolved by the owner, closing the
+original-seven-plus-#8 open-items list entirely — zero still open.** The owner's decision, verbatim
+(extending the general parity answer given earlier in this conversation, before this was formally
+item #3): **"Same principle for the query layer too."** §4 item 3 has the full reasoning, including
+the general-parity answer it extends and the explicit closing of revision 7's "may now be stale"
+flag on the "lag the query surface" recommendation (see this section's "Net after revision 7" note,
+above). Nothing in this design's shape changes as a result — no candidate, port, or slice was ever
+built assuming a lag, per §1's Candidate A introduction of `IMoneyQuery` and §6.4's requirement that
+the contract suite cover `IMoneyQuery` the slice it appears — the only edits are this recording, the
+closed revision-7 flag, and matching tightenings noted in §8's closing summary.
 
 ---
 
@@ -3239,19 +3289,30 @@ dependency revision 8 introduced — only a new consumer of one the document alr
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: of §4's original seven items plus new item #8, **seven are now
-  resolved and one remains open** — #3 (must SQL Server stay at feature parity throughout?).
-  Resolved by the owner, in order:
+- **All originally-flagged items are now resolved.** Of §4's original seven items plus new item
+  #8 — eight items total — **all eight are resolved by the owner; none remain open.** This closes
+  the "needs the owner's decision" list this document has tracked since round 1. Resolved by the
+  owner, in order:
   - **#1** — rebuild in place, not in a parallel `Source/Rebuild/` tree (revision 10; §4 item 1).
     A belated recording rather than a new decision: the owner gave this early in the review
     process, before several of the intervening revisions; revision 2's note on nuke-and-pave
     de-risking the in-place option (by removing the "existing format must keep working" argument
     for a parallel tree) is the relevant context for why the call was easy.
   - **#2** — no file lease, ever, on the shipped path (revision 3; §1.6a).
+  - **#3** — SQL Server must stay at feature parity throughout, with no carve-out for the query
+    surface (revision 11; §4 item 3). The owner's general parity answer, verbatim: *"We can
+    prototype functionality on SQLite, and use that to develop the scrum features. But it would
+    be best to upgrade the SQL Server library in the same feature checkin. If it lags a bit, we
+    can live with that, but we need to keep them as similar as we can, otherwise we cannot test
+    reliably."* Asked directly whether that extends to the query layer specifically, the owner
+    confirmed: *"Same principle for the query layer too."* This closes revision 7's flag (below,
+    #4) that the "lag `IMoneyQuery` on SQL Server" recommendation had gone stale once the query
+    surface became the universal read path rather than a reports-only one.
   - **#4** — whole-graph `Load()` does not survive: *"The query-based pattern replaces the
     whole-graph-in-memory pattern everywhere"* (revision 7; §4 item 4). `IMoneyQuery` is now the
-    universal read-access pattern, not a reports-specific addition — which §4.1 flags as leaving
-    item #3's "lag the query surface on SQL Server" recommendation stale, without resolving it.
+    universal read-access pattern, not a reports-specific addition — which §4.1 flagged as leaving
+    item #3's "lag the query surface on SQL Server" recommendation stale; **resolved in revision 11
+    (see #3, above).**
   - **#5** — XML-as-export-format: **"deferred"** (revision 8). Not in the first slices; §3.2's
     placement behind `IDataFormat` is untouched. §4.1 records that the developer-facing need this
     leaves unserved (keeping a hand-built scenario across a re-pave) is already covered by
