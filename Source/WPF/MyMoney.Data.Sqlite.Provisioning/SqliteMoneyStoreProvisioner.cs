@@ -197,9 +197,46 @@ namespace Walkabout.Data.Sqlite.Provisioning
 
         public void DropAll() => throw new NotImplementedException("Task 18.");
 
-        public void Backup(string destinationPath) => throw new NotImplementedException("Task 9.");
+        /// <summary>
+        /// VACUUM INTO rather than close-and-File.Copy: it is transactionally consistent and does
+        /// not require closing a live WAL database - spec sections 1.7.1 and 3.2. The filename is
+        /// a bound parameter, not concatenated (R-CRUD-1).
+        ///
+        /// VACUUM INTO refuses an existing destination, so an overwrite is explicit. Spec section
+        /// 3.2 requires Backup to be able to overwrite.
+        ///
+        /// Task 21 puts TestDatabaseGuard in front of the destructive operations on this class;
+        /// Backup is not one of them - it only ever writes a NEW file.
+        /// </summary>
+        public void Backup(string destinationPath)
+        {
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                throw new ArgumentException("A backup destination path is required.", nameof(destinationPath));
+            }
 
-        public void Delete() => throw new NotImplementedException("Task 9.");
+            if (System.IO.File.Exists(destinationPath))
+            {
+                System.IO.File.Delete(destinationPath);
+            }
+
+            using (var cmd = new SQLiteCommand("VACUUM INTO @path;", this.connection))
+            {
+                cmd.Parameters.AddWithValue("@path", destinationPath);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        public void Delete()
+        {
+            string dataSource = this.options.DataSource;
+            this.connection.Close();
+
+            if (!SqliteConnectionFactory.IsInMemory(dataSource) && System.IO.File.Exists(dataSource))
+            {
+                System.IO.File.Delete(dataSource);
+            }
+        }
 
         public void Dispose() => this.connection?.Dispose();
 
