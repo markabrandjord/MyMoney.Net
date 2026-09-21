@@ -15,8 +15,10 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <!-- This is the ONE test project allowed to reference the WPF UI project (Task 22 adds it),
-         because inspecting production assemblies is its job. -->
+    <!-- Inspecting the production assemblies is this project's job, so it references each of
+         them directly. It does NOT reference ..\MyMoney\MyMoney.csproj: nothing here inspects the
+         WPF UI assembly yet. If a check for it is ever added, this is the one test project where
+         that reference would be legitimate. -->
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.TestKit.Contracts\MyMoney.TestKit.Contracts.csproj" />
     <ProjectReference Include="..\MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj" />
