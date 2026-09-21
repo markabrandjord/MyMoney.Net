@@ -24,29 +24,42 @@ public partial class AccountsView : UserControl
 
     private async void AddAccountButton_Click(object sender, RoutedEventArgs e)
     {
-        // A fresh view model every time, per Task 9's cancel-restores note - reusing one
-        // across opens would leak the previous attempt's typed values into the next.
+        // A fresh view model per BUTTON CLICK (not per dialog show), per Task 9's
+        // cancel-restores note - reusing one across separate "Add Account" clicks would leak
+        // a previous attempt's typed values into the next. Within a single click's flow,
+        // though, the SAME view model is deliberately reused across a validation-failure
+        // retry loop below - that's what carries the typed values and ErrorMessage forward
+        // so the user doesn't have to retype everything after a typo.
         var addViewModel = new AddAccountViewModel(this.addAccountService);
-        var content = new AddAccountView(addViewModel);
-
-        var outcome = await this.dialogService.ShowAsync(content, "Add Account", "Add");
 
         // WPF-UI's ContentDialog (4.3.0) closes as soon as a button is clicked - its
         // ButtonClicked event carries no deferral/cancel capability, so there is no way to
-        // keep the dialog open pending validation. The commit itself therefore has to run
-        // here, after the dialog has already closed, rather than being wired to the dialog's
-        // own Primary button. A practical consequence: on a validation failure (e.g. a
-        // duplicate name) AddAccountView's ErrorMessage text never becomes visible, since the
-        // dialog is already gone by the time Succeeded is false - a known UX gap, out of this
-        // task's scope (the plan's FlaUI coverage only exercises the happy path and cancel).
-        if (outcome == DialogOutcome.Committed)
+        // keep the dialog open pending validation from inside the dialog itself. Instead, the
+        // SHOW is looped here: on a validation failure (Succeeded == false), re-show the
+        // dialog with the same view model, so ErrorMessage is now populated and the user sees
+        // it on the re-opened dialog, with their previously typed values still intact. A new
+        // AddAccountView is constructed on each loop iteration - the previous one still
+        // logically belongs to the just-closed ContentDialog, so reparenting it would be the
+        // wrong move; the view model is the one thing that should carry over.
+        while (true)
         {
+            var content = new AddAccountView(addViewModel);
+            var outcome = await this.dialogService.ShowAsync(content, "Add Account", "Add");
+
+            if (outcome != DialogOutcome.Committed)
+            {
+                return;
+            }
+
             addViewModel.CommitCommand.Execute(null);
 
             if (addViewModel.Succeeded)
             {
                 await this.listViewModel.LoadCommand.ExecuteAsync(null);
+                return;
             }
+
+            // else: loop and re-show with the same (now error-carrying) view model.
         }
     }
 }

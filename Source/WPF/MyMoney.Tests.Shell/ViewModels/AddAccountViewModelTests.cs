@@ -10,6 +10,37 @@ namespace MyMoney.Tests.Shell.ViewModels;
 public class AddAccountViewModelTests
 {
     [Test]
+    public void Commit_AfterExhaustingRetries_SetsErrorMessageInsteadOfThrowing()
+    {
+        // Review feedback on Task 10: Commit() previously only caught DuplicateAccountNameException
+        // and ArgumentException. AddAccountService.AddAccount can also throw
+        // ConcurrencyRetryExhaustedException after MaxAttempts losing writes (see
+        // AddAccountRetryTests.AddAccount_AfterTooManyConflicts_GivesUpWithAClearException for the
+        // service-level proof this is reachable) - and now that Commit() has a real caller
+        // (AccountsView's click handler), an uncaught exception here would escape an async-void
+        // event handler and crash the app, not just fail a test.
+        using var fixture = InMemorySqliteStore.Create();
+        var faulty = new FaultInjectingStore(fixture.Store);
+        for (int i = 0; i < AddAccountService.MaxAttempts; i++)
+        {
+            faulty.ThrowConflictFor(1); // the id the first attempt will allocate
+        }
+
+        var service = new AddAccountService(faulty, fixture.Query);
+        var viewModel = new AddAccountViewModel(service)
+        {
+            Name = "Vacation Fund",
+            Type = AccountType.Checking,
+            Currency = "USD",
+        };
+
+        Assert.DoesNotThrow(() => viewModel.CommitCommand.Execute(null));
+
+        Assert.That(viewModel.Succeeded, Is.False);
+        Assert.That(viewModel.ErrorMessage, Is.Not.Null);
+    }
+
+    [Test]
     public void Commit_WithValidFields_AddsAccountAndSetsSucceeded()
     {
         using var fixture = InMemorySqliteStore.Create();

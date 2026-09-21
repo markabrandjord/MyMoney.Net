@@ -47,5 +47,14 @@ public sealed partial class AddAccountViewModel : ObservableObject
             this.Succeeded = false;
             this.ErrorMessage = ex.Message;
         }
+        catch (ConcurrencyRetryExhaustedException ex)
+        {
+            // Now a live, reachable path since Task 10 gave Commit() a real caller (previously
+            // this only mattered in theory - AddAccountService.AddAccount can throw this after
+            // MaxAttempts losing writes, and an uncaught exception here would escape the
+            // async-void AddAccountButton_Click handler and crash the app).
+            this.Succeeded = false;
+            this.ErrorMessage = ex.Message;
+        }
     }
 }

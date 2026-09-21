@@ -66,7 +66,8 @@ public class AddAccountFlaUiTests
             TimeSpan.FromSeconds(5));
 
         var listView = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsListView"));
-        var addedRow = listView?.FindFirstDescendant(cf => cf.ByName("Should Not Be Added"));
+        Assert.That(listView, Is.Not.Null, "Sanity check: the list itself must be found, or the next assertion would pass vacuously.");
+        var addedRow = listView!.FindFirstDescendant(cf => cf.ByName("Should Not Be Added"));
         Assert.That(addedRow, Is.Null, "Cancelling must not add the account to the list.");
 
         // D-13's real cancel-restore guarantee: re-opening the dialog after a cancel must not
@@ -106,10 +107,54 @@ public class AddAccountFlaUiTests
         // reach that nested element instead. Confirmed empirically: the ListItem-scoped search
         // used in the brief's original code came back null against the real running app.
         var listView = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsListView"));
+        Assert.That(listView, Is.Not.Null);
         var addedRow = Retry.WhileNull(
-            () => listView?.FindFirstDescendant(cf => cf.ByName("Vacation Fund")),
+            () => listView!.FindFirstDescendant(cf => cf.ByName("Vacation Fund")),
             TimeSpan.FromSeconds(5)).Result;
         Assert.That(addedRow, Is.Not.Null);
+
+        app.Close();
+    }
+
+    // Covers the review-flagged dead-binding bug: Commit()'s validation failure used to set
+    // ErrorMessage on a view whose ContentDialog had already closed, so AddAccountErrorText
+    // could never actually render, and the most likely first thing a real user tries -
+    // clicking "Add" with a blank name - was a silent no-op with no explanation. This is also
+    // the most direct proof that Task 9's ArgumentException catch in Commit() (added for
+    // exactly this blank/invalid-name case) is observable, not just internally recorded and
+    // then discarded.
+    [Test]
+    public void AddingAnAccountWithABlankName_ShowsAnErrorAndKeepsTheDialogOpen()
+    {
+        using var app = Application.Launch(ExePath);
+        using var automation = new UIA3Automation();
+        var mainWindow = Retry.WhileNull(() => app.GetMainWindow(automation), TimeSpan.FromSeconds(10)).Result!;
+
+        OpenAccountsPage(mainWindow);
+
+        // Name field starts blank (AddAccountViewModel's default) - go straight to "Add"
+        // without typing anything.
+        OpenAddAccountDialog(mainWindow);
+
+        var addButton = mainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button).And(cf.ByName("Add")));
+        Assert.That(addButton, Is.Not.Null);
+        addButton!.Patterns.Invoke.Pattern.Invoke();
+
+        // The show-loop must have re-shown the SAME dialog rather than silently closing it -
+        // the name text box should still be findable.
+        var nameBox = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountNameTextBox")),
+            TimeSpan.FromSeconds(5)).Result;
+        Assert.That(nameBox, Is.Not.Null, "A validation failure must re-show the dialog rather than close it.");
+
+        // And the error text must now actually be visible with a real message - TextBlock's
+        // automation peer (TextBlockAutomationPeer.GetNameCore()) surfaces its Text via the
+        // element's Name, the same mechanism the GridView row-name gotcha above relies on.
+        var errorText = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountErrorText")),
+            TimeSpan.FromSeconds(5)).Result;
+        Assert.That(errorText, Is.Not.Null, "The error text element must be findable once ErrorMessage is set.");
+        Assert.That(errorText!.Name, Does.Contain("name"), "The error text must actually explain the problem.");
 
         app.Close();
     }

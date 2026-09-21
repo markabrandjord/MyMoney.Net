@@ -24,7 +24,11 @@ public partial class AddAccountView : UserControl
     {
         this.Resources.Add("NullToCollapsedConverter", new NullToCollapsedConverter());
         InitializeComponent();
-        this.DataContext = viewModel;
+        // ItemsSource assigned before DataContext: SelectedItem="{Binding Type}" in the XAML
+        // would otherwise initially evaluate against an empty item list (DataContext triggers
+        // the binding before ItemsSource has anything to select from) and fail to show the
+        // view model's actual default (AccountType.Checking) selected.
         this.TypeComboBox.ItemsSource = Enum.GetValues<AccountType>();
+        this.DataContext = viewModel;
     }
 }
