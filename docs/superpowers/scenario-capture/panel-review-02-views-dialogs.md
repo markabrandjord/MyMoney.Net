@@ -481,10 +481,22 @@ second.
    the existing auto-categorisation logic rather than a new engine), with the seed query
    shown and editable beside the results and the match rule stated in words.
 
-**Needs your decision: yes** — on whether to build the capability at all. The panel can
-recommend the *design* but not the *priority*: the feature's entire value rests on how
-badly the imported payee data is fragmented, which only the owner, looking at their own
-converted file, can judge. A concrete way to decide it cheaply: after importing the
+### Owner decision
+
+**Resolved 2026-09-21.** The owner accepted the panel's own suggested checkpoint rather
+than deciding blind: delete the dead command now (already true — item 1 above), and defer
+the build/don't-build call until after the Quicken import, using the panel's own test
+(distinct-payees vs. real-merchants ratio) to decide cheaply with real data instead of a
+guess.
+
+### Needs your decision
+
+**Resolved 2026-09-21 — see "Owner decision" above.**
+
+Original flag, kept for context: **yes** — on whether to build the capability at all. The
+panel can recommend the *design* but not the *priority*: the feature's entire value rests
+on how badly the imported payee data is fragmented, which only the owner, looking at their
+own converted file, can judge. A concrete way to decide it cheaply: after importing the
 Quicken data, count distinct payees against the number of real-world merchants. If the
 ratio is close to 1, delete and forget; if it is 3:1, this is one of the more valuable
 things in the register.
@@ -644,9 +656,38 @@ navigation panel as a coupling error. The panel did not resolve this and records
 positions. It *did* reach unanimity on the two things that matter most: no number from the
 dormant column, and no number without a visible timeframe.
 
-**Needs your decision:** No, on the recommendation. **Yes**, on the Adversarial Expert's
-follow-up: what a category total should include is a bookkeeping question, not a UI one,
-and the answer should be settled before any figure is displayed.
+### Owner decision
+
+**Resolved 2026-09-21.** The owner initially pushed back on excluding transfers, on
+concrete grounds: "If I transfer money from my brokerage account into my checking account,
+that appears to be income to me. Conversely, if I transfer it the other way, it appears to
+be an expense. Why wouldn't I show it?"
+
+After discussion of the household-level double-counting problem — an inbound and outbound
+transfer between the owner's own accounts would each inflate total income and total
+expense for money that was never earned or spent, only relocated — the owner agreed:
+**"Yes. Follow the standard."**
+
+**Category totals follow standard accounting semantics**: transfers are excluded from
+income/expense category totals by construction (a transfer is not assigned a spending or
+income category at all — it is tagged by its linked account instead), splits allocate to
+their own child categories, and refunds net against the original category rather than
+being tracked separately. This settles the bookkeeping-semantics half the panel flagged as
+outside its competence.
+
+Explicitly **not** settled by this: the owner's underlying need — seeing what moved into
+or out of an account via transfer — remains real and valid, and is a *different* question
+(transfer/account-activity visibility) than what a category total should mean. That
+capability is not scoped by D-11 and should be picked up as its own design point when the
+redesign gets to account/transfer views, not folded into the categories tree.
+
+### Needs your decision
+
+**Resolved 2026-09-21 — see "Owner decision" above.**
+
+Original flag, kept for context: No, on the recommendation. **Yes**, on the Adversarial
+Expert's follow-up: what a category total should include is a bookkeeping question, not a
+UI one, and the answer should be settled before any figure is displayed.
 
 **Panel flags:** would benefit from **personal-finance / bookkeeping domain expertise** —
 specifically on the treatment of transfers, splits, refunds and income sign conventions in
@@ -1290,13 +1331,25 @@ with the split made deliberately rather than by default:
    disconnected-owner windows fixed on this branch.
 4. **Help is a nullable slot on the contract, not a requirement**, pending D-51.
 
-**Needs your decision: yes — on sequencing, not direction.** The panel is confident that
-A-15.3-plus-A-15.2 is the right end state, but the Adversarial Expert's point stands: the
-choice between "do A-15.1/A-15.2 now on the existing dialogs" and "wait and do A-15.3 as
-part of the rewrite" depends entirely on whether the redesign will in fact rewrite all 29
-dialogs, which is a scope and timing call only the owner can make. The panel's advice in
-either case is to build the enforcement check (item 3) immediately, because it is cheap and
-it is valuable under both answers.
+### Owner decision
+
+**Resolved 2026-09-21.** The owner accepted the panel's own advice, which held under
+either sequencing answer: build the automated base-class enforcement check (item 3) now,
+on the current 29 dialogs, and leave actual conversion to the new A-15.3 content-dialog
+base for whenever each dialog is rewritten as part of the broader UI redesign — no blanket
+retrofit pass on the existing dialogs ahead of that.
+
+### Needs your decision
+
+**Resolved 2026-09-21 — see "Owner decision" above.**
+
+Original flag, kept for context: yes — on sequencing, not direction. The panel is
+confident that A-15.3-plus-A-15.2 is the right end state, but the Adversarial Expert's
+point stands: the choice between "do A-15.1/A-15.2 now on the existing dialogs" and "wait
+and do A-15.3 as part of the rewrite" depends entirely on whether the redesign will in fact
+rewrite all 29 dialogs, which is a scope and timing call only the owner can make. The
+panel's advice in either case is to build the enforcement check (item 3) immediately,
+because it is cheap and it is valuable under both answers.
 
 **Panel flags:** would benefit from **accessibility expertise**. Screen-reader and
 keyboard-navigation behaviour differs materially between a real top-level `Window` and an
@@ -1313,12 +1366,12 @@ converts twenty-odd windows into overlays, that is not a detail.
 |---|---|---|
 | D-8 | Shell-owned navigation contract; stable route ids; state scoped per money file; data-hiding filters restore only with a visible indicator | No |
 | D-9 | Shell-provided filter affordance that surfaces opt into with a predicate; honest "nothing to search here"; global find is a separate future capability | No |
-| D-10 | Delete the dead command now; if the capability is wanted, build it as a seeded editable query over payee *families*, results first | **Yes** — whether to build it at all |
-| D-11 | Figure on the content surface for the selected category, computed on demand; never from the dormant `Category.Balance` column; no figure without a visible timeframe | **Yes** — on what a category total should include (bookkeeping semantics) |
+| D-10 | Delete the dead command now; if the capability is wanted, build it as a seeded editable query over payee *families*, results first | **Resolved** — delete now, decide build/no-build after Quicken import using the panel's payee-ratio test; see D-10's "Owner decision" |
+| D-11 | Figure on the content surface for the selected category, computed on demand; never from the dormant `Category.Balance` column; no figure without a visible timeframe | **Resolved** — standard accounting semantics; transfers excluded from category totals by construction; see D-11's "Owner decision" |
 | D-12 | Detect during a reconcile but present passively with no inline merge; state the flagging mode; adopt the noise-reduction rules regardless | No |
 | D-13 | Edit-on-copy by default; enumerated immediate-apply exceptions for globally shared records; a generic cancel-fidelity test as the real enforcement | No |
 | D-14 | One declared keyboard mechanism, enforced automatically; blast-radius rule requiring count *and* scope before a bulk commit; scoped undo as the preferred end state | No |
-| D-15 | Forms become Fluent content dialogs; workspaces stay windows; enforcement check over the residue, built now | **Yes** — sequencing only |
+| D-15 | Forms become Fluent content dialogs; workspaces stay windows; enforcement check over the residue, built now | **Resolved** — enforcement check now, dialog retrofit deferred to each dialog's rewrite; see D-15's "Owner decision" |
 
 **Opt-outs recorded:** the Data Engine Expert opted out of D-9, D-10, D-12, D-14 and D-15,
 and contributed only a narrow caveat on D-8; the Operations Engineer opted out of D-9 and
