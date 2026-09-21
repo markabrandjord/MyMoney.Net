@@ -181,12 +181,44 @@ feature that *does* exist has been dead in the UI without anyone noticing. If th
 does want jar-style budgeting, **Alternative B** is the shape — and the UI/UX Expert's
 reframing to *savings goals* is probably the version that actually gets used.
 
+### Owner decision
+
+**Resolved 2026-09-20.** Envelope/category-fund budgeting is a feature the owner wants,
+but not now — build it properly later, or not at all; don't half-build it as a byproduct
+of this redesign:
+
+> "D-1 + D-3. Create a WI to track our thoughts on this. It is a feature that I would like
+> to have in the system, but if it is not complete now, we should remove it. We can define
+> the scenarios we want to support, and the requirements and design goals when we actually
+> do begin development. Until then, leave it out of the redesign effort, and the source
+> code."
+
+Tracked going forward in **GitHub issue [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69)**
+("Feature (deferred): category-fund / envelope budgeting") — the home for future
+scenario/requirements/design work once active development on this feature actually begins.
+
+Consequences for this redesign:
+
+- Envelope/category-fund budgeting is **out of scope for the redesign effort** until that
+  future work happens — none of Alternatives A/B/C above are being adopted now.
+- The current dead/unreachable budgeting plumbing (confirmed a ghost feature — nothing
+  wired up, `Category.Budget` unreferenced anywhere in the WPF project) should be
+  **removed from the source code**, but that removal is **tracked as follow-up work in
+  #69, not yet executed** — a careful audit is needed first, since some underlying fields
+  (e.g. `Category.Frequency`, `Split.IsBudgeted`) may serve purposes beyond budgeting, or
+  may be more or less dead than this panel's initial read established. See #69 for that
+  nuance rather than re-deriving it here.
+
+This is one resolution covering both D-1 and D-3 — see D-3's own "Owner decision" note,
+which points back here.
+
 ### Needs your decision?
 
-**Yes — for the product question only.** "Does the redesign offer envelope budgeting or
-savings goals?" is pure product taste and the panel is guessing. The two technical
-conclusions above (never as accounts; migrate the type deliberately) stand regardless and
-need no decision.
+**Resolved 2026-09-20 — see "Owner decision" above, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69).**
+Original flag, kept for context: "Yes — for the product question only." "Does the
+redesign offer envelope budgeting or savings goals?" is pure product taste and the panel
+is guessing. The two technical conclusions above (never as accounts; migrate the type
+deliberately) stand regardless and need no decision.
 
 ---
 
@@ -551,12 +583,28 @@ This is confidently recommended as the *shape*. It is entangled with D-1: if the
 wants savings goals or envelopes, they sit naturally on C's plan record and very awkwardly
 on A or B.
 
+### Owner decision
+
+**Resolved 2026-09-20**, jointly with D-1 — see [D-1's "Owner decision"](#owner-decision)
+section above for the full note. Same resolution: envelope/category-fund budgeting (at
+whatever grain) is a wanted future feature, not built now and not abandoned — "if it is
+not complete now, we should remove it... define the scenarios... and the requirements and
+design goals when we actually do begin development." Tracked in
+**GitHub issue [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69)**.
+
+Consequently: the grain question (A/B/C above) is not being decided or built now. The
+redesign excludes budgeting scope — at any grain — until that future work happens, and
+removing the dead plumbing this section catalogs (unreachable commands, the always-false
+"Budgeted" search condition, the per-line tick, the two budget-balance dates, the two flag
+bits) is tracked as follow-up work in #69, not yet executed.
+
 ### Needs your decision?
 
-**Partly.** The panel is confident about the shape (C) and about deleting the dead
-plumbing — neither needs escalation. **"Does budgeting ship at all, and at what priority?"
-is a product call** and the panel is guessing; it should be answered together with D-1,
-since they are the same product question at two levels of ambition.
+**Resolved 2026-09-20 — see "Owner decision" above, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69).**
+Original flag, kept for context: "Partly." The panel is confident about the shape (C) and
+about deleting the dead plumbing — neither needs escalation. "Does budgeting ship at all,
+and at what priority?" is a product call and the panel is guessing; it should be answered
+together with D-1, since they are the same product question at two levels of ambition.
 
 ---
 
@@ -1463,9 +1511,9 @@ convention above is offered as ready to adopt.
 
 | # | Decision | Panel's recommendation | Needs your decision? |
 |---|---|---|---|
-| D-1 | Envelope budgeting / category funds | **A** — leave it out, with a deliberate migration; **C (funds-as-accounts) ruled out unconditionally**; if envelopes ever ship, **B** as a virtual allocation ledger (probably framed as savings goals) | **Yes** — product scope only |
+| D-1 | Envelope budgeting / category funds | **A** — leave it out, with a deliberate migration; **C (funds-as-accounts) ruled out unconditionally**; if envelopes ever ship, **B** as a virtual allocation ledger (probably framed as savings goals) | **Resolved** — deferred as a future feature, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-1's "Owner decision" |
 | D-2 | View state on domain objects | **A now, C as the target** — fix the change-tracker and move two properties to the transient path immediately; in the redesign, view state moves to an identity-keyed side table. **B (full view-model layer) rejected on cost** | No |
-| D-3 | Budgeting grain | **C** — no "budgeted" flag at all; a stored plan plus derived actuals. Delete the dead plumbing regardless. Keep exclusion as an explicit feature | **Partly** — shape is confident; whether budgeting ships is the owner's |
+| D-3 | Budgeting grain | **C** — no "budgeted" flag at all; a stored plan plus derived actuals. Delete the dead plumbing regardless. Keep exclusion as an explicit feature | **Resolved** — deferred jointly with D-1, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-3's "Owner decision" |
 | D-4 | Currency model | **A's fixes behind a dated conversion seam** — fix the conversion cache and the short-circuit, declare the convention, make the source configurable. **B rejected**; **C** named as the shape only if multi-currency becomes real | **Partly** — is multi-currency supported? |
 | D-28 | Sales with no cost basis | **B as destination, C as interim, A opt-in only** — ship the flag fix now with tests, never silently drop a sale, build user-supplied opening lots | **Partly** — prioritisation of opening lots |
 | D-29 | Tax-year vintage | **Split**: **A** for the rate tables (version, disclose, staleness-check, fix loading) — confident. Export/box catalogue: retire, rebuild or freeze — owner's call | **Yes** — for the export |
