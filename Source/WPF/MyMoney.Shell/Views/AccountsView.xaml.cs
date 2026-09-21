@@ -2,6 +2,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using MyMoney.Shell.Controls;
 using MyMoney.Shell.Services;
 using MyMoney.Shell.ViewModels;
 using Walkabout.Business.AppServices;
@@ -30,6 +31,10 @@ public partial class AccountsView : UserControl
         this.editAccountService = editAccountService;
         this.deleteAccountService = deleteAccountService;
         this.DataContext = listViewModel;
+
+        // Reusable across every simple-table screen (see GridViewSorter's own doc comment) -
+        // Transactions will need its own design once that screen exists.
+        GridViewSorter.Attach(this.AccountsListView, defaultColumn: "Name");
     }
 
     private void AccountsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
