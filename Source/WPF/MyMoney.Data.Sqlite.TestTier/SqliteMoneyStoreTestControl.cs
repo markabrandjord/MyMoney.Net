@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
+using System.Linq;
 using MyMoney.TestKit.Contracts;
 using Walkabout.Data;
 using Walkabout.Data.Sqlite.Provisioning;
@@ -197,15 +198,153 @@ namespace Walkabout.Data.Sqlite.TestTier
                 + $"{this.CurrentSchemaVersion}.");
         }
 
-        public RowSnapshot CaptureRow(TableRef table, long id) => throw new NotImplementedException("Task 20.");
+        public RowSnapshot CaptureRow(TableRef table, long id)
+        {
+            RowSnapshot snapshot = this.TryCaptureRow(table, id);
+            if (snapshot == null)
+            {
+                throw new StoreTestControlException($"{table.Name} has no row with Id {id}.");
+            }
 
-        public RowSnapshot TryCaptureRow(TableRef table, long id) => throw new NotImplementedException("Task 20.");
+            return snapshot;
+        }
 
-        public void DeleteRow(TableRef table, long id) => throw new NotImplementedException("Task 20.");
+        public RowSnapshot TryCaptureRow(TableRef table, long id)
+        {
+            string name = this.Validate(table);
 
-        public void RestoreRow(RowSnapshot row) => throw new NotImplementedException("Task 20.");
+            // Column list built from PRAGMA introspection rather than SELECT *, so the snapshot's
+            // key order and content are explicit and a schema change is visible here.
+            IReadOnlyList<string> columns = this.ColumnsOf(name);
+            var values = new Dictionary<string, object>(StringComparer.Ordinal);
 
-        public IRowScope RemoveRow(TableRef table, long id) => throw new NotImplementedException("Task 20.");
+            string columnList = string.Join(", ", columns.Select(c => $"\"{c}\""));
+            using (var cmd = new SQLiteCommand(
+                $"SELECT {columnList} FROM \"{name}\" WHERE Id = @id;", this.Connection))
+            {
+                cmd.Parameters.AddWithValue("@id", id);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    if (!reader.Read())
+                    {
+                        return null;
+                    }
+
+                    for (int i = 0; i < columns.Count; i++)
+                    {
+                        values[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    }
+                }
+            }
+
+            return new RowSnapshot(table, id, values);
+        }
+
+        /// <summary>
+        /// No version check, no cascade. If another table's FK references the row, the delete
+        /// fails and rolls back - cascading would make RestoreRow a lie, restoring the one row it
+        /// captured while the rows the cascade took are gone for good. Restore must be exactly the
+        /// inverse of remove, or it is not a restore. Spec section 2.6.5 point 1.
+        ///
+        /// Succeeds as a no-op when the row is already absent (spec section 2.6.8).
+        /// </summary>
+        public void DeleteRow(TableRef table, long id)
+        {
+            string name = this.Validate(table);
+
+            using (SQLiteTransaction tx = this.Connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                try
+                {
+                    using (var cmd = new SQLiteCommand($"DELETE FROM \"{name}\" WHERE Id = @id;", this.Connection, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@id", id);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    throw new StoreTestControlException(
+                        $"Deleting {name} row {id} failed and was rolled back. DeleteRow does not "
+                        + "cascade: use CaptureRow/DeleteRow on the dependents first if that is "
+                        + "genuinely what the test wants.",
+                        ex);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Re-inserts VERBATIM: same Id, same Version, same every column. Not idempotent, by
+        /// design - a second call is a primary-key violation, because this is the single-shot
+        /// inverse half of a capture-then-delete pair. Spec sections 2.6.5 point 2 and 2.6.8.
+        /// </summary>
+        public void RestoreRow(RowSnapshot row)
+        {
+            if (row == null)
+            {
+                throw new ArgumentNullException(nameof(row));
+            }
+
+            string name = this.Validate(row.Table);
+            var columns = row.Values.Keys.ToList();
+            string columnList = string.Join(", ", columns.Select(c => $"\"{c}\""));
+            string parameterList = string.Join(", ", columns.Select((c, i) => "@p" + i));
+
+            using (SQLiteTransaction tx = this.Connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                try
+                {
+                    using (var cmd = new SQLiteCommand(
+                        $"INSERT INTO \"{name}\" ({columnList}) VALUES ({parameterList});", this.Connection, tx))
+                    {
+                        for (int i = 0; i < columns.Count; i++)
+                        {
+                            cmd.Parameters.AddWithValue("@p" + i, row.Values[columns[i]] ?? DBNull.Value);
+                        }
+
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    throw new StoreTestControlException(
+                        $"Restoring {name} row {row.Id} failed. A silently-failed restore would leak "
+                        + "state into every subsequent test in this fixture, so this throws.",
+                        ex);
+                }
+            }
+        }
+
+        public IRowScope RemoveRow(TableRef table, long id)
+        {
+            RowSnapshot snapshot = this.CaptureRow(table, id);
+            this.DeleteRow(table, id);
+            return new SqliteRowScope(this, snapshot);
+        }
+
+        private IReadOnlyList<string> ColumnsOf(string table)
+        {
+            var columns = new List<string>();
+            using (var cmd = new SQLiteCommand("SELECT name FROM pragma_table_info(@t) ORDER BY cid;", this.Connection))
+            {
+                cmd.Parameters.AddWithValue("@t", table);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        columns.Add(reader.GetString(0));
+                    }
+                }
+            }
+
+            return columns;
+        }
 
         public IReadOnlyList<TableRef> Tables
         {
