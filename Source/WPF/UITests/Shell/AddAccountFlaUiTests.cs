@@ -1,9 +1,7 @@
 using System;
-using System.IO;
-using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
-using FlaUI.UIA3;
 using NUnit.Framework;
 
 namespace Walkabout.UITests.Shell;
@@ -18,32 +16,43 @@ namespace Walkabout.UITests.Shell;
 [TestFixture]
 public class AddAccountFlaUiTests
 {
-    private static string ExePath => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "MyMoney.Shell",
-        "bin", "Debug", "net10.0-windows7.0", "MyMoney.Shell.exe"));
+    private ShellSession session;
 
-    private static void OpenAccountsPage(FlaUI.Core.AutomationElements.Window mainWindow)
+    [TearDown]
+    public void TearDown()
     {
-        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NavAccountsButton"))!
+        try
+        {
+            ShellTestApp.AssertNoCrashOccurred(this.session);
+        }
+        finally
+        {
+            this.session?.Dispose();
+            this.session = null;
+        }
+    }
+
+    private static void OpenAccountsPage(Window mainWindow)
+    {
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NavAccountsButton"))
             .Patterns.Invoke.Pattern.Invoke();
         Retry.WhileNull(() => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsPage")), TimeSpan.FromSeconds(5));
     }
 
-    private static FlaUI.Core.AutomationElements.AutomationElement OpenAddAccountDialog(FlaUI.Core.AutomationElements.Window mainWindow)
+    private static AutomationElement OpenAddAccountDialog(Window mainWindow)
     {
-        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountButton"))!
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountButton"))
             .Patterns.Invoke.Pattern.Invoke();
         return Retry.WhileNull(
             () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountNameTextBox")),
-            TimeSpan.FromSeconds(5)).Result!;
+            TimeSpan.FromSeconds(5)).Result;
     }
 
     [Test]
     public void CancellingAddAccount_LeavesTheListUnchangedAndTheDialogDoesNotRememberTheTypedName()
     {
-        using var app = Application.Launch(ExePath);
-        using var automation = new UIA3Automation();
-        var mainWindow = Retry.WhileNull(() => app.GetMainWindow(automation), TimeSpan.FromSeconds(10)).Result!;
+        this.session = ShellTestApp.Launch();
+        var mainWindow = this.session.MainWindow;
 
         OpenAccountsPage(mainWindow);
 
@@ -56,7 +65,7 @@ public class AddAccountFlaUiTests
         // ContentDialog's Close/Cancel button - findable by its declared CloseButtonText.
         var cancelButton = Retry.WhileNull(
             () => mainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button).And(cf.ByName("Cancel"))),
-            TimeSpan.FromSeconds(5)).Result!;
+            TimeSpan.FromSeconds(5)).Result;
         cancelButton.Patterns.Invoke.Pattern.Invoke();
 
         // The dialog must actually be gone before we look for the (nonexistent) row - Invoke()
@@ -67,7 +76,7 @@ public class AddAccountFlaUiTests
 
         var listView = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsListView"));
         Assert.That(listView, Is.Not.Null, "Sanity check: the list itself must be found, or the next assertion would pass vacuously.");
-        var addedRow = listView!.FindFirstDescendant(cf => cf.ByName("Should Not Be Added"));
+        var addedRow = listView.FindFirstDescendant(cf => cf.ByName("Should Not Be Added"));
         Assert.That(addedRow, Is.Null, "Cancelling must not add the account to the list.");
 
         // D-13's real cancel-restore guarantee: re-opening the dialog after a cancel must not
@@ -78,16 +87,13 @@ public class AddAccountFlaUiTests
         var reopenedNameBox = OpenAddAccountDialog(mainWindow);
         var reopenedName = reopenedNameBox.Patterns.Value.Pattern.Value.ValueOrDefault;
         Assert.That(reopenedName, Is.Empty, "Re-opening the dialog after a cancel must not carry over the previously typed name.");
-
-        app.Close();
     }
 
     [Test]
-    public void AddingAnAccount_AppearsInTheList()
+    public void AddingAnAccount_AppearsInTheListAndIsReportedInTheStatusBar()
     {
-        using var app = Application.Launch(ExePath);
-        using var automation = new UIA3Automation();
-        var mainWindow = Retry.WhileNull(() => app.GetMainWindow(automation), TimeSpan.FromSeconds(10)).Result!;
+        this.session = ShellTestApp.Launch();
+        var mainWindow = this.session.MainWindow;
 
         OpenAccountsPage(mainWindow);
 
@@ -96,7 +102,7 @@ public class AddAccountFlaUiTests
 
         var addButton = mainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button).And(cf.ByName("Add")));
         Assert.That(addButton, Is.Not.Null);
-        addButton!.Patterns.Invoke.Pattern.Invoke();
+        addButton.Patterns.Invoke.Pattern.Invoke();
 
         // Not scoped to ControlType.ListItem: the GridView-backed row's own automation Name is
         // the AccountRowViewModel record's ToString() (e.g. "AccountRowViewModel { Id = ...,
@@ -109,11 +115,22 @@ public class AddAccountFlaUiTests
         var listView = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AccountsListView"));
         Assert.That(listView, Is.Not.Null);
         var addedRow = Retry.WhileNull(
-            () => listView!.FindFirstDescendant(cf => cf.ByName("Vacation Fund")),
+            () => listView.FindFirstDescendant(cf => cf.ByName("Vacation Fund")),
             TimeSpan.FromSeconds(5)).Result;
         Assert.That(addedRow, Is.Not.Null);
 
-        app.Close();
+        // D-5's status model had no producers at all until this fix wave - the status bar read
+        // "Ready" and the Activity button "(0)" no matter what the user did. These two
+        // assertions are what keeps that from silently becoming true again. TextBlock's
+        // automation peer surfaces its Text as the element's Name.
+        var statusText = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("StatusText")),
+            TimeSpan.FromSeconds(5)).Result;
+        Assert.That(statusText.Name, Is.EqualTo("Account added: Vacation Fund"));
+
+        var activityButton = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("ActivityButton"));
+        Assert.That(activityButton.Name, Is.EqualTo("Activity (1)"),
+            "Adding an account must be recorded in the activity list, not just the status line.");
     }
 
     // Covers the review-flagged dead-binding bug: Commit()'s validation failure used to set
@@ -126,9 +143,8 @@ public class AddAccountFlaUiTests
     [Test]
     public void AddingAnAccountWithABlankName_ShowsAnErrorAndKeepsTheDialogOpen()
     {
-        using var app = Application.Launch(ExePath);
-        using var automation = new UIA3Automation();
-        var mainWindow = Retry.WhileNull(() => app.GetMainWindow(automation), TimeSpan.FromSeconds(10)).Result!;
+        this.session = ShellTestApp.Launch();
+        var mainWindow = this.session.MainWindow;
 
         OpenAccountsPage(mainWindow);
 
@@ -138,7 +154,7 @@ public class AddAccountFlaUiTests
 
         var addButton = mainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button).And(cf.ByName("Add")));
         Assert.That(addButton, Is.Not.Null);
-        addButton!.Patterns.Invoke.Pattern.Invoke();
+        addButton.Patterns.Invoke.Pattern.Invoke();
 
         // The show-loop must have re-shown the SAME dialog rather than silently closing it -
         // the name text box should still be findable.
@@ -154,8 +170,6 @@ public class AddAccountFlaUiTests
             () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddAccountErrorText")),
             TimeSpan.FromSeconds(5)).Result;
         Assert.That(errorText, Is.Not.Null, "The error text element must be findable once ErrorMessage is set.");
-        Assert.That(errorText!.Name, Does.Contain("name"), "The error text must actually explain the problem.");
-
-        app.Close();
+        Assert.That(errorText.Name, Does.Contain("name"), "The error text must actually explain the problem.");
     }
 }

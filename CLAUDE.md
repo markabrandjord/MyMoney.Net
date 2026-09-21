@@ -61,6 +61,15 @@ scenario tests, project dependency diagram). Quick reference:
 - `Importers/` and `Ofx/` handle bringing in external data (OFX/QFX, CSV, QIF-style
   imports) — relevant to the Quicken-conversion evaluation this fork exists for.
 - `Reports/`, `Charts/`, `Taxes/` are feature areas built on top of the core model.
+- **There are now TWO WPF applications in `Source/WPF`**, both in the same solution and
+  both shipped: the legacy `MyMoney` project described above, and `MyMoney.Shell` — the
+  UI/UX redesign's vertical slice (WPF-UI/Fluent chrome + MVVM, `MyMoney.Shell` root
+  namespace, its own `MyMoney.Tests.Shell` unit tests and `UITests/Shell` FlaUI tests). It
+  runs *alongside* the legacy app rather than replacing it, has its own `MainWindow`, and
+  talks to `IMoneyStore`/`IMoneyQuery` (currently over a throwaway in-memory SQLite database
+  opened in its `App.OnStartup`) instead of `Database/Money.cs`'s object graph. A change to
+  one app is not automatically a change to the other, and "the app" in an older note or issue
+  almost always means the legacy one.
 - Other source trees are separate/experimental UI ports, not part of the main
   app: `Source/Xamarin` (legacy mobile) and `Source/Uno` (in-progress Uno
   Platform port). Don't assume changes to `Source/WPF/MyMoney` need mirroring there.

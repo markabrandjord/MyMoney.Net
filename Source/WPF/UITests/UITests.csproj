@@ -27,6 +27,14 @@
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.Data\MyMoney.Data.csproj" />
     <ProjectReference Include="..\MyMoney.TestSupport\MyMoney.TestSupport.csproj" />
+    <!--
+      The Shell FlaUI tests (Shell\*.cs) launch MyMoney.Shell.exe as a subprocess from its own
+      bin directory - they never call into it as a library, hence ReferenceOutputAssembly=false:
+      build it as a dependency, but do not reference its assembly or copy its output in here.
+      Without this, running `dotnet test UITests.csproj` would not rebuild the shell first, so
+      those four fixtures could silently drive a stale - or entirely missing - executable.
+    -->
+    <ProjectReference Include="..\MyMoney.Shell\MyMoney.Shell.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

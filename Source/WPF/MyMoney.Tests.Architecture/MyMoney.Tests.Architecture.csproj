@@ -25,5 +25,9 @@
     <ProjectReference Include="..\MyMoney.Data.Sqlite.Provisioning\MyMoney.Data.Sqlite.Provisioning.csproj" />
     <ProjectReference Include="..\MyMoney.Tests.Business\MyMoney.Tests.Business.csproj" />
     <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
+    <!-- MyMoney.Shell is the second WPF application (the UI/UX redesign shell) and is where new
+         dialogs will actually be written from here on, so the D-15 allow-list check covers it
+         too - same justification as the MyMoney.csproj reference above. -->
+    <ProjectReference Include="..\MyMoney.Shell\MyMoney.Shell.csproj" />
   </ItemGroup>
 </Project>
