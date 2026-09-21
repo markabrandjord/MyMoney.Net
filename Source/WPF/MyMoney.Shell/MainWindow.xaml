@@ -1,0 +1,13 @@
+<ui:FluentWindow x:Class="MyMoney.Shell.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="MyMoney"
+        Height="640" Width="980"
+        WindowStartupLocation="CenterScreen"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica">
+    <Grid AutomationProperties.AutomationId="ShellRoot">
+        <ui:TitleBar Title="MyMoney" VerticalAlignment="Top" />
+    </Grid>
+</ui:FluentWindow>

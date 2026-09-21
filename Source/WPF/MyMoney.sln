@@ -53,6 +53,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.TestKit", "MyMoney.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Data.Sqlite.TestTier", "MyMoney.Data.Sqlite.TestTier\MyMoney.Data.Sqlite.TestTier.csproj", "{BEE312AD-899F-4A08-A516-BFA0EE4202E3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Shell", "MyMoney.Shell\MyMoney.Shell.csproj", "{3BF5195D-4F14-4B1B-8603-D27262F022AB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -569,6 +571,30 @@ Global
 		{BEE312AD-899F-4A08-A516-BFA0EE4202E3}.Release|x64.Build.0 = Release|Any CPU
 		{BEE312AD-899F-4A08-A516-BFA0EE4202E3}.Release|x86.ActiveCfg = Release|Any CPU
 		{BEE312AD-899F-4A08-A516-BFA0EE4202E3}.Release|x86.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|ARM.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|ARM.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|x64.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Debug|x86.Build.0 = Debug|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|ARM.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|ARM.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|ARM64.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|x64.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|x64.Build.0 = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|x86.ActiveCfg = Release|Any CPU
+		{3BF5195D-4F14-4B1B-8603-D27262F022AB}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
