@@ -328,11 +328,54 @@ namespace Walkabout.Data.Sqlite
             }
         }
 
+        /// <summary>
+        /// Per-root and version-checked, for the same conflict-attribution reason as UpdateAccounts.
+        ///
+        /// The never-persisted rule is the plan's decision D-2, which the design deliberately
+        /// routed to this slice to pin (spec sections 1.6c honest costs and 4.1): RowVersion == 0
+        /// means the root has never been written - a loaded root always has Version >= 1 from the
+        /// schema's DEFAULT 1, and a constructed one has the long default. Because OnUpdated()
+        /// never clears Deleted, a root created and then deleted before any save is also Deleted,
+        /// so without this rule the common accident would raise a ConcurrencyConflictException
+        /// that misdiagnoses "this row was never there".
+        ///
+        /// Deleting the SAME persisted root twice deliberately still conflicts: the first delete
+        /// succeeded, so the second call is a caller bug or a real race, which is precisely what
+        /// the conflict exception and section 1.6a's retry loop are for.
+        ///
+        /// No Parent.RemoveChild here. That call existed to keep the ambient MyMoney graph in
+        /// sync, and revision 7 removed whole-graph Load(), so there is no long-lived container
+        /// for the store to maintain.
+        /// </summary>
         private void DeleteAccounts(IReadOnlyList<Account> deleted, SQLiteTransaction tx, List<Action> postCommitActions)
         {
-            if (deleted.Count > 0)
+            foreach (Account a in deleted)
             {
-                throw new NotImplementedException("Task 14.");
+                if (a.RowVersion == 0)
+                {
+                    postCommitActions.Add(() => a.OnUpdated());
+                    continue;
+                }
+
+                long callerRowVersion = a.RowVersion;
+                object removedId;
+
+                using (var cmd = new SQLiteCommand(
+                    "DELETE FROM Accounts WHERE Id=@Id AND Version=@ExpectedVersion RETURNING Id;",
+                    this.connection,
+                    tx))
+                {
+                    cmd.Parameters.AddWithValue("@Id", a.Id);
+                    cmd.Parameters.AddWithValue("@ExpectedVersion", callerRowVersion);
+                    removedId = cmd.ExecuteScalar();
+                }
+
+                if (removedId == null || removedId == DBNull.Value)
+                {
+                    throw new ConcurrencyConflictException(a, this.ReadStoredVersion(a.Id, tx), callerRowVersion);
+                }
+
+                postCommitActions.Add(() => a.OnUpdated());
             }
         }
 
