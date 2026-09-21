@@ -304,6 +304,12 @@ namespace Walkabout.Data.Sqlite.Provisioning
         /// VACUUM INTO refuses an existing destination, so an overwrite is explicit. Spec section
         /// 3.2 requires Backup to be able to overwrite.
         ///
+        /// It vacuums to a scratch file BESIDE the destination and moves it into place only once
+        /// the vacuum has succeeded. Deleting the destination first and then vacuuming would mean
+        /// a failure half way - a full disk, a denied write, a corrupt page - destroys the
+        /// previous backup and produces no new one, which is the one outcome a backup routine
+        /// must never have.
+        ///
         /// Task 21 puts TestDatabaseGuard in front of the destructive operations on this class;
         /// Backup is not one of them - it only ever writes a NEW file.
         /// </summary>
@@ -314,15 +320,34 @@ namespace Walkabout.Data.Sqlite.Provisioning
                 throw new ArgumentException("A backup destination path is required.", nameof(destinationPath));
             }
 
-            if (System.IO.File.Exists(destinationPath))
+            string scratchPath = destinationPath + ".backup-tmp";
+            if (System.IO.File.Exists(scratchPath))
             {
-                System.IO.File.Delete(destinationPath);
+                System.IO.File.Delete(scratchPath);
             }
 
-            using (var cmd = new SQLiteCommand("VACUUM INTO @path;", this.connection))
+            try
             {
-                cmd.Parameters.AddWithValue("@path", destinationPath);
-                cmd.ExecuteNonQuery();
+                using (var cmd = new SQLiteCommand("VACUUM INTO @path;", this.connection))
+                {
+                    cmd.Parameters.AddWithValue("@path", scratchPath);
+                    cmd.ExecuteNonQuery();
+                }
+
+                System.IO.File.Move(scratchPath, destinationPath, true);
+            }
+            catch
+            {
+                try
+                {
+                    System.IO.File.Delete(scratchPath);
+                }
+                catch (System.IO.IOException)
+                {
+                    // Leaving the scratch file behind is not worth masking the real failure.
+                }
+
+                throw;
             }
         }
 

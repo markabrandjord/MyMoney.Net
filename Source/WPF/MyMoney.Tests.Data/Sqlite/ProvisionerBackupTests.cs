@@ -108,6 +108,33 @@ namespace Walkabout.Tests.Data.Sqlite
         }
 
         [Test]
+        public void Backup_WhenTheCopyFails_LeavesThePreviousBackupIntact()
+        {
+            // A backup routine that deletes the old backup and THEN tries to write the new one
+            // turns any failure - full disk, denied write, closed handle - into "no backup at
+            // all". The copy goes to a scratch file and is moved into place only on success.
+            string backupPath = Path.Combine(this.dir, "backup.mmdb");
+
+            using (var p = OpenFile("books"))
+            {
+                p.ApplyTo(SchemaStepCatalog.LatestVersion);
+                p.Backup(backupPath);
+                long goodLength = new FileInfo(backupPath).Length;
+
+                // Any failure will do; a closed handle is the one a test can cause reliably.
+                p.Connection.Close();
+
+                Assert.Throws<InvalidOperationException>(() => p.Backup(backupPath));
+
+                Assert.That(File.Exists(backupPath), Is.True, "The previous backup was destroyed.");
+                Assert.That(new FileInfo(backupPath).Length, Is.EqualTo(goodLength));
+            }
+
+            Assert.That(Directory.GetFiles(this.dir, "*.backup-tmp"), Is.Empty,
+                "A failed backup left its scratch file behind.");
+        }
+
+        [Test]
         public void Backup_ToAnEmptyPath_Throws()
         {
             using (var p = OpenFile("books"))
