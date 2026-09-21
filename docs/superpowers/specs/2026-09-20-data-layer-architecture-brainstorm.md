@@ -71,6 +71,37 @@ business-layer-visible", and one narrow question is flagged back to the owner** 
 owner should confirm"). §1.7.1's table and §7's expertise-gap item are edited to match, so the
 document does not argue with itself.
 
+**Revision 5 (2026-09-20, same day).** The smallest revision so far, and deliberately so: it
+changes **three names and nothing else**. No candidate, recommendation, slice, requirement or
+guarantee in this document changes shape.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "It makes sense to use a templated method so as to reduce the amount of lines of code we have to maintain." | Confirmed and recorded as settled — the generic write methods on `IMoneyStore` stay generic. §1.6b opens by stating this so a later reader does not mistake a rename for a redesign |
+| "But I hope you can find a better name." | New §1.6b — the naming analysis, the recommendation, the alternatives the panel rejected and why, and the rename applied consistently through every section that names these methods |
+
+**The outcome, in one line:** `SaveOne<T>` becomes **`SaveRoot<TRoot>`**, `SaveBatch` becomes
+**`SaveRoots`**, and **`SaveTransfer` keeps its name** — because it was the only one of the three
+that was already named after *what it saves* rather than *how many*, and it is therefore the
+pattern the other two are being brought into line with, not an exception to it. Reasoning in §1.6b.
+
+**Two things this revision deliberately does not touch**, stated here because both look like
+omissions otherwise:
+
+- **The SQL stored-procedure layer is not renamed.** `Currencies_SaveBatch`,
+  `dbo.CurrencySaveBatchRow`, `Payees_AccessProcs` and the rest keep their names. A T-SQL proc
+  cannot be generic across tables with different column shapes, so that layer has to be
+  per-entity and already is; the owner has confirmed it reads well as-is. §1.6b records that the
+  resulting C#-name/proc-name mismatch (`SaveRoots` calling `Currencies_SaveBatch`) is a
+  deliberate seam, so a later slice does not "tidy" it in either direction.
+- **Today's merged `IDatabase` is not renamed.** `IDatabase.SaveOne<T>`/`SaveBatch`/
+  `SaveTransfer`, `SqliteDatabase.SaveBatch`, `SaveOneCategory` and
+  `SqlServerStoredProcDatabase.ExecuteSaveBatchProc` are **working code on `master`**, and every
+  mention of them in §0/§0.1 is a *verified fact about the current tree*. Those citations keep the
+  old names on purpose — renaming them would make this document's evidence section describe code
+  that does not exist. The new names apply to the **rebuilt `IMoneyStore` port**, which is created
+  in slice 1 and first implemented in slice 3.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -218,10 +249,12 @@ two engines' schemas have quietly drifted before.
 > single integer with no room for a per-step record, and per-step records are exactly what issue
 > #34 needs.
 
-**What happens to `SaveOne`/`SaveTransfer`/`SaveBatch`/`IAggregateRoot`:** they move onto
-`IMoneyStore` unchanged. They are the one part of the current data layer with a proven,
-three-engine, ~60-test shared contract behind them; nothing here justifies reopening them.
-Two changes around them:
+**What happens to `IDatabase`'s three write methods and `IAggregateRoot`:** they move onto
+`IMoneyStore` **unchanged in behavior, renamed in revision 5** — `SaveOne<T>` → `SaveRoot<TRoot>`,
+`SaveBatch` → `SaveRoots`, `SaveTransfer` unchanged (§1.6b). They are the one part of the current
+data layer with a proven, three-engine, ~60-test shared contract behind them; nothing here
+justifies reopening their *semantics*, and revision 5 does not — it changes two names and no
+guarantee. Two changes around them:
 
 - **`Save(MyMoney)` does not exist on `IMoneyStore`.** R1 said to retire it; it is still on
   `IDatabase` today. The rebuild is the clean moment.
@@ -543,9 +576,10 @@ already warns about for the privilege model.
 
 The owner asked for parameterized, transactional CRUD sprocs "because they are safer," and for
 tabular-input sprocs that write multiple records as one transaction. Both already exist in the
-Phase 2 persistence-concurrency work. Round 1 carried them forward *implicitly* ("`SaveOne`/
-`SaveTransfer`/`SaveBatch` move onto `IMoneyStore` unchanged"). Revision 2 states them as
-requirements, because an implicit carry-forward is a thing a later slice can quietly drop.
+Phase 2 persistence-concurrency work. Round 1 carried them forward *implicitly* ("the three write
+methods move onto `IMoneyStore` unchanged"). Revision 2 states them as requirements, because an
+implicit carry-forward is a thing a later slice can quietly drop. *(Revision 5 renames two of the
+three — `SaveRoot`/`SaveRoots`/`SaveTransfer`, per §1.6b — without touching any requirement below.)*
 
 **R-CRUD-1 — every store write is parameterized.** No SQL built by string concatenation with a
 value in it, on either engine. This is already true of every write path today. *(It is not yet true
@@ -554,8 +588,8 @@ of two schema-introspection reads: `SqliteDatabase.cs:218` and `:230` interpolat
 identifiers, so it is not a live injection vector — but both live in code §1.5 deletes, and the
 replacement introspection in `Schema_Verify` must not reintroduce the pattern.)*
 
-**R-CRUD-2 — every store write is atomic at the call boundary.** `SaveOne`, `SaveTransfer` and
-`SaveBatch` each either apply completely or not at all, including their in-memory side effects.
+**R-CRUD-2 — every store write is atomic at the call boundary.** `SaveRoot`, `SaveTransfer` and
+`SaveRoots` each either apply completely or not at all, including their in-memory side effects.
 SQL Server achieves this inside the proc (`SET XACT_ABORT ON; BEGIN TRANSACTION;`); SQLite achieves
 it with `BeginTransaction()` plus the `postCommitActions` deferral that keeps `RowVersion`/
 `OnUpdated()` from being applied to the object graph until the commit actually succeeded. That
@@ -613,6 +647,139 @@ re-try the transaction... The retry logic should probably be in the business lay
 This is additive to R-CRUD-4, not a change to it — R-CRUD-4 already described an
 engine-independent conflict *contract*; 1.6a states who is on the other end of it.
 
+### 1.6b Naming the store's write methods — `SaveRoot` / `SaveRoots` / `SaveTransfer`
+*(New in revision 5. Developer leading, per the panel's C#/.NET idiom brief.)*
+
+**First, what is settled and not up for discussion here.** The owner has confirmed the *mechanism*:
+these stay **generic (templated) methods**, one body serving `Account`, `Category`, `Transaction`,
+`Payee`, `Security`, `RentBuilding` and everything else that implements `IAggregateRoot`, rather
+than a hand-written `SaveAccount`/`SaveCategory`/`SaveTransaction` per type. That is the entire
+point — it is what keeps the C# write surface at three methods instead of thirty, and it is what
+makes §2.7.2's compile-time guarantee possible at all (a per-type method surface would have thirty
+places for a DTO-shaped hole to open instead of one). **This subsection changes names, not shape.**
+
+#### Why `SaveOne` and `SaveBatch` are worth fixing
+
+The names are not arbitrary — they came from the 2026-09-16 persistence-concurrency design, which
+inventoried every call site in the app and sorted them into four *groups* by shape, then named a
+method per group: *"`SaveOne<T>` — Group 1's shape… `SaveTransfer` — Group 2's shape…
+`SaveBatch` — Group 4's shape."* Naming a method after the migration bucket it was carved out of
+is completely reasonable **while the migration is the thing everyone is thinking about**. That
+reason has now expired: the groups are not a concept anyone reading `IMoneyStore` in six months
+will have ever heard of, and what is left is a name that describes *cardinality* — how many things
+you hand it — which is the least interesting fact about either method.
+
+Three concrete problems, in increasing order of how much they cost:
+
+1. **`One` is ambiguous at a glance.** It can be read as a quantity ("save one of them"), as an
+   identity ("save *the* one"), or — read fast, in a call like `SaveOne(a)` — as a leftover from
+   an `Update`/`UpdateOne`/`UpdateAll` family that does not exist. The owner's own first recall of
+   this method was "`UpdateOne`," which is a small but real data point that the name is not
+   sticking as written.
+2. **Neither name says what the method accepts**, which is the one thing a reader actually needs.
+   The constraint `where TRoot : IAggregateRoot` is the whole contract — it is why the method can
+   be generic, it is why `Split` and `Investment` cannot be passed (they have no commit boundary
+   of their own), and it is why §2.7.2's `store.Save…(transactionRow)` fails to compile. A name
+   that says "one" tells you the arity, which the signature already told you. A name that says
+   "root" tells you the *admission rule*, which the signature only tells you if you read the
+   constraint clause.
+3. **`Batch` names an engine-side strategy the port must not promise.** Today "batch" means a
+   table-valued parameter on SQL Server and a C# `switch` loop on SQLite, and §1.7.1's slice-10
+   benchmark may yet keep the loop if `json_each` loses on realistic batch sizes. A port method
+   named after the implementation technique is a leak in exactly the direction this whole document
+   is trying to close: if the benchmark says "loop wins," `SaveRoots` is still a true name and
+   `SaveBatch` has quietly become a false one.
+
+#### The recommendation
+
+```csharp
+void SaveRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;   // was SaveOne<T>
+void SaveRoots(IReadOnlyList<IAggregateRoot> roots);             // was SaveBatch
+void SaveTransfer(Transaction from, Transaction to);             // unchanged - see below
+```
+
+**Keep the verb, change the noun.** `Save` is the right verb and is not the problem: it is the
+word the domain, the UI, the existing `IDatabase`, and the stored procs all already use, and
+swapping it for `Commit`, `Persist`, `Write` or `Store` would churn every call site to say the
+same thing in a less familiar way. (`Commit` was considered and rejected on a specific ground, not
+a stylistic one — see the rejected list below.) What was wrong was the **noun**: `One` and `Batch`
+describe the *shipment*; `Root` and `Roots` describe the *cargo*, which is what the caller has in
+their hand and what the compiler is going to check.
+
+**Why `SaveTransfer` is explicitly kept.** It is not being grandfathered in; it is the exemplar.
+`SaveTransfer` already names its subject — a transfer, meaning exactly two peer `Transaction`s that
+must co-commit — rather than its cardinality, and it is specific, self-describing and reads
+naturally in a call site, which is precisely the property the owner asked for. The rule the panel
+is applying is therefore **not new to this family**: two of the three names broke it, and the
+third one is where the rule came from. Renaming it (to `SaveTransferPair`, say) would be change
+for its own sake, and the panel says so rather than leaving it silently untouched.
+
+#### Consistency with what this document has already established
+
+This is the strongest argument for `SaveRoot`/`SaveRoots` over the alternatives, and it is an
+argument from the document rather than from general taste. §2.6.2's test-control surface — written
+two revisions ago, by a different role, without this naming question in view — independently
+arrived at exactly this convention:
+
+| §2.6.2 already says | The shape of the rule |
+|---|---|
+| `ClearTable(TableRef)` / `ClearTables(IReadOnlyCollection<TableRef>)` | verb + **subject**, singular for one, plural for many |
+| `CaptureRow(...)` / `CaptureRows(...)` | same |
+| `RestoreRow(...)` / `RestoreRows(...)` | same |
+| `RemoveRow(...)` / `RemoveRows(...)` | same |
+| `ClearTable(TableRef)` vs. `ClearTable<TRoot>()` | **overload** when the cardinality is the same and only the way of naming the target differs; **rename** when the cardinality differs |
+
+`SaveRoot`/`SaveRoots` is that rule applied to the write port, with `TRoot` as the type-parameter
+name for the same reason `ClearTable<TRoot>` uses it. §2.7.2's Tier-0 test name
+`StoreWriteMethods_AcceptOnlyAggregateRoots` already reaches for "roots" as this surface's noun
+when it has to describe the property in words — the interface simply had not caught up.
+
+Against the broader .NET convention: the BCL's own singular/plural pair is `Add`/`AddRange`,
+`Insert`/`InsertRange`, `Remove`/`RemoveRange`, and EF Core follows it with `Add`/`AddRange`,
+`Update`/`UpdateRange`. `SaveRoot`/`SaveRootRange` is the letter-perfect translation of that and
+the panel rejects it: `Range` carries a contiguity connotation from `List<T>` that is actively
+wrong for a heterogeneous set of unrelated aggregate roots, and it reads badly. The in-document
+convention wins over the BCL one where they disagree, because a reader of this codebase meets
+`ClearTables` and `CaptureRows` long before they think about `List<T>`.
+
+#### Alternatives the panel considered and rejected
+
+| Candidate | Why not |
+|---|---|
+| `Save<TRoot>(root)` / `Save(IReadOnlyList<IAggregateRoot>)` — bare, overloaded | Tempting, and shortest. Rejected because `Save(MyMoney)` is being retired (§1) and a bare `Save` re-reads as its replacement — the one name guaranteed to confuse anyone who worked on the old `IDatabase`. Overloading also makes `store.Save(x)` un-greppable: you cannot search for the single-root call sites separately from the batch ones, which matters during a migration that will touch every one of them |
+| `SaveAggregate` / `SaveAggregates` | **Rejected on a hard collision.** In this codebase "aggregate" already means reporting's group-and-subtotal: `IMoneyQuery.Aggregate(AggregateQuery)`, `AggregateRow`, §6.4's "two implementations of aggregation." `SaveAggregate` would read as "save a report total." `Root` carries the DDD meaning without the homonym |
+| `Commit<TRoot>` / `CommitAll` | "Commit" is the right *concept* (atomic, all-or-nothing, R-CRUD-2) but the wrong *word here*: `IDbTransaction.Commit()` is three feet away in the same assembly, and a `Commit` on the store implies a preceding stage/track phase — a unit-of-work model this store deliberately does not have. Naming a method after a pattern you are not implementing is worse than a bland name |
+| `Persist` / `Write` / `Store` | No clearer than `Save` and each costs something: `Persist` is jargon for the same idea, `Write` reads as raw I/O beneath the domain, and `store.StoreRoot(...)` stutters |
+| `SaveRoot` / `SaveBatch` (rename only the single) | Leaves the family reading `SaveRoot`/`SaveBatch`/`SaveTransfer`, where the middle member alone is named after mechanism instead of subject — half a fix, and the half left undone is the one problem 3 above says will age badly |
+| `SaveEntity` / `SaveEntities` | "Entity" is strictly weaker than "root": every aggregate root is an entity, but `Split` and `Investment` are entities too and are exactly what this method must refuse. `SaveEntity(split)` reads legal and is not |
+
+#### The one honest cost, stated
+
+`SaveRoot` and `SaveRoots` differ by one character. That is a real readability tax in a diff or a
+skim, and the panel does not pretend otherwise — it is the same tax `ClearTable`/`ClearTables` and
+`CaptureRow`/`CaptureRows` already pay in §2.6.2, accepted there for the same reason it is accepted
+here: the alternative is an asymmetric pair where the two members look unrelated, which is worse
+for the far more common task of *finding* the method than for the rarer task of telling two
+adjacent call sites apart. The mitigation is the one already in the plan — §2.7.2's
+`StoreWriteMethods_AcceptOnlyAggregateRoots` Tier-0 test means a future fourth write method has to
+pass the same admission rule, so the family cannot grow a member whose name implies something the
+constraint does not enforce.
+
+#### What this costs to adopt, and where the old names deliberately survive
+
+Nothing, today. `IMoneyStore` does not exist yet — it is created in slice 1 and first implemented
+in slice 3 — so this is a rename applied to a design, not a refactor applied to a codebase. The
+merged `IDatabase` on `master` keeps `SaveOne`/`SaveBatch`/`SaveTransfer` until the rebuild
+replaces it, and every citation of it in §0/§0.1 keeps the old names because those sections are
+this document's evidence, not its proposal.
+
+The SQL layer likewise keeps its names: `SaveRoots` calls `dbo.Currencies_SaveBatch` with a
+`dbo.CurrencySaveBatchRow` TVP, and that mismatch is intentional. The C# method is one generic
+entry point over every root type; the proc is necessarily one object per table, because T-SQL
+cannot be generic over differing column shapes. They are named for what each one actually is, and
+the mapping between them lives in the engine adapter, which is the only place that should know
+both vocabularies. Recorded here so a later slice does not "align" them in either direction.
+
 ---
 
 ## 1.7 New design principle: SQLite should use SQLite (Data Engine Expert)
@@ -652,7 +819,7 @@ Stated flatly, because the owner's goal is that the two engines *appear* similar
 
 | Limit | Why it is unclosable | What the design does instead |
 |---|---|---|
-| **No stored procedures.** SQLite has no procedural language at all — no `CREATE PROCEDURE`, no variables, no control flow. | It is a library linked into the process, not a server with a query engine that executes code on your behalf. | Views cover *set-shaped read* logic. **Revision 4: multi-statement *write* logic does not get the `INSTEAD OF` escape hatch after all** (§1.7.1, §2.7.3) — it stays in the store assembly, inside one transaction, which is where `SaveTransfer` and `SaveBatch` already put it and where R-CRUD-2's post-commit deferral already lives. Everything needing loops or branching likewise stays in the provisioning/store assembly as versioned, embedded SQL plus a thin executor. §1.5's process table names this as step 2's real divergence rather than papering it, and revision 4 makes the gap slightly *wider* and more honest than revision 2 claimed. |
+| **No stored procedures.** SQLite has no procedural language at all — no `CREATE PROCEDURE`, no variables, no control flow. | It is a library linked into the process, not a server with a query engine that executes code on your behalf. | Views cover *set-shaped read* logic. **Revision 4: multi-statement *write* logic does not get the `INSTEAD OF` escape hatch after all** (§1.7.1, §2.7.3) — it stays in the store assembly, inside one transaction, which is where `SaveTransfer` and `SaveRoots` already put it and where R-CRUD-2's post-commit deferral already lives. Everything needing loops or branching likewise stays in the provisioning/store assembly as versioned, embedded SQL plus a thin executor. §1.5's process table names this as step 2's real divergence rather than papering it, and revision 4 makes the gap slightly *wider* and more honest than revision 2 claimed. |
 | **No server-side identities, roles, grants or permissions.** There is no `MyMoneyUser` on SQLite, and no `GRANT EXECUTE`. | There is no server and no authentication boundary. The process that opens the file has the file's OS rights, entirely. | §1's tier-per-assembly model, and §6.1's already-written honest statement of exactly how far that falls short. Revision 2 changes nothing here and adds no new claim. |
 | **Triggers cannot be conditionally bypassed by privilege.** | Same reason. | Don't put test-tier-only behavior in a trigger. Test-tier capability stays an assembly-presence question. |
 | **No table-valued parameters as a typed, server-declared object.** `json_each` is functionally equivalent but is not a declared type with a schema the engine validates. | SQLite has no user-defined types. | Accept the asymmetry; the contract suite (not the type system) is what proves the two batch paths behave identically. |
@@ -816,12 +983,12 @@ object-identity coincidence), the committed-version bookkeeping, and its genuine
 thing in the current test support, because it makes error-path testing the default rather than an
 afterthought. Add two things it doesn't have:
 
-- **`RecordingStore`** — a decorator that records every operation (`SaveOne(Account#3, v2)`,
+- **`RecordingStore`** — a decorator that records every operation (`SaveRoot(Account#3, v2)`,
   `Aggregate(...)`) so a business test can assert *what was asked of the data layer*, which is
   explicitly shape (b) of the business-layer testing responsibility and is currently done by
   inference.
 - **`FaultInjectingStore`** — a decorator configured to throw on the Nth call, or to throw
-  `ConcurrencyConflictException` for a named root, or to fail mid-`SaveBatch`. This is the
+  `ConcurrencyConflictException` for a named root, or to fail mid-`SaveRoots`. This is the
   concrete answer to the owner's *"test processes to drive the happy path **and the error path**
   of the data layer"*. **Revision 3: this is also the formal answer to the owner's separate,
   later requirement that "the test business layer should have one or more APIs that will have a
@@ -1094,7 +1261,7 @@ Concretely, per engine:
 | Concern | SQLite | SQL Server |
 |---|---|---|
 | Table set | `sqlite_master WHERE type='table'`, minus `sqlite_%` internal tables and minus `__SchemaHistory` | `sys.tables`, minus `__SchemaHistory` |
-| Delete order | Reverse topological order over `PRAGMA foreign_key_list`; `PRAGMA defer_foreign_keys=ON` inside the transaction as the safety net for a cycle (the same pragma `SaveBatch` already uses, §0.1) | Reverse topological order over `sys.foreign_keys`. **No** `NOCHECK CONSTRAINT` — a clear that disables constraint checking can leave a state the schema forbids |
+| Delete order | Reverse topological order over `PRAGMA foreign_key_list`; `PRAGMA defer_foreign_keys=ON` inside the transaction as the safety net for a cycle (the same pragma today's `SqliteDatabase.SaveBatch` already uses, §0.1) | Reverse topological order over `sys.foreign_keys`. **No** `NOCHECK CONSTRAINT` — a clear that disables constraint checking can leave a state the schema forbids |
 | Statement | `DELETE FROM t` (no `WHERE`), which SQLite's truncate optimization turns into a page-drop | `DELETE FROM t`. **Not `TRUNCATE TABLE`** — it is refused on any table an FK references, so it cannot be applied uniformly, and parity beats a constant factor here |
 | Where the logic lives | The `MyMoney.Data.Sqlite.TestTier` executor, in-process (§1.7.2's unclosable limit, again) | `Test/*` procs — `dbo.Test_ClearTables @Tables dbo.TableNameList READONLY` — deployed **only** into a `TestDatabase: true` catalog and granted only to `MyMoneyTest`, exactly as the existing `_Test_Reset` procs are (§0.1) |
 | Transaction | One, around the whole call | One, inside the proc, `SET XACT_ABORT ON` |
@@ -1276,11 +1443,11 @@ and critically, **no projection implements `IAggregateRoot`.** Since every write
 is generically constrained to roots —
 
 ```csharp
-void SaveOne<TRoot>(TRoot root) where TRoot : IAggregateRoot;
-void SaveBatch(IReadOnlyList<IAggregateRoot> roots);
+void SaveRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;
+void SaveRoots(IReadOnlyList<IAggregateRoot> roots);
 ```
 
-— `store.SaveOne(transactionRow)` does not compile. Not "is discouraged", not "throws at
+— `store.SaveRoot(transactionRow)` does not compile. Not "is discouraged", not "throws at
 runtime": there is no overload it can bind to. A business-layer developer who tries to write back
 something they queried discovers it at the moment they type it, which is the only feedback loop
 that reliably works.
@@ -1361,7 +1528,7 @@ way, and two of them are stronger than the owner's own:
    which is §6.1's already-written caution arriving in a new place.
 
 Against all that, what `INSTEAD OF` buys is multi-statement write logic living in the database.
-`SaveTransfer` and `SaveBatch` already put that logic in one place, inside one transaction, with a
+`SaveTransfer` and `SaveRoots` already put that logic in one place, inside one transaction, with a
 hard-won post-commit deferral (R-CRUD-2) that a trigger would have to be re-proven not to break.
 That is not enough to pay for points 1 and 2.
 
@@ -1524,7 +1691,7 @@ technical panel cannot legitimately answer.
 
 7. **Is "sample data" a product feature or a test capability?** `SampleDataGenerator` is in
    `MyMoney.Business` and is user-reachable (File ▸ Add Sample Data). If it stays a product
-   feature, it must **not** move into `MyMoney.TestKit`, and the first-time-population `SaveBatch`
+   feature, it must **not** move into `MyMoney.TestKit`, and the first-time-population `SaveRoots`
    path stays in the shipped product. Confirm, because it affects where a surprising amount of
    seeding code lives.
 
@@ -1603,7 +1770,7 @@ flag:
 | 1 | `IMoneyStore` / `IMoneyStoreProvisioner` / `IMoneyQuery` ports (in `MyMoney.Business`), `MyMoney.TestKit.Contracts` with `IMoneyStoreTestControl` | The tier split exists as types before any engine implements it |
 | 2 | `MyMoney.Data.Sqlite.Provisioning` — the §1.5 executor: `__SchemaHistory` ledger, per-step transactions, checksums, `ApplyTo`/`CurrentVersion`/`Verify`; steps creating `Accounts` + FK-target tables as `STRICT` | Schema-as-versioned-artifact, not reflection-to-DDL; and the upgrade mechanism exists before anything needs upgrading |
 | **2b** | **The fresh-vs-upgraded schema-equality test** (§1.5 S-4): build at N; build at N−1 then `ApplyTo(N)`; assert introspected schemas identical. Include a step that adds an index to a table created by an earlier step — the issue #34 shape | **Issue #34 cannot recur.** The upgrade path runs on every build from here on |
-| 3 | `MyMoney.Data.Sqlite` — `SaveOne<Account>`, `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven `SaveOne` pattern survives the reshape, engine-side |
+| 3 | `MyMoney.Data.Sqlite` — `SaveRoot<Account>`, `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven single-root save pattern (today's `SaveOne`, renamed `SaveRoot` in revision 5 — §1.6b) survives the reshape, engine-side |
 | 4 | `MyMoney.TestKit` — in-memory-SQLite store fixture (T-1), `RecordingStore`, `FaultInjectingStore`, `StoreContractTests` base with the Account cases | Happy path **and** error path from day one, as the owner asked — over a real engine, not a mock |
 | 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl`'s **schema** level (`ResetSchema` = `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery) **and its data/row levels** (§2.6): introspection-derived `ClearAllData`/`ClearTables`/`ClearTable`, `CaptureRow`/`DeleteRow`/`RestoreRow` + the `RemoveRow` scope, `TableRef` with its anti-drift contract test, and the `ResetIdentity` parity assertion (§2.6.4) | The SQLite facade, for real; the owner's nuke-and-pave as a first-class operation rather than a script; and a reset granularity a test can actually aim (§2.6) |
 | **5b** | `TestDatabase`-flag refusal in the provisioner contract (§1.8): destructive operations fail loudly against an entry not marked as a test database | The only guard that currently exists becomes enforced rather than assumed |
@@ -1611,7 +1778,7 @@ flag:
 | 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException`, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one |
 | 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine, plus the `Test/*` half of §2.6 (`dbo.Test_ClearTables` taking a table-name TVP, deployed only into a `TestDatabase: true` catalog) | The tiering maps twice, the schema mechanism is parity (§4.1 #3), the contract suite is genuinely shared, and §2.6.4's `ResetIdentity` divergence is pinned rather than discovered |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
-| 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveBatch` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
+| 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveRoots` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
 
 **One honest deviation from the literal instruction.** The owner's guidance says build *"the data
 layer DLLs, as well as the app and business layers of the test subsystem first."* The business
@@ -1821,9 +1988,17 @@ worked case.
   `IMoneyStoreProvisioner` / `IMoneyStoreTestControl`) plus a non-store `IDataFormat`, and make
   each tier of each engine **its own assembly** (Candidate A), so privilege separation is
   "the code isn't in the build output" rather than "the code is politely hidden."
-- **Keep `IAggregateRoot`/`SaveOne`/`SaveTransfer`/`SaveBatch` unchanged**; retire
-  `Save(MyMoney)`; **add `IMoneyQuery`**, a closed, typed filter/aggregate port (not `IQueryable`),
-  because reporting needs SQL-side filtering and subtotaling that doesn't exist today.
+- **Keep `IAggregateRoot` and the three write methods unchanged in behavior, renamed in revision 5
+  for clarity** (§1.6b): `SaveOne<T>` → **`SaveRoot<TRoot>`**, `SaveBatch` → **`SaveRoots`**,
+  `SaveTransfer` **kept as-is** because it was already named after what it saves rather than how
+  many — it is the pattern, not the exception. The methods stay **generic**, which the owner has
+  confirmed is the point (one body per operation instead of one per entity type); only the nouns
+  change, from cardinality (`One`, `Batch`) to subject (`Root`, `Roots`), matching §2.6.2's
+  existing `ClearTable`/`ClearTables`, `CaptureRow`/`CaptureRows` convention. The SQL procs
+  (`Currencies_SaveBatch` et al.) are deliberately **not** renamed — they are necessarily
+  per-entity and read fine. Also retire `Save(MyMoney)`; **add `IMoneyQuery`**, a closed, typed
+  filter/aggregate port (not `IQueryable`), because reporting needs SQL-side filtering and
+  subtotaling that doesn't exist today.
 - **Schema management becomes one versioned mechanism with several entry points** (§1.5): an
   ordered list of immutable steps, a `__SchemaHistory` ledger with checksums, one per-step
   transaction, and `Schema_ApplyTo`/`CurrentVersion`/`Verify`/`DropAll` — real stored procs on SQL
@@ -1868,7 +2043,7 @@ worked case.
   time on SQL Server), and a view change is its own numbered step. The read/write asymmetry is
   enforced by four stacked type-system properties rather than by documentation: separate
   `IMoneyQuery`/`IMoneyStore` ports, query results marked `IProjection` and never `IAggregateRoot`
-  (so `SaveOne(row)` does not compile), projections carrying **no** `RowVersion` (so a stale
+  (so `SaveRoot(row)` does not compile), projections carrying **no** `RowVersion` (so a stale
   version cannot be smuggled from a report into a write), and the business layer never naming a
   view at all. **`INSTEAD OF` triggers are demoted from revision 2's "adopt selectively" to "do
   not adopt now"**, kept as a deferred single-candidate spike with a standing "never above
