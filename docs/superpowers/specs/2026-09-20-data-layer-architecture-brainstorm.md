@@ -5,6 +5,11 @@ was explicitly written as the input to. It is deliberately *not* polished into s
 it exists to drive an owner review, after which the agreed path becomes a real design spec and
 then an implementation plan, per the brainstorming skill's normal process.
 
+**That owner review is now complete** (revisions 2–11; all eight of §4's items resolved by the
+owner), and revision 12 is the final self-review pass. This document is the input to implementation
+planning from here. **It is deliberately larger than one plan should be** — see the note under §5's
+slice table for the recommended split and the one scheduling gap that split has to resolve.
+
 **Date:** 2026-09-20 · **Branch:** `rebuild/data-layer-foundation` · **Panel:** the usual 7 roles.
 
 **Revision 2 (2026-09-20, same day).** The owner read round 1 and gave follow-up guidance. This
@@ -137,7 +142,7 @@ Every part of the application goes through targeted queries against the data lay
 reports, which is what originally motivated `IMoneyQuery` — instead of walking an already-loaded
 object tree. This is the larger-rewrite option, chosen deliberately. Because §1's design already
 worked either way by construction, no candidate, port shape, or slice changes as a result; the two
-places that described `IMoneyQuery` as reports-scoped (§1's introduction of the port, and §7's
+places that described `IMoneyQuery` as reports-scoped (§1's introduction of the port, and §8's
 summary bullet) are tightened to say so plainly, and item #3's "lag the query surface on SQL
 Server" recommendation is flagged as framing that may now be stale — without being resolved here,
 per the owner's instruction that this is a recording pass, not a new design pass.
@@ -245,6 +250,88 @@ closes the open-items list: of §4's original seven items plus item #8, **all ei
 by the owner**. See §4 item 3 for the full reasoning, §4.1 for the closed stale-framing flag, and §8
 for the updated closing summary.
 
+**Revision 12 (2026-09-20, same day). Final self-review pass before handoff to implementation
+planning.** Not an owner-guidance revision: no owner input, no decision recorded, no design changed.
+This was a fresh end-to-end read of the whole document — not a diff of revision 11 — specifically
+looking for the drift that eleven incremental passes, several by different dispatched agents each
+doing its own occurrence sweep, can accumulate without any single pass noticing. **No placeholders,
+no unresolved items and no contradicted decisions were found.** The naming sequence, the concurrency
+reversal, the `Load()`/`IMoneyQuery` resolution and the §4 item counts were each spot-checked by
+searching for the superseded term rather than by trusting the revision that claimed to have swept
+it, and all four came back clean:
+
+| Claim spot-checked | Result |
+|---|---|
+| Revisions 5 + 6's method rename (`SaveOne`/`SaveBatch` → `SaveRoot`/`DeleteRoot`/`SaveRoots`/`SaveTransfer`) | **Clean.** Every surviving `SaveOne`/`SaveBatch` is either a §0/§0.1 verified-fact citation of code on `master`, a T-SQL proc name §1.6b deliberately keeps, or the naming analysis itself. No snippet, table or prose reference uses an intermediate shape |
+| Revision 3's file-lease reversal | **Clean.** Every "lease" occurrence discusses it as the rejected alternative |
+| Revision 7's `Load()`/`IMoneyQuery` resolution | **Clean** on the hedging — nothing still describes `IMoneyQuery` as reports-scoped or optional. Two *consequences* of the resolution were found unswept: see items 2 and 8 below |
+| §4/§4.1/§8 item numbering and counts | **Clean.** Re-derived by reading: seven original items plus #8, eight resolved, zero open; every "net after revision N" running total is arithmetically right |
+
+**Twelve things were found and fixed inline.** Eight are genuine (a reader would have been misled or
+an implementer would have built the wrong thing); four are polish:
+
+1. **§1's assembly list pointed at a `§1.4` that does not exist** (this document has no §1.1–§1.4).
+   Repointed to §1's own Recommendation, which is where SQLite provisioning's shipped/in-process
+   status is actually decided.
+2. **§1 said `IMoneyQuery`'s third implementation is "the test double… over the in-memory graph"** —
+   directly contradicting revision 2's T-1 resolution (no `MockStore` is built) and §6.4's argument,
+   which was *the* argument that carried T-1. Rewritten to say there is deliberately no third
+   implementation.
+3. **§1.9.3 and §5's slice 5b put the `TestDatabase` guard at "every `IMoneyStoreTestControl` entry
+   point"** — which §2.6.4 explicitly rejects in favour of one check at the guarded factory, *on
+   the stated grounds that the twenty-first method is the one that forgets*. Revision 8 introduced
+   the contradiction by paraphrasing. Both repointed to §2.6.4's shape.
+4. **§5's slice 6 said "all ten Tier-0 tests from §2.5"; §2.5 lists eleven** since revision 8 added
+   `TestDatabaseFlag_IsReadOnlyByTheSharedGuard`, which slice 5b delivers. Restated as "the other
+   ten of eleven," naming where the eleventh lands.
+5. **§2.6.2 and §2.7.1 both credit the snapshot-version tightening to §2.6.6**, which is about
+   `TableRef` drift and says nothing about snapshots — the rule is stated only in §2.7.1's own
+   table. Both references corrected.
+6. **§2.7.2's write-method signatures had drifted from §1.6c's final ones** (`where TRoot :
+   IAggregateRoot` versus §1.6c's `where TRoot : PersistentObject, IAggregateRoot`, which is what
+   lets the base class read `ChangeType` for revision 6's precondition). Matched to §1.6c, with a
+   note that §1.6c is authoritative and that both types live in `MyMoney.Business`, so the
+   constraint costs no layering.
+7. **§7's items were numbered 1, 2, 4, 3 in source order.** Under normal Markdown rendering an
+   ordered list renumbers sequentially, so the `INSTEAD OF`-triggers item would have rendered as
+   item **3** — silently breaking all three cross-references to "§7 item 4" (§1.7.1's table and
+   §2.7.3's second argument and spike recommendation). Reordered; no text changed.
+8. **§3.2's `IDataFormat` signature is written against a whole `MyMoney` object graph that revision
+   7 removed.** The placement ruling is unaffected and stands; the parameter type is now flagged as
+   unsettled rather than reading as decided. Not re-derived, because item #5 deferred the work and
+   nothing is being built against it.
+9. *(Polish)* §3.2 still named SQLite backup as close-and-`File.Copy`, which §1.7.1 superseded with
+   `VACUUM INTO` in revision 2 — §1.7.1 had noticed and §3.2 was never updated.
+10. *(Polish)* §5's "Revised for revision 2" note listed only revision 2's slice edits although
+    revisions 4, 6 and 8 each changed a slice too.
+11. *(Polish)* "§5's ten-slice table" (the table has twelve rows, numbered to 10); §6.6's heading
+    said "Seven assemblies" where §1 says 7–9.
+12. *(Polish)* The status header said the owner review was still ahead; it is complete.
+
+**One genuine gap is flagged, not filled** — it is a scheduling question, not a design hole, and
+filling it would be new design work this pass has no mandate for: **no slice in §5 implements
+`IMoneyQuery`.** Slice 1 introduces it as a type and nothing builds it. That was defensible while
+the port was reports-scoped, but revision 7 made it the whole application's read path and revision
+11 ruled out a SQL Server carve-out for it, and neither pass revisited §5's table (both were
+recording passes, and §4.1 says so in both cases). It now sits in tension with §6.4's *"the contract
+suite must grow to cover `IMoneyQuery` in the same slice the port is introduced — not later."*
+Slice 3's `LoadAccounts` is the same question in miniature: this document never pins whether simple
+reads go through `IMoneyStore` or `IMoneyQuery`. Recorded under §5's table for the implementation
+plan to resolve deliberately.
+
+**One scope call is added** (§5, under the slice table): the document is larger than one plan, and
+the recommended split is slices 1–7 (the SQLite vertical, one demonstrable end state) and slices
+8–10 (SQL Server parity plus the two measurement gates). §3's rulings, §3.3's reporting redesign,
+§1.8's upgrade workflow and §1.9's sample-data rewrite are decided but unscheduled and are in
+neither plan.
+
+**Two things deliberately left alone**, both because they are already correct as written: §2.7.3's
+views-rule confirmation question to the owner (§8 and §4.1 both state that nothing waits on it, and
+the panel's recommendation stands either way), and §1.6c's `DeleteRoot`-on-a-never-persisted-root
+semantics, which §4.1 deliberately routes to slice 3's contract test as a behaviour to pin rather
+than a trade-off to choose. Both are real outstanding questions; neither is a defect in this
+document, and the implementation plan inherits both as stated.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -330,7 +417,8 @@ MyMoney.Data.Contracts              IMoneyStore, IMoneyStoreProvisioner, IMoneyQ
                                     (could equally stay in MyMoney.Business — see note below)
 
 MyMoney.Data.Sqlite                 IMoneyStore + IMoneyQuery            [always shipped]
-MyMoney.Data.Sqlite.Provisioning    IMoneyStoreProvisioner               [shipped; see §1.4]
+MyMoney.Data.Sqlite.Provisioning    IMoneyStoreProvisioner               [shipped; see the
+                                                                         Recommendation below]
 MyMoney.Data.SqlServer              IMoneyStore + IMoneyQuery            [DEBUG only]
 MyMoney.Data.SqlServer.Provisioning IMoneyStoreProvisioner + bootstrapper [DEBUG only]
 
@@ -432,9 +520,10 @@ IReadOnlyList<TransactionRow> IMoneyQuery.List(ListQuery q);
 ```
 
 SQLite implements it as parameterized SQL; SQL Server as a `_Query` proc family taking a TVP of
-filter values (consistent with the TVP pattern Phase 2c already established); the test double
-implements it over the in-memory graph. The shared contract suite grows to cover it — see §6.4
-for why that's not optional.
+filter values (consistent with the TVP pattern Phase 2c already established). There is deliberately
+**no third, hand-written implementation** — business-layer tests run against the real SQLite one
+over an in-memory database (§2.4's T-1 resolution; `MockStore` is not built). The shared contract
+suite grows to cover it — see §6.4 for why that's not optional.
 
 **Pros**
 - Enforcement is structural and *provable by inspecting the output directory*, which is the
@@ -1563,7 +1652,7 @@ Exactly three call sites, and the third is the whole point of this section:
 | # | Caller | Protects | Reachable in a release build? |
 |---|---|---|---|
 | 1 | Destructive `IMoneyStoreProvisioner` operations — `Schema_DropAll`, delete, restore-over-the-top | The owner's own machine, today (§1.8) | Yes — `MyMoney.Data.Sqlite.Provisioning` is a shipped assembly (§1, Candidate A) |
-| 2 | Every `IMoneyStoreTestControl` entry point (§2.6.2) — defense in depth *behind* assembly absence | A developer running the test suite against the wrong registry entry | No — the test tier is never shipped |
+| 2 | The point an `IMoneyStoreTestControl` is **obtained** — its guarded factory, once, per §2.6.4 (*not* repeated in every method: §2.6.4 rejects that explicitly, on the grounds that the twenty-first method is the one that forgets) — defense in depth *behind* assembly absence | A developer running the test suite against the wrong registry entry | No — the test tier is never shipped |
 | 3 | **`SampleDataService.Populate` (revision 8)** | A customer, an agent, or a script fabricating thousands of fictitious transactions into a database someone intends to keep | **Yes — and it is the only one of the three a customer can reach** |
 
 ### 1.9.4 Placement and API — the generator splits in two
@@ -2041,7 +2130,8 @@ public interface IMoneyStoreTestControl : IDisposable
     IRowScope      RemoveRow(TableRef table, long id);                // capture + delete; Dispose restores
     IRowScope      RemoveRows(TableRef table, RowFilter filter);
 
-    // ---- Whole-database snapshot: unchanged in role, tightened in 2.6.6 ----
+    // ---- Whole-database snapshot: unchanged in role, tightened in 2.7.1 (Restore refuses a
+    //      snapshot whose recorded schema version differs from the target's current one) ----
     StoreSnapshot Snapshot();
     void          Restore(StoreSnapshot snapshot);
 
@@ -2309,7 +2399,7 @@ behavior, but not quite all of it:
 |---|---|---|
 | `ClearTable` / `ClearAllData` | **Nothing to do.** The view definition survives untouched; querying it afterwards returns zero rows because its underlying tables are empty | A view has no state to reset. It is "automatically reset" in the only sense that matters |
 | `DeleteRow` / `RestoreRow` | Nothing to do; the view reflects the change immediately, in both directions | Same reason |
-| `Snapshot` / `Restore` | Snapshot captures **data only**, tagged with `Schema_CurrentVersion()`. View definitions are schema and are neither captured nor restored | A snapshot is not a schema backup. §2.6.6's tightening: `Restore` **refuses** a snapshot whose recorded version differs from the target's current version, loudly, rather than restoring rows into a schema that may have reshaped under them |
+| `Snapshot` / `Restore` | Snapshot captures **data only**, tagged with `Schema_CurrentVersion()`. View definitions are schema and are neither captured nor restored | A snapshot is not a schema backup. **The tightening revision 4 adds here** (referenced from §2.6.2's surface): `Restore` **refuses** a snapshot whose recorded version differs from the target's current version, loudly, rather than restoring rows into a schema that may have reshaped under them |
 | `ResetSchema` | **Views must be explicitly dropped and recreated**, and this is the one place views need real handling | Below |
 
 `Schema_DropAll()` must drop views, **and drop them before the tables they depend on** — required
@@ -2370,10 +2460,15 @@ and critically, **no projection implements `IAggregateRoot`.** Since every write
 is generically constrained to roots —
 
 ```csharp
-void SaveRoot<TRoot>(TRoot root)   where TRoot : IAggregateRoot;
-void DeleteRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;   // revision 6, §1.6c
+void SaveRoot<TRoot>(TRoot root)   where TRoot : PersistentObject, IAggregateRoot;
+void DeleteRoot<TRoot>(TRoot root) where TRoot : PersistentObject, IAggregateRoot;  // rev 6, §1.6c
 void SaveRoots(IReadOnlyList<IAggregateRoot> roots);
 ```
+
+*(The `PersistentObject` half of the constraint is §1.6c's — it is what lets the base class read the
+root's `ChangeType` for its precondition; `PersistentObject` and `IAggregateRoot` both live in
+`MyMoney.Business`, so it costs no layering. §1.6c is the authoritative signature; the argument
+below turns on the `IAggregateRoot` half.)*
 
 — `store.SaveRoot(transactionRow)` does not compile, and neither does
 `store.DeleteRoot(transactionRow)`. Not "is discouraged", not "throws at runtime": there is no
@@ -2531,15 +2626,20 @@ issue #5's own open question — §4 keeps it there.)*
 - **Whole-file formats that are not stores** (XML export, CSV export, and — per D-35 — anything
   that can't meet the store capability floor) → also business layer, behind
   `IDataFormat { void Write(MyMoney, Stream); MyMoney Read(Stream); }`. **They must not live
-  behind `IMoneyStore` and must not live in an engine assembly.** This is what finally kills
+  behind `IMoneyStore` and must not live in an engine assembly.** *(Revision 12 flag: that
+  signature is written in terms of a whole `MyMoney` object graph, which **revision 7 removed** —
+  `Load()` does not survive. The **placement** decision in this bullet is unaffected and stands;
+  the parameter type is not settled and must be re-derived whenever item #5's deferral ends. It is
+  not re-derived here because nothing is being built against it — see §4 item 5.)* This is what finally kills
   `NotImplementedException`-as-a-capability-signal: you cannot pass a format where a store is
   required, because they are different types in different assemblies. *(Revision 8: the owner has
   **deferred** `IDataFormat` and the XML implementation out of the first slices — §4 item 5. This
   bullet's placement decision is unaffected; only the schedule is. §4.1 records what the deferral
   leaves unserved.)*
-- **Engine-native duplication/backup/restore** (SQLite close-and-`File.Copy`; SQL Server
-  `BACKUP`/`RESTORE`) → **data layer, provisioner tier**, because it is engine-specific by
-  definition. Already decided by R1; this just names the tier it lands in. The Operations
+- **Engine-native duplication/backup/restore** (SQLite `VACUUM INTO` — revision 2's §1.7.1
+  supersedes the close-and-`File.Copy` this bullet originally named, because it is transactionally
+  consistent and needs no close; SQL Server `BACKUP`/`RESTORE`) → **data layer, provisioner tier**,
+  because it is engine-specific by definition. Already decided by R1; this just names the tier it lands in. The Operations
   Engineer's standing insistence that *backup is part of the capability floor and is currently its
   weakest plank* attaches here: `IMoneyStoreProvisioner.Backup` must be able to overwrite, and must
   be contract-tested.
@@ -2809,7 +2909,7 @@ genuinely unbuilt until `IDataFormat` is scheduled. Recorded so the deferral is 
 mistaken for the need having evaporated.
 
 **No slice-plan reference goes stale from #5's deferral**, which the panel checked rather than
-assumed: §5's ten-slice table contains no XML, `XmlStore` or `IDataFormat` deliverable — the
+assumed: §5's slice table contains no XML, `XmlStore` or `IDataFormat` deliverable — the
 "yes, sooner" argument lived only in §4.1's row-5 recommendation above and never made it into the
 slice order. So the deferral costs nothing in §5, and the only edit it forces is the one made
 here. One adjacent confusion worth pre-empting, since both involve XML: `SampleDataGenerator`'s
@@ -2876,7 +2976,10 @@ flag:
 
 ### Proposed slice order
 
-*(Revised for revision 2: slices 2, 4, 7, 8 and 9 changed; 2b, 5b and 10 are new.)*
+*(Revised for revision 2: slices 2, 4, 7, 8 and 9 changed; 2b, 5b and 10 are new. Touched since:
+slice 5 by revision 4 (§2.6's data/row ladder), slices 3, 6 and 7 by revision 6 (§1.6c's
+`SaveRoot`/`DeleteRoot` split), slice 5b by revision 8 (§1.9's shared guard). Revisions 7, 10 and
+11 changed no slice — each checked and recorded that in §4.1.)*
 
 | # | Deliverable | Proves |
 |---|---|---|
@@ -2886,12 +2989,31 @@ flag:
 | 3 | `MyMoney.Data.Sqlite` — `SaveRoot<Account>` **and `DeleteRoot<Account>`** over one shared `WriteRoots` executor on `MoneyStoreBase` (§1.6c), `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven single-root save pattern (today's `SaveOne`, renamed `SaveRoot` in revision 5 — §1.6b, and split into save/delete in revision 6 — §1.6c) survives the reshape, engine-side, with the insert/update/delete dispatch still written exactly once |
 | 4 | `MyMoney.TestKit` — in-memory-SQLite store fixture (T-1), `RecordingStore`, `FaultInjectingStore`, `StoreContractTests` base with the Account cases | Happy path **and** error path from day one, as the owner asked — over a real engine, not a mock |
 | 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl`'s **schema** level (`ResetSchema` = `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery) **and its data/row levels** (§2.6): introspection-derived `ClearAllData`/`ClearTables`/`ClearTable`, `CaptureRow`/`DeleteRow`/`RestoreRow` + the `RemoveRow` scope, `TableRef` with its anti-drift contract test, and the `ResetIdentity` parity assertion (§2.6.4) | The SQLite facade, for real; the owner's nuke-and-pave as a first-class operation rather than a script; and a reset granularity a test can actually aim (§2.6) |
-| **5b** | **The shared `TestDatabase` guard** (§1.8, §1.9.3): `StoreIdentity` on `IMoneyStore` (§1.9.2), `TestDatabaseGuard.Require` + `TestDatabaseRequiredException`, wired into the provisioner's destructive operations and every `IMoneyStoreTestControl` entry point; plus Tier-0 `TestDatabaseFlag_IsReadOnlyByTheSharedGuard` and the per-engine flag round-trip test (§1.9.7) | The only guard that currently exists becomes enforced rather than assumed — **and it is built once, here, as the mechanism §1.9's shipped sample-data feature reuses rather than parallels** |
-| 6 | `MyMoney.Tests.Architecture` — all ten Tier-0 tests from §2.5, including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2) and revision 6's `StoreWriteSurface_IsExactlyTheFourNamedMethods` (§1.6c); plus the Tier-2 *schema owns no `INSTEAD OF` trigger* check per engine (§2.7.3) and §1.6c's six per-engine precondition cases | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule, and "`SaveRoot` cannot remove a row," which is a behaviour a test proves rather than a name that implies it |
+| **5b** | **The shared `TestDatabase` guard** (§1.8, §1.9.3): `StoreIdentity` on `IMoneyStore` (§1.9.2), `TestDatabaseGuard.Require` + `TestDatabaseRequiredException`, wired into the provisioner's destructive operations and into the factory that hands out an `IMoneyStoreTestControl` (§2.6.4 — once, at acquisition, not per method); plus Tier-0 `TestDatabaseFlag_IsReadOnlyByTheSharedGuard` and the per-engine flag round-trip test (§1.9.7) | The only guard that currently exists becomes enforced rather than assumed — **and it is built once, here, as the mechanism §1.9's shipped sample-data feature reuses rather than parallels** |
+| 6 | `MyMoney.Tests.Architecture` — the other ten of §2.5's **eleven** Tier-0 tests (the eleventh, revision 8's `TestDatabaseFlag_IsReadOnlyByTheSharedGuard`, lands with its mechanism in slice 5b), including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2) and revision 6's `StoreWriteSurface_IsExactlyTheFourNamedMethods` (§1.6c); plus — in `MyMoney.Tests.Data` (§2.2), since these are Tier-2 and per engine, not architecture tests — the *schema owns no `INSTEAD OF` trigger* check (§2.7.3) and §1.6c's six precondition cases | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule, and "`SaveRoot` cannot remove a row," which is a behaviour a test proves rather than a name that implies it |
 | 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException` **and nothing wider**, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand and to prove an `ArgumentException` from §1.6c's preconditions is *not* retried | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one — with the caller-bug/race distinction pinned rather than assumed |
 | 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine, plus the `Test/*` half of §2.6 (`dbo.Test_ClearTables` taking a table-name TVP, deployed only into a `TestDatabase: true` catalog) | The tiering maps twice, the schema mechanism is parity (§4.1 #3), the contract suite is genuinely shared, and §2.6.4's `ResetIdentity` divergence is pinned rather than discovered |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
 | 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveRoots` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
+
+**How much of this is one implementation plan** *(revision 12, the self-review's scope call)*. The
+document as a whole is **not** one plan's worth of work: §3's placement rulings, §3.3's reporting
+redesign, §1.8's deferred upgrade workflow and §1.9's sample-data rewrite are all decided-but-
+unscheduled, and none of them is in the table above. The table is the right unit, and it splits
+naturally in two at the engine boundary:
+
+- **Plan A — slices 1 through 7** (the SQLite vertical: ports, provisioning + ledger, the
+  fresh-vs-upgraded equality test, the store, the TestKit, the test tier, the shared guard, the
+  Tier-0 band, and `AddAccountService` with its retry loop). This is one coherent plan with one
+  demonstrable end state — *provision a database and add an account, headlessly, with the
+  concurrency path tested* — and every slice in it is a prerequisite of the next.
+- **Plan B — slices 8 through 10** (SQL Server parity for the same slice, then the two measurement
+  gates). Slice 8 depends on all of Plan A existing, and slices 9 and 10 are verification of
+  decisions Plan A implements, not new capability. Nothing in Plan A is blocked by Plan B.
+
+Splitting there is a recommendation, not a constraint — but running the whole table through one
+planning pass would produce a plan whose second half is written against code that does not exist
+yet, which is the failure mode that makes long plans stale rather than the one that makes them long.
 
 **Where sample data lands in this order (revision 8), and where it deliberately does not.** The
 guard is slice **5b**, above — it is the same mechanism the provisioner needs, built once (§1.9.3).
@@ -2904,6 +3026,21 @@ numbered row would imply a scheduling commitment nobody made. When it is schedul
 which revision 7 removed), not as a project-file move. One nice side effect worth remembering at
 that point: sample data is the first realistic workload for slice **10**'s `json_each` batch
 benchmark (§1.9.5).
+
+**One gap in this table, found by the revision-12 self-review and flagged rather than filled.**
+**No slice implements `IMoneyQuery`.** Slice 1 introduces it as a *type*; nothing after that
+delivers `Aggregate`/`List` on either engine, and no slice carries its contract tests. That was
+defensible while the port was reports-scoped and reports were out of the first slices — but
+**revision 7 made `IMoneyQuery` the whole application's read path**, and **revision 11 ruled out any
+SQL Server carve-out for it**, and neither revision revisited this table (both were recording
+passes; §4.1 says so in both cases). Two things now sit in tension with the table as written: §6.4's
+*"the contract suite must grow to cover `IMoneyQuery` in the same slice the port is introduced — not
+later"*, and slice 3's `LoadAccounts`, which is a read whose port — `IMoneyStore`'s simple reads or
+`IMoneyQuery` — this document never pins. **This is a scheduling/scoping question for the
+implementation plan, not a design hole**: the port's shape (§1), its SQLite landing site (§1.7.1's
+views), its SQL Server shape (`_Query` proc family) and its parity rule (§4 item 3) are all decided.
+What is undecided is which slice builds it and what slice 3's read goes through. Flagged here so the
+plan resolves it deliberately instead of inheriting a table that predates two decisions.
 
 **One honest deviation from the literal instruction.** The owner's guidance says build *"the data
 layer DLLs, as well as the app and business layers of the test subsystem first."* The business
@@ -2982,7 +3119,7 @@ SQL rather than about business logic. The panel judges that an acceptable and ev
 coupling during nuke-and-pave (§2.4 point 4), but it is a real change in failure ergonomics and
 whoever is debugging at 11pm should have been told.
 
-### 6.6 Seven assemblies is a real cost, not a rounding error
+### 6.6 Seven-to-nine assemblies is a real cost, not a rounding error
 
 More projects, slower cold builds, more `.csproj` churn in reviews, and a structure that the next
 person will try to "simplify." The mitigation is not discipline; it is that the Tier-0 tests fail
@@ -3140,6 +3277,10 @@ dependency revision 8 introduced — only a new consumer of one the document alr
    document does not currently have. Still not blocking — but worth confirming before slice 8
    rather than after.
 
+3. **Nobody here can speak for the report recipient.** D-17's own panel flagged this and the owner
+   resolved the format question; it stays flagged only because §3.3's `ReportModel` shape (which
+   cells, which formatting intents) will eventually be judged by whoever receives a report.
+
 4. **(Revision 2; superseded in its recommendation by revision 4.) Whether `INSTEAD OF` triggers
    on views are a maintainable way to encode multi-statement write logic in SQLite at this
    scale.** The gap itself is unchanged and is stated here for the record: the panel has no
@@ -3154,10 +3295,6 @@ dependency revision 8 introduced — only a new consumer of one the document alr
    The gap therefore no longer blocks anything on the current path; it becomes live again only if
    the spike is ever proposed. Explicitly *not* a reason to skip §1.7's other findings, which are
    independent of this one.
-
-3. **Nobody here can speak for the report recipient.** D-17's own panel flagged this and the owner
-   resolved the format question; it stays flagged only because §3.3's `ReportModel` shape (which
-   cells, which formatting intents) will eventually be judged by whoever receives a report.
 
 ---
 
