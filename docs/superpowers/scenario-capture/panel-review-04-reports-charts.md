@@ -13,7 +13,7 @@ those catalog sections, and in several cases went back to the source, before opi
 | D-18 | Does every report export, and to what? | Export becomes a framework guarantee, moved to the report's command surface | No |
 | D-19 | What should a mixed-currency total say? | Always normalise to a stated display currency; never silently drop a subtotal | **Resolved** — minimal/best-effort (current-rate basis), tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70); see D-19's "Owner decision" |
 | D-20 | Should generated category colours be persisted? | Stable-hash into a curated, theme-aware palette; persist only explicit user choices | No |
-| D-21 | Does the net-worth picture include what the user owes? | Assets-only composition chart + separate liabilities and net figures | **Yes** |
+| D-21 | Does the net-worth picture include what the user owes? | Assets-only composition chart + separate liabilities and net figures | **Resolved** — yes, liabilities are genuinely included and visible in net worth; chart presentation (two-sided vs. other) left as implementation detail; see D-21's "Owner decision" |
 | D-22 | As at the start or the end of the chosen day? | Close-of-day (inclusive) everywhere, stated in words, enforced by one range type | No |
 | D-23 | How are report options hosted, and should a report remember them? | Declarative parameter model in a long-lived host; parameters *are* the view state | No |
 | D-24 | One vocabulary for "a period" | Three named types — recurrence, granularity, span — refusing to merge the first two | No |
@@ -1121,13 +1121,48 @@ grounds; the Adversarial seat's position is that neither preference is grounded 
 owner actually uses the report for. The panel did not reach consensus and is not pretending
 to.
 
+### Owner decision
+
+**Resolved 2026-09-20.** The owner answers the substance of D-21 directly:
+
+> "Yes. If you have a mortgage, a car payment, credit card balances, etc. they should be in
+> your net worth."
+
+This settles the question the panel could not agree on: **liabilities must be genuinely
+included and visible in the net-worth picture**, not omitted or reduced to a footnote figure
+sitting beside it. A mortgage, a car loan, credit card balances — anything owed — has to
+actually reduce, and be seen to reduce, the net-worth number and whatever picture accompanies
+it.
+
+What this does **not** settle is chart mechanics. The panel's disagreement between the UI/UX
+Expert's two-sided assets-vs-liabilities comparison (Alternative B) and the
+Architect/Developer's assets-only pie with liabilities and net stated as separate figures
+(Alternative A) was about *how* to draw that picture, not about *whether* liabilities belong
+in it. That remains an implementation detail, left for whenever this report is actually
+rebuilt — guided by the binding principle that liabilities must be visible and included, not
+decided in favor of whichever of the panel's two chart-shape alternatives is cheaper to
+build. Alternative C (a waterfall) remains available on the same terms.
+
+**Cross-reference:** this decision also resolves the *intent* behind the already-known
+liability-charting bug flagged earlier in this section (the `Math.Abs(balance)` call that
+charts liability loans as positive pie slices, directly contradicting the code's own adjacent
+comment that liabilities are left out of the pie "because that would be confusing" —
+separately tracked in the issue tracker, originally filed as #52 and since split into
+per-area issues). That bug fix should now clearly aim at correctly representing liabilities
+as *reducing* net worth — not toward the "liabilities excluded" behavior the contradictory
+comment describes, and not toward silently charting them as positive wealth either. Whatever
+chart shape is eventually built, a liability must never contribute a positive magnitude to a
+chart that represents wealth, per the "settled regardless" repairs already recorded above.
+
 ### Needs your decision
 
-**Yes.** The repairs above should happen regardless. But *which picture* the net-worth
-report should show — a composition pie of assets (A), a two-sided assets-versus-liabilities
-comparison (B), or a waterfall explaining the net figure (C) — is a product-taste question
-that turns on what you use this report for. The panel leans A on cost and honesty; it is
-not confident it is what you want.
+**Resolved 2026-09-20 — see "Owner decision" above.**
+
+Original flag, kept for context: **Yes.** The repairs above should happen regardless. But
+*which picture* the net-worth report should show — a composition pie of assets (A), a
+two-sided assets-versus-liabilities comparison (B), or a waterfall explaining the net figure
+(C) — is a product-taste question that turns on what you use this report for. The panel leans
+A on cost and honesty; it is not confident it is what you want.
 
 **Panel flags: would benefit from accounting / financial-reporting expertise** — what a
 net-worth statement conventionally presents (and whether showing assets and liabilities in
