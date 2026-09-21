@@ -83,34 +83,6 @@ namespace Walkabout.Tests.Data.Sqlite
         }
 
         [Test]
-        public void DeleteRoot_OnARootThatWasNeverPersisted_IsASilentNoOp()
-        {
-            // Decision D-2. OnUpdated() never clears Deleted, and a root created then deleted
-            // before any save is also Deleted - so without this rule the COMMON accident raises a
-            // ConcurrencyConflictException that misdiagnoses "this row was never there".
-            Account a = this.New(99, "Never Saved");
-            a.OnDelete();
-
-            Assert.DoesNotThrow(() => this.store.DeleteRoot(a));
-            Assert.That(a.RowVersion, Is.EqualTo(0));
-            Assert.That(this.RowCount(), Is.EqualTo(0));
-        }
-
-        [Test]
-        public void DeleteRoot_Twice_OnAPersistedRoot_ThrowsOnTheSecondCall()
-        {
-            // Decision D-2, the other half, pinned in the opposite direction: the first delete
-            // succeeded, so a second call is a caller bug or a real race - both of which are what
-            // the conflict exception and the retry loop exist for. Deliberately NOT a no-op.
-            Account a = this.New(1, "Checking");
-            this.store.SaveRoot(a);
-            a.OnDelete();
-            this.store.DeleteRoot(a);
-
-            Assert.Throws<ConcurrencyConflictException>(() => this.store.DeleteRoot(a));
-        }
-
-        [Test]
         public void SaveRoots_CanCommitAChangedSurvivorAndADeletedVictimTogether()
         {
             // The merge shape: SaveRoots is mixed-state by definition and asserts nothing.

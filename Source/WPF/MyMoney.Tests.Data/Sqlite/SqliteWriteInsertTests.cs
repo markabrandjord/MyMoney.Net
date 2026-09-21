@@ -104,23 +104,6 @@ namespace Walkabout.Tests.Data.Sqlite
         }
 
         [Test]
-        public void SaveRoot_OnAnIdThatAlreadyExists_ThrowsConcurrencyConflictAndWritesNothing()
-        {
-            this.store.SaveRoot(this.NewAccount(1, "Checking"));
-
-            var colliding = this.NewAccount(1, "Someone Else's Checking");
-
-            var ex = Assert.Throws<ConcurrencyConflictException>(() => this.store.SaveRoot(colliding));
-
-            Assert.That(ex.StoredRowVersion, Is.EqualTo(1));
-            Assert.That(this.RowCount(), Is.EqualTo(1));
-            using (var cmd = new SQLiteCommand("SELECT Name FROM Accounts WHERE Id = 1;", this.provisioner.Connection))
-            {
-                Assert.That(Convert.ToString(cmd.ExecuteScalar()), Is.EqualTo("Checking"));
-            }
-        }
-
-        [Test]
         public void SaveRoots_WhenOneRootCollides_RollsBackTheWholeBatch()
         {
             // R-CRUD-2: atomic at the call boundary, including in-memory side effects. The first

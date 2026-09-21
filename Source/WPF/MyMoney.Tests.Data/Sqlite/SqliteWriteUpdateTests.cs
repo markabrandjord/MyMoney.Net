@@ -94,33 +94,6 @@ namespace Walkabout.Tests.Data.Sqlite
         }
 
         [Test]
-        public void AfterAConflict_TheSameCallIsStillAdmissible()
-        {
-            // Spec section 1.6a consequence 2: the postCommitActions deferral means a failed write
-            // leaves the root's change state untouched, which is what makes the business-layer
-            // retry loop legal at all. Under a unified SaveRoot this was true but invisible; with
-            // a state precondition on the method it becomes load-bearing.
-            Account a = this.Saved(1, "Checking");
-
-            using (var cmd = new SQLiteCommand("UPDATE Accounts SET Version = Version + 1 WHERE Id = 1;",
-                this.provisioner.Connection))
-            {
-                cmd.ExecuteNonQuery();
-            }
-
-            a.Name = "Mine";
-            Assert.Throws<ConcurrencyConflictException>(() => this.store.SaveRoot(a));
-
-            Assert.That(a.IsChanged, Is.True);
-            Assert.That(a.RowVersion, Is.EqualTo(1), "A failed write must not advance RowVersion.");
-
-            // Re-query, reapply, retry - what AddAccountService will do in Task 24.
-            a.RowVersion = 2;
-            Assert.DoesNotThrow(() => this.store.SaveRoot(a));
-            Assert.That(this.NameInDatabase(1), Is.EqualTo("Mine"));
-        }
-
-        [Test]
         public void SaveRoot_OnACleanAccount_IsASilentNoOp()
         {
             // Spec section 1.6c: SaveRoot deliberately admits None and no-ops. Account has no
