@@ -11,7 +11,7 @@ those catalog sections, and in several cases went back to the source, before opi
 | D-16 | How is a report or chart scoped, and is there still a shared range dialog? | One inline scope model, no modal; category filtering as a declared per-surface capability | **Partly** — the category-filter half |
 | D-17 | What is a shareable report, and is HTML it? | Paginated print/PDF as the share format; HTML export retired unless made self-contained | **Partly** — whether HTML survives |
 | D-18 | Does every report export, and to what? | Export becomes a framework guarantee, moved to the report's command surface | No |
-| D-19 | What should a mixed-currency total say? | Always normalise to a stated display currency; never silently drop a subtotal | No — but blocked on D-4 |
+| D-19 | What should a mixed-currency total say? | Always normalise to a stated display currency; never silently drop a subtotal | **Resolved** — minimal/best-effort (current-rate basis), tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70); see D-19's "Owner decision" |
 | D-20 | Should generated category colours be persisted? | Stable-hash into a curated, theme-aware palette; persist only explicit user choices | No |
 | D-21 | Does the net-worth picture include what the user owes? | Assets-only composition chart + separate liabilities and net figures | **Yes** |
 | D-22 | As at the start or the end of the chosen day? | Close-of-day (inclusive) everywhere, stated in words, enforced by one range type | No |
@@ -706,10 +706,28 @@ resolves toward per-transaction captured rates, the totalling primitive's inputs
 this should be revisited. The panel's position is that D-4 and D-19 should be answered in
 the same sitting, and the register already says so.
 
+### Owner decision
+
+**Resolved 2026-09-20**, as a downstream consequence of **D-4** — see
+[D-4's "Owner decision"](panel-review-01-domain-model-taxes.md#d-4--what-does-a-currency-ratio-mean-and-can-a-non-usd-user-be-right)
+in `panel-review-01-domain-model-taxes.md` for the full note (multi-currency stays
+minimal/best-effort, tracked in GitHub issue
+[#70](https://github.com/markabrandjord/MyMoney.Net/issues/70)).
+
+The panel's recommended shape stands: **Alternative A** — always normalize to a stated
+display currency, never silently drop a subtotal, with B's per-currency rows available as
+disclosure — but on a **single current/best-available rate**, not historical/dated rates
+(D-4 ruled out Alternative C's historical-rate model as out of scope for a
+minimal/best-effort product). Step 3 of this section's recommendation ("decide rate
+vintage... as part of D-4") is therefore resolved: current-rate-with-caveat, not rate
+history.
+
 ### Needs your decision
 
-**No** on the shape — the panel is confident. **But blocked on D-4:** do not implement step
-3 before D-4 is answered, and treat step 1 as a bug fix that ships independently.
+**Resolved 2026-09-20 — see "Owner decision" above, tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70).**
+Original flag, kept for context: "No" on the shape — the panel is confident. "But blocked
+on D-4:" do not implement step 3 before D-4 is answered, and treat step 1 as a bug fix that
+ships independently.
 
 **Panel flags: would benefit from accounting / financial-reporting expertise** — the
 convention for presenting a multi-currency net position (and whether a converted total is

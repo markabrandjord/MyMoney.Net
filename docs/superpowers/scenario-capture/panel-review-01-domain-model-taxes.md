@@ -789,13 +789,43 @@ panel can say authoritatively how foreign-exchange gain and loss should be recog
 tax, and that — not the totalling arithmetic — is the real reason a serious multi-currency
 product needs C. If the owner ever wants C, that question should be answered first.
 
+### Owner decision
+
+**Resolved 2026-09-20.** Multi-currency stays **minimal/best-effort** — no investment in
+historical/dated exchange rates (Alternative C) or a deeper FX-accounting model. Scope is
+exactly what the current model already enables: an account in a non-default currency,
+transactions entered in that account's own currency, and reporting on that account in its
+own currency (the already-cataloged `P1-CUR-1..5`, `P1-XFER-5`, `P1-ACCT-13` scenarios in
+`docs/superpowers/scenario-capture/end-user-scenarios.md`) — not broader:
+
+> "For me, it is a minimal/best-effort. I have no foreign currency accounts, and do not
+> plan to have them. This could be useful for evaluating someone's net worth if they have
+> foreign accounts. So doing the minimum to enable the scenarios that the code already
+> supports makes sense. We could enter transactions into a euro account in euros, and we
+> could report on that account in euros. We would have to understand the scenarios
+> supported to make other decisions. Fix bugs, and write tests to support today's
+> scenarios. Least, best effort."
+
+Tracked going forward in **GitHub issue [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70)**
+("Multi-currency: minimal/best-effort scope — fix known bug, add test coverage") — fix
+`Account.GetNormalizedAmount` overwriting the conversion factor instead of composing it
+(Panel finding 1 above), fix the adjacent `&`/`&&` null-check bug (Panel finding 2), and
+write test coverage for today's supported scenarios, before any further multi-currency
+decisions get made. See #70 for the fix/test detail rather than re-deriving it here.
+
+This also resolves **D-19** ("What should a mixed-currency total say?") in
+`panel-review-04-reports-charts.md` — the panel's recommended shape there stands, on a
+single current/best-available rate rather than historical/dated rates. See that section's
+own "Owner decision" note, which points back here.
+
 ### Needs your decision?
 
-**Partly.** Steps 1–5 are defect fixes and one cheap architectural seam; the panel is
-confident and no decision is needed. **"Is multi-currency a supported capability of this
-product?"** is a scope question only the owner can answer, and it determines whether C is
-ever built. The panel's recommendation is written so that answering "no" costs nothing and
-answering "yes" later is affordable.
+**Resolved 2026-09-20 — see "Owner decision" above, tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70).**
+Original flag, kept for context: "Partly." Steps 1–5 are defect fixes and one cheap
+architectural seam; the panel is confident and no decision is needed. "Is multi-currency a
+supported capability of this product?" is a scope question only the owner can answer, and
+it determines whether C is ever built. The panel's recommendation is written so that
+answering "no" costs nothing and answering "yes" later is affordable.
 
 ---
 
@@ -1514,7 +1544,7 @@ convention above is offered as ready to adopt.
 | D-1 | Envelope budgeting / category funds | **A** — leave it out, with a deliberate migration; **C (funds-as-accounts) ruled out unconditionally**; if envelopes ever ship, **B** as a virtual allocation ledger (probably framed as savings goals) | **Resolved** — deferred as a future feature, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-1's "Owner decision" |
 | D-2 | View state on domain objects | **A now, C as the target** — fix the change-tracker and move two properties to the transient path immediately; in the redesign, view state moves to an identity-keyed side table. **B (full view-model layer) rejected on cost** | No |
 | D-3 | Budgeting grain | **C** — no "budgeted" flag at all; a stored plan plus derived actuals. Delete the dead plumbing regardless. Keep exclusion as an explicit feature | **Resolved** — deferred jointly with D-1, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-3's "Owner decision" |
-| D-4 | Currency model | **A's fixes behind a dated conversion seam** — fix the conversion cache and the short-circuit, declare the convention, make the source configurable. **B rejected**; **C** named as the shape only if multi-currency becomes real | **Partly** — is multi-currency supported? |
+| D-4 | Currency model | **A's fixes behind a dated conversion seam** — fix the conversion cache and the short-circuit, declare the convention, make the source configurable. **B rejected**; **C** named as the shape only if multi-currency becomes real | **Resolved** — minimal/best-effort, tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70); see D-4's "Owner decision" |
 | D-28 | Sales with no cost basis | **B as destination, C as interim, A opt-in only** — ship the flag fix now with tests, never silently drop a sale, build user-supplied opening lots | **Partly** — prioritisation of opening lots |
 | D-29 | Tax-year vintage | **Split**: **A** for the rate tables (version, disclose, staleness-check, fix loading) — confident. Export/box catalogue: retire, rebuild or freeze — owner's call | **Yes** — for the export |
 | D-30 | Filing-status approximations | **C** — complete federal data, replace hardcoded fallbacks with data-driven capability queries, generate disclosure from them, fix gains-stacking first | No |
