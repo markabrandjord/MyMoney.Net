@@ -50,6 +50,27 @@ question is now closed: no lease, ever, on the shipped path. The changes below t
 lives in the business layer, and the test tier must be able to trigger a conflict on demand"
 architecture through the sections that talk about the conflict contract, T-1, and the slice plan.
 
+**Revision 4 (2026-09-20, same day).** A small, additive revision on two owner points. Both are
+narrower than revisions 2 and 3 — neither changes a candidate, a recommendation or the slice
+order's shape — but the second one required reconciling the owner's guidance against something
+this document already said, rather than simply recording it.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "`IMoneyStoreTestControl` is too coarse — it only does whole-database things. I want to clear a table, delete and restore 1 record, clear a table or all tables, etc." | New §2.6 — the granular surface, and the worked-out answer to *"is table-level a decomposition of the whole-database wipe?"* (**no** — they are two different ladders; only the data ladder decomposes) |
+| "It will cover views when we get around to using them. SQLite will allow us to query using views, but we cannot update using one. The business layer will have to comprehend that difference." | New §2.7 — how reset interacts with views (§2.7.1), the type-system shape that makes the asymmetry structural rather than remembered (§2.7.2), and the reconciliation with §1.7.1 (§2.7.3) |
+
+**The one thing this revision does not simply accept.** §1.7.1 already lists `INSTEAD OF` triggers
+on views as *"adopt selectively — the closest thing SQLite has to a stored procedure for writes"*,
+which means SQLite *can* be made to accept a write through a view, and this document had said so
+before the owner said it could not. That is a real contradiction, not a wording mismatch, and
+§2.7.3 resolves it rather than papering it: **the rule is adopted as an architectural constraint
+(views are a read surface; nothing in the business layer ever writes through one), the `INSTEAD OF`
+entry in §1.7.1 is demoted from "adopt selectively" to "deferred behind a spike, and never
+business-layer-visible", and one narrow question is flagged back to the owner** (§2.7.3, "What the
+owner should confirm"). §1.7.1's table and §7's expertise-gap item are edited to match, so the
+document does not argue with itself.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -101,7 +122,10 @@ ways along the *privilege* axis the owner named:
 ```
 IMoneyStore            — everyday read/write. No DDL, no destructive bulk operations.
 IMoneyStoreProvisioner — create catalog/file, deploy + run schema, upgrade, backup, delete.
-IMoneyStoreTestControl — wipe to empty, seed, snapshot/restore. Test tier only.
+IMoneyStoreTestControl — put the store into a known state, below the object graph and below
+                         the version check: reset the schema, clear all tables or some tables,
+                         delete/capture/restore an individual row, snapshot/restore. Test tier
+                         only. **Expanded in revision 4 — see §2.6 for the actual surface.**
 ```
 
 Plus a fourth, non-store contract for what D-35 called *formats*:
@@ -611,8 +635,8 @@ Engine version 3.53.4 ships with all of these (§0.1); none needs a package chan
 |---|---|---|---|
 | **`RETURNING`** (3.35+) | `SaveOneCategory` computes `c.RowVersion = callerRowVersion + 1` in C# after an `UPDATE` that did `Version = Version + 1` server-side | The *authoritative* post-write version, read from the engine, exactly as SQL Server's `_SaveBatch` procs return theirs. Removes an inference that is correct today only because nothing else can touch the row mid-transaction | **Adopt.** Small, removes a real C#-side simulation of a database fact, and makes both engines report versions the same way |
 | **`json_each()` / `json_tree()`** (3.38+, built in) | SQLite loops in C#: one `ExecuteNonQueryInTransaction` per root | The genuine **TVP equivalent**. Pass the whole batch as one JSON parameter, then `INSERT ... SELECT ... FROM json_each(@Rows)` — one parameterized statement, set-based, engine-side, one transaction. This is the single largest structural convergence available between the two engines | **Adopt, measured.** It is the direct answer to R-CRUD-3 on SQLite. Verify with a benchmark: at small batch sizes a prepared-statement C# loop inside one transaction may genuinely beat JSON parsing, and "more native" is not a reason to be slower. Measure, then choose — and if the loop wins, say so here rather than adopting for aesthetics |
-| **Views** | No `CREATE VIEW` anywhere | Read-side shapes (`IMoneyQuery`'s aggregates) defined once in SQL rather than assembled in C#, and defined in a *schema step* so they are versioned like everything else | **Adopt.** This is where §1's `IMoneyQuery` should land on SQLite, and it is the closest parity with SQL Server's `_Query` proc family |
-| **`INSTEAD OF` triggers on views** | Not used | The closest thing SQLite has to a **stored procedure for writes**: multi-statement write logic that lives in the database, is versioned as a schema step, and is invoked by a plain `INSERT INTO SomeView VALUES (...)`. A store-tier caller issues one statement; the multi-step logic runs engine-side | **Adopt selectively.** Genuinely useful where a write is multi-statement (transfer both-sides, split rebalance). **Do not** use it to hide the version-conflict check — see 1.7.3 |
+| **Views** | No `CREATE VIEW` anywhere | Read-side shapes (`IMoneyQuery`'s aggregates) defined once in SQL rather than assembled in C#, and defined in a *schema step* so they are versioned like everything else | **Adopt — as a read surface only.** This is where §1's `IMoneyQuery` should land on SQLite, and it is the closest parity with SQL Server's `_Query` proc family. Revision 4 adds the constraints: explicit column lists (never `SELECT *`), a view change is its own numbered step, and **nothing writes through a view** — see §2.7 |
+| **`INSTEAD OF` triggers on views** | Not used | The closest thing SQLite has to a **stored procedure for writes**: multi-statement write logic that lives in the database, is versioned as a schema step, and is invoked by a plain `INSERT INTO SomeView VALUES (...)`. A store-tier caller issues one statement; the multi-step logic runs engine-side | **Revision 4: do not adopt now.** Demoted from round 2's "adopt selectively." A trigger-backed writable view is the one construct that would make the read/write asymmetry §2.7 establishes a *convention* instead of a *property*, and SQLite has no grant with which to make a view read-only in the engine. It also collides with the `RETURNING` adoption one row above (a post-write version read through a trigger-backed view is, at best, unverified — §7 item 4). Kept as a **deferred, single-candidate spike** (transfer both-sides), with a standing constraint if it is ever taken: never above `IMoneyStore`. Reasoning and the owner question in §2.7.3 |
 | **`CHECK` constraints** | Not emitted | Domain invariants enforced by the engine on both engines instead of by C# on one | **Adopt** for invariants that are genuinely schema-level (non-negative where truly non-negative, enum ranges). Resist the urge to push business rules in: a `CHECK` that fires is an opaque error, and §7's UI note about plain-language failures applies |
 | **`STRICT` tables** (3.37+) | Not used — SQLite's default dynamic typing silently accepts a string in an `INTEGER` column | Column types that actually mean something, which is *exactly* the kind of SQL-Server-alike behavior this principle is about. It is also the single cheapest way to stop a type mismatch surviving a SQLite test and failing on SQL Server | **Adopt.** Strong recommendation; low cost since the schema is being rebuilt from zero anyway |
 | **Generated columns** (3.31+) | Not used | Derived values computed by the engine rather than assigned in C# | **Note, don't adopt yet.** No current need; listing it so the option is known |
@@ -628,7 +652,7 @@ Stated flatly, because the owner's goal is that the two engines *appear* similar
 
 | Limit | Why it is unclosable | What the design does instead |
 |---|---|---|
-| **No stored procedures.** SQLite has no procedural language at all — no `CREATE PROCEDURE`, no variables, no control flow. | It is a library linked into the process, not a server with a query engine that executes code on your behalf. | Views + `INSTEAD OF` triggers cover *set-shaped* and *multi-statement-write* logic. Everything needing loops or branching stays in the provisioning/store assembly as versioned, embedded SQL plus a thin executor. §1.5's process table names this as step 2's real divergence rather than papering it. |
+| **No stored procedures.** SQLite has no procedural language at all — no `CREATE PROCEDURE`, no variables, no control flow. | It is a library linked into the process, not a server with a query engine that executes code on your behalf. | Views cover *set-shaped read* logic. **Revision 4: multi-statement *write* logic does not get the `INSTEAD OF` escape hatch after all** (§1.7.1, §2.7.3) — it stays in the store assembly, inside one transaction, which is where `SaveTransfer` and `SaveBatch` already put it and where R-CRUD-2's post-commit deferral already lives. Everything needing loops or branching likewise stays in the provisioning/store assembly as versioned, embedded SQL plus a thin executor. §1.5's process table names this as step 2's real divergence rather than papering it, and revision 4 makes the gap slightly *wider* and more honest than revision 2 claimed. |
 | **No server-side identities, roles, grants or permissions.** There is no `MyMoneyUser` on SQLite, and no `GRANT EXECUTE`. | There is no server and no authentication boundary. The process that opens the file has the file's OS rights, entirely. | §1's tier-per-assembly model, and §6.1's already-written honest statement of exactly how far that falls short. Revision 2 changes nothing here and adds no new claim. |
 | **Triggers cannot be conditionally bypassed by privilege.** | Same reason. | Don't put test-tier-only behavior in a trigger. Test-tier capability stays an assembly-presence question. |
 | **No table-valued parameters as a typed, server-declared object.** `json_each` is functionally equivalent but is not a declared type with a schema the engine validates. | SQLite has no user-defined types. | Accept the asymmetry; the contract suite (not the type system) is what proves the two batch paths behave identically. |
@@ -653,6 +677,20 @@ UPDATE` trigger raising `RAISE(ABORT, ...)` on a version mismatch is more "nativ
 
 This is the shape of the general caution: P-SQLITE is a tool for removing real asymmetries
 (1.7.1's `json_each`, `RETURNING`, views, `STRICT`), not a goal to be maximized.
+
+### 1.7.4 The second place the panel pushes back — views are a read surface *(new in revision 4)*
+
+> **P-VIEW.** A view is a **query surface only.** No layer of this application writes through a
+> view — not the business layer, and (for now) not the data layer either. Views are adopted
+> enthusiastically for reads (§1.7.1) and are the SQLite landing site for `IMoneyQuery`; the
+> write side goes through `IMoneyStore`'s methods against real tables, always.
+
+This is the owner's rule, adopted. It is stated here so it sits next to P-SQLITE, because the two
+principles pull against each other on exactly one construct — `INSTEAD OF` triggers — and a reader
+who finds P-SQLITE first needs to find the exception at the same time. **§2.7 is the full
+treatment**: how reset interacts with views (§2.7.1), how the type system makes P-VIEW structural
+rather than remembered (§2.7.2), and the reconciliation with §1.7.1 plus the one question flagged
+back to the owner (§2.7.3).
 
 ---
 
@@ -899,11 +937,463 @@ ReleasePublishOutput_ContainsNoSqlServerEngineAssembly
 MyMoneyBusiness_HasNoWpfAssemblyReference           (carry forward, unchanged)
 MyMoneyData_HasNoWpfAssemblyReference               (carry forward, per-engine now)
 TestsBusiness_DoesNotReferenceTheWpfUiProject       (fixes 2.1 #2)
+
+ProjectionTypes_DoNotImplementIAggregateRoot        (revision 4, §2.7.2)
+StoreWriteMethods_AcceptOnlyAggregateRoots          (revision 4, §2.7.2)
 ```
 
 The fourth one is the test that makes D-37 real rather than aspirational, and it is the one most
 likely to be quietly deleted when it becomes inconvenient — so it should assert against an actual
 `dotnet publish -c Release` output directory, not against a `.csproj`.
+
+The last two are revision 4's; they are what turns *"the business layer knows views are read-only"*
+from a sentence in a document into a property of the compiled assemblies. §2.7.2 gives their exact
+shape.
+
+---
+
+## 2.6 `IMoneyStoreTestControl`, expanded — three levels of reset *(new in revision 4)*
+
+Revisions 1–3 gave this contract one granularity: *wipe the whole database, seed it, snapshot and
+restore it.* The owner's objection is correct and the panel should have caught it — a test that
+wants to know *"what does `AddAccountService` do when the `Payees` table is empty?"* or *"what
+happens to this report when this one transaction disappears mid-run?"* has, today, exactly one
+tool: destroy and rebuild everything. That is both slow and imprecise: it resets state the test
+was depending on, so the test has to re-establish it, which means the reset is no longer isolating
+anything.
+
+### 2.6.1 The question that has to be answered first: is table-level a decomposition of the wipe?
+
+**No, and getting this wrong would produce a confused API.** The whole-database wipe in
+revisions 1–3 is `Schema_DropAll()` + `Schema_ApplyTo(N)` — a **schema** operation that destroys
+data as a *side effect* of destroying and rebuilding the objects that hold it. A table clear is a
+**data** operation that deliberately leaves every schema object exactly where it was.
+
+They are not the same operation at two granularities. They are two ladders:
+
+| Ladder | Rungs | What it touches | What it leaves alone |
+|---|---|---|---|
+| **Schema** | `ResetSchema(N)` | Every table, index, view, trigger, constraint, TVP/table type, proc — and `__SchemaHistory` itself | Nothing. This is nuke-and-pave (§1.5 S-1) |
+| **Data** | `ClearAllData()` → `ClearTables(subset)` → `DeleteRow(table, id)` | Rows | Every schema object, including `__SchemaHistory`, indexes and views |
+
+Only the **data** ladder decomposes, and it decomposes cleanly — the three rungs are literally one
+executor with a narrowing target:
+
+```
+ClearAllData()          ==  ClearTables(<every data table, FK-ordered>)
+ClearTables(ts)         ==  for each t in FK-order(ts): DELETE FROM t        [one transaction]
+DeleteRow(t, id)        ==  DELETE FROM t WHERE Id = @id                    [one transaction]
+```
+
+The schema ladder does **not** decompose into the data ladder and must not be implemented in terms
+of it. `ResetSchema` is not "clear all tables, then fix up the schema": if the schema has drifted —
+which, during nuke-and-pave, is the normal reason you are resetting at all — clearing rows does
+nothing about it. Conversely `ClearAllData` must never be implemented as `ResetSchema`, because
+its entire value is that it does *not* re-run DDL.
+
+**The practical rule for a test author**, which belongs in the TestKit's own docs:
+
+- Schema might be stale or wrong → `ResetSchema(N)`.
+- Schema is fine, I want a blank slate → `ClearAllData()`.
+- I want a blank slate in one corner → `ClearTables(...)`.
+- I want one row gone for the next twelve lines → `RemoveRow(...)` in a `using`.
+
+### 2.6.2 The surface
+
+```csharp
+namespace MyMoney.TestKit.Contracts;   // never referenced by a production assembly (§2.5)
+
+public interface IMoneyStoreTestControl : IDisposable
+{
+    // ---- Schema level: revisions 1-3's operation, unchanged, reusing §1.5 verbatim ----
+    void ResetSchema(int targetVersion);          // Schema_DropAll() + Schema_ApplyTo(N)
+    int  CurrentSchemaVersion { get; }            // Schema_CurrentVersion()
+
+    // ---- Data level ----
+    ClearResult ClearAllData(ClearOptions options = default);
+    ClearResult ClearTables(IReadOnlyCollection<TableRef> tables, ClearOptions options = default);
+    ClearResult ClearTable(TableRef table, ClearOptions options = default);
+    ClearResult ClearTable<TRoot>(ClearOptions options = default) where TRoot : IAggregateRoot;
+
+    // ---- Row level ----
+    RowSnapshot    CaptureRow(TableRef table, long id);               // throws if absent
+    RowSnapshot?   TryCaptureRow(TableRef table, long id);
+    RowSetSnapshot CaptureRows(TableRef table, RowFilter filter);     // see 2.6.5 on RowFilter
+    void           DeleteRow(TableRef table, long id);                // no version check, no cascade
+    void           RestoreRow(RowSnapshot row);                       // verbatim: Id and Version too
+    void           RestoreRows(RowSetSnapshot rows);
+    IRowScope      RemoveRow(TableRef table, long id);                // capture + delete; Dispose restores
+    IRowScope      RemoveRows(TableRef table, RowFilter filter);
+
+    // ---- Whole-database snapshot: unchanged in role, tightened in 2.6.6 ----
+    StoreSnapshot Snapshot();
+    void          Restore(StoreSnapshot snapshot);
+
+    // ---- Introspection the above needs, and tests find useful in their own right ----
+    IReadOnlyList<TableRef> Tables { get; }        // data tables only; never views (§2.7.1)
+    long RowCount(TableRef table);
+}
+
+public readonly record struct ClearOptions(
+    bool ResetIdentity = true,                     // see 2.6.4 - the cross-engine trap
+    bool VerifyForeignKeysAfter = true);           // PRAGMA foreign_key_check / DBCC CHECKCONSTRAINTS
+
+public sealed record ClearResult(IReadOnlyDictionary<TableRef, long> RowsDeleted);
+
+public interface IRowScope : IDisposable { RowSetSnapshot Removed { get; } }
+```
+
+`Seed` is deliberately **absent**, and that is a change from the revision-1–3 sketch. Seeding is a
+`MyMoney.TestKit` concern that writes **through `IMoneyStore`** — which means a seeded fixture has
+exercised the real write path, the real version assignment and the real FK enforcement, exactly as
+T-1 (§2.4) argues for everywhere else. What the test-control tier offers instead is the *fast*
+path: `Snapshot()` a seeded database once, `Restore()` it per test. Splitting these two apart is
+strictly better than the single `Seed` the earlier revisions implied, because it stops a
+"convenience" seeder from quietly becoming a second, domain-rule-free way to create data.
+
+### 2.6.3 Why these cannot just be done through `IMoneyStore` — the justification for the tier
+
+A reviewer's first reaction to `DeleteRow` should be *"`IMoneyStore` can already delete."* It can,
+and that is a different operation:
+
+| Through `IMoneyStore` | Through `IMoneyStoreTestControl` |
+|---|---|
+| Version-checked; throws `ConcurrencyConflictException` on a stale `RowVersion` (R-CRUD-4) | No version check at all. A test that has no idea what version a row is at can still remove it |
+| Applies domain semantics — `SaveTransfer` touches both sides, deleting a transfer's other side is refused when reconciled | Applies none. One row, one table. If the result violates an FK, the engine says so and the operation rolls back |
+| Runs `postCommitActions`, updates the in-memory graph, marks objects `OnUpdated()` | Runs below the object graph entirely |
+| Is the thing under test | Is the fixture |
+
+That last row is the whole argument. These operations exist precisely so that a test can put the
+store into a state the domain rules would not let it reach, or would only let it reach through a
+sequence of calls that is itself under test. Using the production API to build the fixture for a
+test of the production API is how a test ends up asserting that a bug is consistent with itself.
+
+**The consequence, which must be documented where a test author will hit it:** every test-control
+operation is invisible to any live `MyMoney` object graph or cached store state. After any of
+them, the caller re-reads. The TestKit fixture base class should make that the default rather than
+a remembered step.
+
+### 2.6.4 How this reuses §1.5's machinery — and the one place it must not hand-maintain a list
+
+`ResetSchema` is `Schema_DropAll()` + `Schema_ApplyTo(N)`, unchanged. The interesting reuse is in
+the *data* ladder, and it is the single most important implementation constraint in this section:
+
+> **The clear executor derives its table list and its delete order by introspection, from the same
+> mechanism `Schema_Verify()` uses (§1.5 S-4 / §1.7.1's `PRAGMA table_info`/`foreign_key_list`,
+> `sys.tables`/`sys.foreign_keys`). It never carries a hand-written list of tables.**
+
+This is issue #34's lesson applied somewhere it would otherwise recur verbatim. A hand-maintained
+`ClearAll` list has exactly #34's failure shape: someone adds a table in step 23, forgets the
+clear list, and every test from then on runs against a table that is never emptied — silently,
+with no error, and with the symptom appearing somewhere else entirely. Deriving the list means a
+new table is cleared the moment its step exists, for the same reason and by the same route that a
+new index is created the moment its step exists.
+
+Concretely, per engine:
+
+| Concern | SQLite | SQL Server |
+|---|---|---|
+| Table set | `sqlite_master WHERE type='table'`, minus `sqlite_%` internal tables and minus `__SchemaHistory` | `sys.tables`, minus `__SchemaHistory` |
+| Delete order | Reverse topological order over `PRAGMA foreign_key_list`; `PRAGMA defer_foreign_keys=ON` inside the transaction as the safety net for a cycle (the same pragma `SaveBatch` already uses, §0.1) | Reverse topological order over `sys.foreign_keys`. **No** `NOCHECK CONSTRAINT` — a clear that disables constraint checking can leave a state the schema forbids |
+| Statement | `DELETE FROM t` (no `WHERE`), which SQLite's truncate optimization turns into a page-drop | `DELETE FROM t`. **Not `TRUNCATE TABLE`** — it is refused on any table an FK references, so it cannot be applied uniformly, and parity beats a constant factor here |
+| Where the logic lives | The `MyMoney.Data.Sqlite.TestTier` executor, in-process (§1.7.2's unclosable limit, again) | `Test/*` procs — `dbo.Test_ClearTables @Tables dbo.TableNameList READONLY` — deployed **only** into a `TestDatabase: true` catalog and granted only to `MyMoneyTest`, exactly as the existing `_Test_Reset` procs are (§0.1) |
+| Transaction | One, around the whole call | One, inside the proc, `SET XACT_ABORT ON` |
+
+**The cross-engine trap, and why `ClearOptions.ResetIdentity` defaults to `true`.** After
+`DELETE FROM Accounts`, the next `Id` a fresh insert receives is **not** the same on the two
+engines. SQLite's `INTEGER PRIMARY KEY` is the rowid and allocates `max(rowid)+1`, so an emptied
+table starts again at 1 by itself — *unless* the table is declared `AUTOINCREMENT`, in which case
+the high-water mark persists in `sqlite_sequence` and must be deleted explicitly. SQL Server's
+`IDENTITY` never rewinds without `DBCC CHECKIDENT(..., RESEED, 0)`. A test that asserts
+`account.Id == 1` after a clear therefore passes on one engine and fails on the other, for reasons
+having nothing to do with what it is testing. This is precisely the class of silent divergence
+§6.8 warns the new nativeness principle can create, arriving from the test tier instead. The
+contract suite must pin it: **after `ClearTable` with `ResetIdentity: true`, the next inserted row
+has the same Id on both engines as it would in a freshly paved database.** That assertion is
+cheap, and it is the only thing that keeps the option honest.
+
+**Where the `TestDatabase` guard goes.** Slice 5b already requires destructive provisioner
+operations to refuse an entry not marked `TestDatabase: true` (§1.8). Granularity makes that
+*more* important, not less, and moves where the check belongs: `ResetSchema` reads as dangerous
+and gets respect; `ClearTable(TableRef.Payees)` reads as housekeeping. So the guard is **at the
+point the `IMoneyStoreTestControl` is obtained** — the factory checks the registry entry once and
+refuses to hand back an instance at all — rather than repeated in twenty methods where the
+twenty-first will be forgotten. On SQL Server the same guarantee arrives twice over, since the
+`Test/*` procs are not deployed into a non-test catalog and `MyMoneyTest` has no table grants.
+
+### 2.6.5 Row-level: what "delete and restore 1 record" actually has to mean
+
+Three decisions here have real consequences and none of them is obvious.
+
+**1. `DeleteRow` does not cascade, and that is the point.** If another table's FK references the
+row, the delete fails and rolls back, surfacing as `StoreTestControlException` wrapping the engine
+error. The alternative — cascade, or defer FK enforcement for the call — is tempting and wrong,
+because `RestoreRow` would then be a lie: it restores the one row it captured, while the rows the
+cascade took are gone for good and the test's "restore" silently leaves the database in a state
+neither before nor after. A test that genuinely wants a row and its dependents gone uses
+`CaptureRows` + `RemoveRows` and says so. **Restore must be exactly the inverse of remove, or it
+is not a restore.**
+
+**2. `RestoreRow` re-inserts verbatim — same `Id`, same `RowVersion`, same every column.** It is
+not "insert a new row with the same values." A restored row that came back with a fresh `Id` or a
+bumped version would break every reference to it and would make the version-conflict tests
+(§1.6a's whole subject) unreproducible. This means `RestoreRow` writes the identity column
+explicitly — `SET IDENTITY_INSERT ... ON` on SQL Server, a plain explicit `Id` value on SQLite.
+
+**3. The scoped form is the one tests should actually use.** The primitives exist, but the shape
+that makes this feature pay for itself is:
+
+```csharp
+using (control.RemoveRow(TableRef.Of<Payee>(), payeeId))
+{
+    // The report runs against a database where this payee's row does not exist.
+    var model = reportBuilder.Build(request);
+    Assert.That(model.Rows, Has.None.Matches<ReportRow>(r => r.PayeeId == payeeId));
+}
+// Row is back, byte-for-byte, including its RowVersion. The rest of the fixture is untouched.
+```
+
+`Dispose` restores inside its own transaction and throws if the restore fails, rather than
+swallowing — a silently-failed restore would leak state into every subsequent test in the fixture,
+which is the exact failure mode `AppCrashGuard` was written to stop tolerating elsewhere in this
+project (see CLAUDE.md's note on why that check is deliberately not wrapped in a try/catch).
+
+`RowFilter` for the multi-row forms is deliberately **not** a SQL string. It is the same closed,
+typed shape §1's `IMoneyQuery` uses for its filters — a small record of column/operator/value
+triples — so the test tier does not become the one place in the design where string-built SQL is
+acceptable (R-CRUD-1).
+
+### 2.6.6 `TableRef`, and keeping it from drifting
+
+`TableRef` is a `readonly record struct` wrapping a name, with no public constructor. Instances
+come from `TableRef.Of<TRoot>()` (aggregate roots, compile-time safe) or from a static
+`Tables.Accounts`-style class for the tables no root maps to (join tables, lookup tables).
+Anything else — a typo, a renamed table, or a **view** (§2.7.1) — cannot be constructed.
+
+The anti-drift guard is the same shape as slice 2b's schema-equality test, and belongs in the
+Tier-2 contract suite: **assert that the set of `TableRef`s the TestKit exposes is exactly the set
+of data tables the introspected schema contains at the current version.** Add a table without a
+`TableRef`, or leave a `TableRef` behind after dropping a table, and that test goes red. This is
+what keeps §2.6.4's derived clear list and the typed surface from disagreeing.
+
+### 2.6.7 Honest note: granularity is not automatically faster
+
+It is easy to assume the fine-grained operations exist for speed. Sometimes; not always, and the
+answer differs by engine, which matters because the same tests run on both:
+
+| Reset | SQLite (`:memory:`, T-1's default) | SQL Server |
+|---|---|---|
+| `ResetSchema(N)` | DDL against an empty page cache — sub-ms to low-ms (§2.4) | Seconds. Genuinely expensive |
+| `ClearAllData()` | Comparable to the above, sometimes slower once FK-order introspection is counted | **Much** cheaper than reprovisioning. This is where the granular API earns its keep |
+| `Restore(snapshot)` | Cheapest of all — SQLite's backup API / `VACUUM INTO` over a prepared template (§1.7.1, §2.4) | Expensive; `RESTORE DATABASE` needs exclusive access |
+| `RemoveRow(...)` scope | Trivial | Trivial |
+
+So the recommended default per-test reset stays **per-engine, not universal**: template
+snapshot-restore on SQLite, `ClearAllData()` on SQL Server, `ResetSchema` only when the schema
+itself is in question. The TestKit fixture base should choose this per engine so individual tests
+never encode the choice — and slice 9's measurement gate (§2.4) should record all three numbers
+rather than just the one it currently plans to.
+
+---
+
+## 2.7 Views: reset behavior, and the read/write asymmetry *(new in revision 4)*
+
+The owner: *"It will cover views when we get around to using them. SQLite will allow us to query
+using views, but we cannot update using one. The business layer will have to comprehend that
+difference."*
+
+Three separable questions live in that sentence, and they have different answers.
+
+### 2.7.1 What resetting does to views — worked out, not assumed
+
+**A view is a stored *definition*, not stored *data*.** On SQLite it is a row in `sqlite_master`
+with `type='view'` holding its SQL text; on SQL Server it is an object in `sys.views`. It holds no
+rows of its own; it is re-evaluated at query time. That single fact determines almost all of the
+behavior, but not quite all of it:
+
+| Operation | Effect on views | Why |
+|---|---|---|
+| `ClearTable` / `ClearAllData` | **Nothing to do.** The view definition survives untouched; querying it afterwards returns zero rows because its underlying tables are empty | A view has no state to reset. It is "automatically reset" in the only sense that matters |
+| `DeleteRow` / `RestoreRow` | Nothing to do; the view reflects the change immediately, in both directions | Same reason |
+| `Snapshot` / `Restore` | Snapshot captures **data only**, tagged with `Schema_CurrentVersion()`. View definitions are schema and are neither captured nor restored | A snapshot is not a schema backup. §2.6.6's tightening: `Restore` **refuses** a snapshot whose recorded version differs from the target's current version, loudly, rather than restoring rows into a schema that may have reshaped under them |
+| `ResetSchema` | **Views must be explicitly dropped and recreated**, and this is the one place views need real handling | Below |
+
+`Schema_DropAll()` must drop views, **and drop them before the tables they depend on** — required
+on SQL Server, harmless-but-done-anyway on SQLite for parity of the step list. Equally,
+`Schema_Verify()`'s expected object set must **include** views, or a paved database missing a view
+reports no drift and the first symptom is an `IMoneyQuery` call failing at runtime. Both of these
+are one-line consequences, but both are the kind of one line that is omitted when nobody writes it
+down.
+
+Two further concrete findings, neither hand-wavable:
+
+1. **Never `SELECT *` in a view — always an explicit column list.** SQLite stores the view's SQL
+   text and re-resolves `*` when the query is prepared, so a `SELECT *` view silently *gains* a
+   column when its underlying table does. SQL Server binds the column list at `CREATE VIEW` time
+   and keeps serving the old shape until someone runs `sp_refreshview`. That is two different
+   behaviors from one schema step — a textbook §6.8 divergence, arriving through a feature §1.7.1
+   enthusiastically adopted. An explicit column list makes both engines do the same thing, and it
+   makes a view change what it should be: **its own numbered step** that drops and recreates the
+   view (`DROP VIEW IF EXISTS` + `CREATE VIEW` on SQLite, which has no `CREATE OR ALTER VIEW`;
+   `CREATE OR ALTER VIEW` on SQL Server).
+2. **A view step is cheap and always safe to re-run, which makes it the most tempting place to
+   break S-3.1** (never edit an applied step). There is no data to migrate and no rebuild to do,
+   so editing step 14's view definition and re-paving *feels* free — and during nuke-and-pave it
+   is, right up until it is not. `ChecksumHash` (§1.5 S-2) catches it, which is one more reason
+   that check has to be on from slice 2 rather than "when it matters" (§6.7).
+
+There is one non-obvious exception to "a view holds no data": a **SQL Server indexed view** is
+materialized and does hold rows. The engine maintains it automatically as part of the DML, so a
+`DELETE FROM` still leaves it correct with no special handling — but it makes the clear slower and
+it has no SQLite counterpart, so it falls under §6.8 rule 1: **not adopted, and if ever proposed,
+it must be matched or declined in writing.** Listed so the "views hold no data" claim above is
+true as stated rather than true-with-an-unmentioned-asterisk.
+
+### 2.7.2 "The business layer will have to comprehend that difference" — in the type system
+
+The weak version of this is a documented convention. The strong version, which is what the panel
+recommends and what the rest of this design's approach to enforcement demands, is that **the
+business layer cannot express a write against view-backed data, because no type it can reach
+permits it.** Four mechanisms, in increasing order of how load-bearing they are:
+
+**1. The read port and the write port are different interfaces, and use cases take only what they
+need.** This already exists (§1) and is the foundation: `IMoneyQuery` has no write methods at all.
+A use case that reports takes `IMoneyQuery` in its constructor and nothing else — it cannot write
+anything, through a view or otherwise, because it is holding no object that can.
+
+**2. Query results are projections, and projections are not entities.** Every row type
+`IMoneyQuery` returns (`AggregateRow`, `TransactionRow`, and every view-backed type that follows)
+is a `sealed record` with `init`-only members implementing a marker interface:
+
+```csharp
+public interface IProjection { }        // MyMoney.Business - read-model marker, no members
+
+public sealed record TransactionRow(...) : IProjection;
+public sealed record AggregateRow(...)   : IProjection;
+```
+
+and critically, **no projection implements `IAggregateRoot`.** Since every write on `IMoneyStore`
+is generically constrained to roots —
+
+```csharp
+void SaveOne<TRoot>(TRoot root) where TRoot : IAggregateRoot;
+void SaveBatch(IReadOnlyList<IAggregateRoot> roots);
+```
+
+— `store.SaveOne(transactionRow)` does not compile. Not "is discouraged", not "throws at
+runtime": there is no overload it can bind to. A business-layer developer who tries to write back
+something they queried discovers it at the moment they type it, which is the only feedback loop
+that reliably works.
+
+**3. Projections carry no `RowVersion`.** This is the subtle one and it matters more than it
+looks. If a projection carried a version, a determined developer could construct a root from a
+projection's fields and save it — and the version they carried is whatever the query saw, which
+may be stale by the time they write. That is a concurrency bug (§1.6a) smuggled in through a
+report. So the round trip is deliberately made to cost something: to write, you re-read the root
+through `IMoneyStore`, which hands you the authoritative version. **The round trip is possible;
+it just has to be explicit, and the explicitness is the feature.**
+
+**4. The business layer never names a view at all.** This is the real answer to the owner's
+sentence, and it is stronger than "views are read-only." A view is an implementation detail of an
+`IMoneyQuery` implementation: the SQLite store may answer `Aggregate(q)` by selecting from
+`v_MonthlyCategoryTotals`, the SQL Server store by executing `dbo.Aggregate_Query` — and the
+business layer, which issued a typed `AggregateQuery`, knows about neither. It has no `ViewRef`
+type, no view name, no connection, and no statement text. **There is nothing for it to
+"comprehend" at runtime, because the asymmetry has been resolved at the layer boundary rather
+than passed across it.**
+
+Where view names *do* exist as first-class values is the provisioner and test tiers, and they are
+deliberately a **different type** from `TableRef` (§2.6.6): `ViewRef` appears in `Schema_Verify`'s
+drift report and nowhere else. `IMoneyStoreTestControl.ClearTables` takes `TableRef`, so "clear a
+view" is not a runtime error message — it is a type error, which is the same trick applied at the
+other end of the stack.
+
+**The two Tier-0 tests this needs** (added to §2.5's list):
+
+```
+ProjectionTypes_DoNotImplementIAggregateRoot
+    every IProjection implementer, by reflection over MyMoney.Business, is not an IAggregateRoot,
+    and exposes no settable member and no RowVersion
+
+StoreWriteMethods_AcceptOnlyAggregateRoots
+    every write member of IMoneyStore has every parameter constrained to (or typed as)
+    IAggregateRoot or a collection thereof - so a future method cannot quietly open a hole
+```
+
+The second is the one that earns its place over time: the property is easy to hold today when
+`IMoneyStore` has three write methods, and easy to lose on the day someone adds a fourth that
+takes a DTO "just for this one import path."
+
+### 2.7.3 The `INSTEAD OF` triggers tension, stated and resolved
+
+**The tension, plainly.** The owner says SQLite cannot update through a view. Strictly as an
+engine fact, that is *incomplete*: a bare view is not updatable, but an `INSTEAD OF` trigger on a
+view makes `INSERT`/`UPDATE`/`DELETE` against that view legal, with the trigger body doing the
+real work against the underlying tables. §1.7.1 of this document — written before the owner's
+guidance — not only knew that, it **recommended it**, as *"the closest thing SQLite has to a
+stored procedure for writes,"* verdict *"adopt selectively."* So this is not the owner mis-stating
+an engine capability that the design can quietly route around; it is the owner stating an
+architectural rule that contradicts a recommendation the document already made. One of them has
+to move.
+
+**The resolution: the rule wins, and §1.7.1 moves.** Not because the owner said so — the panel's
+job here is to say whether it is right — but because three independent arguments point the same
+way, and two of them are stronger than the owner's own:
+
+1. **A writable view makes P-VIEW a convention instead of a property, at exactly the moment
+   §2.7.2 is making it a property.** SQLite has no grants (§1.7.2), so there is no way to make a
+   view read-only *in the engine*. The read-only-ness of views is therefore held entirely in .NET
+   types. Introducing one view that accepts writes means the invariant is "views are read-only
+   except the ones that aren't," which cannot be expressed in the type system and therefore has to
+   be remembered — the precise failure mode §2.7.2 exists to eliminate.
+2. **It collides with an adoption §1.7.1 made in the same table.** `RETURNING` was adopted so the
+   post-write `RowVersion` is read authoritatively from the engine rather than inferred in C#.
+   Whether `RETURNING` behaves usefully on a write routed through an `INSTEAD OF` trigger is
+   exactly one of the unknowns §7's item 4 already admits the panel does not have operational
+   experience of. Adopting both means shipping a write path whose version reporting is unverified,
+   which is the single most contract-tested behavior in the data layer (§1.7.3).
+3. **§6.8 rule 1 is satisfiable but the convergence is weaker than it reads.** An `INSTEAD OF`
+   trigger *does* have a SQL Server counterpart (a proc), so on the face of it adopting it
+   converges. But the counterpart is only structural: on SQL Server the multi-statement logic runs
+   under a login with no table grants, invoked through an object the user tier is explicitly
+   granted `EXECUTE` on; on SQLite it runs in-process under a connection that could have issued
+   the underlying statements directly anyway. The *shape* converges; the *guarantee* does not —
+   which is §6.1's already-written caution arriving in a new place.
+
+Against all that, what `INSTEAD OF` buys is multi-statement write logic living in the database.
+`SaveTransfer` and `SaveBatch` already put that logic in one place, inside one transaction, with a
+hard-won post-commit deferral (R-CRUD-2) that a trigger would have to be re-proven not to break.
+That is not enough to pay for points 1 and 2.
+
+**So, concretely:**
+
+- §1.7.1's `INSTEAD OF` row is rewritten from **"adopt selectively"** to **"do not adopt now"**,
+  retained as a deferred single-candidate spike (the transfer both-sides write, per §7 item 4's
+  own recommendation), with a standing constraint attached: **if it is ever adopted, it is an
+  implementation detail strictly below `IMoneyStore`, never a business-layer-visible write
+  surface.**
+- §1.7.2's "no stored procedures" row no longer offers `INSTEAD OF` as the write-side escape
+  hatch. The seam between the engines is correspondingly *wider* than revision 2 claimed, and
+  saying so is the point (§1.5 S-5's closing paragraph applies unchanged).
+- **The decision gets an enforcement, not just a paragraph.** A Tier-2 contract test per engine:
+  *the schema owns no `INSTEAD OF` trigger* — `sqlite_master WHERE type='trigger'` with no
+  `INSTEAD OF` in the SQL, `sys.triggers` with `is_instead_of_trigger = 0` throughout. If the
+  spike is ever taken, that test is the thing someone has to deliberately amend, which is exactly
+  the conversation that should happen at that moment.
+
+**What the owner should confirm** (one question, and the panel is not stalling on it — the
+recommendation above stands either way until told otherwise):
+
+> Is the rule **(a)** *"nothing in this codebase ever writes through a view, full stop"*, or
+> **(b)** *"the business layer never writes through a view; the data layer may use trigger
+> machinery internally if a future spike proves it out"*?
+>
+> **The panel recommends (b) as the stated rule and (a) as the current state** — they are
+> indistinguishable today, because no trigger-backed write path exists or is planned, and they
+> only diverge if someone later proposes the transfer-both-sides spike. Stating it as (b) keeps
+> that door open without costing anything now; stating it as (a) closes it permanently, which is
+> also a defensible call but a more expensive one to reverse. Either way, §2.7.2's business-layer
+> guarantees are unchanged, which is why this is a confirmation rather than a blocker.
 
 ---
 
@@ -1071,6 +1561,20 @@ list, but it was the largest genuinely-open technical question in round 1), **tw
 panel — this one was explicitly the owner's to decide, and they decided it). #4 remains the only
 fully open item among the original seven; #8 (nuke-and-pave's exit trigger) remains open as well.
 
+**Net after revision 4: no change to this list.** Neither the test-control expansion (§2.6) nor
+the views work (§2.7) touches any of the eight, which is itself worth recording — both were
+additive by construction. Revision 4 raises exactly one thing for the owner, and it is
+deliberately **not** added here as item #9, because it is a confirmation of a decision the panel
+has already made and can defend, not a question the panel is unable to answer:
+
+> **Confirmation, not a blocker (§2.7.3):** is the views rule *"nothing in this codebase ever
+> writes through a view"* or *"the business layer never writes through a view, and the data layer
+> may use trigger machinery internally if a future spike proves it out"*? The panel recommends the
+> second as the stated rule with the first as the current state — they are indistinguishable today
+> and diverge only if someone proposes the transfer-both-sides `INSTEAD OF` spike. Work proceeds on
+> the recommendation either way; a "no, make it absolute" answer costs one line in §1.7.1 and one
+> sentence in §2.7.3.
+
 ---
 
 ## 5. Recommended starting point, sanity-checked
@@ -1101,11 +1605,11 @@ flag:
 | **2b** | **The fresh-vs-upgraded schema-equality test** (§1.5 S-4): build at N; build at N−1 then `ApplyTo(N)`; assert introspected schemas identical. Include a step that adds an index to a table created by an earlier step — the issue #34 shape | **Issue #34 cannot recur.** The upgrade path runs on every build from here on |
 | 3 | `MyMoney.Data.Sqlite` — `SaveOne<Account>`, `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven `SaveOne` pattern survives the reshape, engine-side |
 | 4 | `MyMoney.TestKit` — in-memory-SQLite store fixture (T-1), `RecordingStore`, `FaultInjectingStore`, `StoreContractTests` base with the Account cases | Happy path **and** error path from day one, as the owner asked — over a real engine, not a mock |
-| 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl` (wipe/reset) implemented as `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery | The SQLite facade, for real — and the owner's nuke-and-pave, as a first-class operation rather than a script |
+| 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl`'s **schema** level (`ResetSchema` = `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery) **and its data/row levels** (§2.6): introspection-derived `ClearAllData`/`ClearTables`/`ClearTable`, `CaptureRow`/`DeleteRow`/`RestoreRow` + the `RemoveRow` scope, `TableRef` with its anti-drift contract test, and the `ResetIdentity` parity assertion (§2.6.4) | The SQLite facade, for real; the owner's nuke-and-pave as a first-class operation rather than a script; and a reset granularity a test can actually aim (§2.6) |
 | **5b** | `TestDatabase`-flag refusal in the provisioner contract (§1.8): destructive operations fail loudly against an entry not marked as a test database | The only guard that currently exists becomes enforced rather than assumed |
-| 6 | `MyMoney.Tests.Architecture` — all seven Tier-0 tests from §2.5 | The guarantees are enforced, not asserted |
+| 6 | `MyMoney.Tests.Architecture` — all nine Tier-0 tests from §2.5, including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2); plus the Tier-2 *schema owns no `INSTEAD OF` trigger* check per engine (§2.7.3) | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule |
 | 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException`, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one |
-| 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine | The tiering maps twice, the schema mechanism is parity (§4.1 #3), and the contract suite is genuinely shared |
+| 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine, plus the `Test/*` half of §2.6 (`dbo.Test_ClearTables` taking a table-name TVP, deployed only into a `TestDatabase: true` catalog) | The tiering maps twice, the schema mechanism is parity (§4.1 #3), the contract suite is genuinely shared, and §2.6.4's `ResetIdentity` divergence is pinned rather than discovered |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
 | 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveBatch` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
 
@@ -1234,8 +1738,15 @@ other direction. Two rules follow, and they belong in the eventual spec:
 
 1. **An engine-native behavior adopted on one engine must be matched on the other or explicitly
    declined in writing.** `STRICT` tables have a SQL Server counterpart (typed columns, which it
-   has always had), so adopting them converges. An `INSTEAD OF` trigger encoding a write rule has a
-   counterpart (a proc), so it converges. A `CHECK` constraint with no SQL Server twin diverges.
+   has always had), so adopting them converges. A `CHECK` constraint with no SQL Server twin
+   diverges. **Revision 4 adds the case where this rule is satisfied and is still not enough:** an
+   `INSTEAD OF` trigger encoding a write rule *does* have a counterpart (a proc), so by this rule
+   it converges — yet it was declined anyway, for reasons this rule does not capture (§2.7.3).
+   Rule 1 is a necessary test, not a sufficient one. The two concrete divergences revision 4 found
+   by applying it are both textbook cases for this section: `SELECT *` inside a view resolves at
+   prepare time on SQLite and at create time on SQL Server (§2.7.1), and a table clear rewinds id
+   allocation on SQLite but not on SQL Server (§2.6.4). Both were found by going looking, which is
+   the only way they get found before a test lies about them.
 2. **The shared contract suite is the arbiter, not the principle.** If a native feature can't be
    shown to produce identical observable behavior through `IMoneyStore` on both engines, it doesn't
    go in — however native it is. §6.4 already makes this argument for `IMoneyQuery`; §1.7 widens
@@ -1283,13 +1794,19 @@ worked case.
    document does not currently have. Still not blocking — but worth confirming before slice 8
    rather than after.
 
-4. **(Revision 2.) Whether `INSTEAD OF` triggers on views are a maintainable way to encode
-   multi-statement write logic in SQLite at this scale.** §1.7.1 recommends them selectively and
-   the mechanism is sound, but the panel has no operational experience of a codebase that leans on
-   them heavily — the failure modes (debuggability, error messages, interaction with
-   `defer_foreign_keys`, behavior under `RETURNING`) are known to exist and not known in detail.
-   Recommendation: adopt for one concrete case first (the transfer both-sides write), evaluate,
-   and only then generalize. Explicitly *not* a reason to skip §1.7's other findings, which are
+4. **(Revision 2; superseded in its recommendation by revision 4.) Whether `INSTEAD OF` triggers
+   on views are a maintainable way to encode multi-statement write logic in SQLite at this
+   scale.** The gap itself is unchanged and is stated here for the record: the panel has no
+   operational experience of a codebase that leans on them heavily, and the failure modes
+   (debuggability, error messages, interaction with `defer_foreign_keys`, behavior under
+   `RETURNING`) are known to exist and not known in detail. **What changed is the recommendation
+   built on top of it.** Revision 2 said "adopt for one concrete case, evaluate, then generalize";
+   revision 4 says **do not adopt now at all** (§1.7.1, §2.7.3), keeping the transfer-both-sides
+   case as a *deferred* spike rather than a first adoption — because the owner's views-are-
+   read-only rule plus §2.7.2's type-system work make a writable view actively costly, and because
+   this very item's `RETURNING` unknown is one of the three arguments that carried the decision.
+   The gap therefore no longer blocks anything on the current path; it becomes live again only if
+   the spike is ever proposed. Explicitly *not* a reason to skip §1.7's other findings, which are
    independent of this one.
 
 3. **Nobody here can speak for the report recipient.** D-17's own panel flagged this and the owner
@@ -1328,10 +1845,38 @@ worked case.
   (§2.4) is formalized as the test-tier's first-class API for deliberately provoking a conflict to
   test that loop. This closes §4 item 2, which revision 2 had left open.
 - **New principle P-SQLITE** (§1.7): express behavior in SQLite where SQLite can express it —
-  `RETURNING`, `json_each` batches, views, `INSTEAD OF` triggers, `STRICT` tables, structured
-  `PRAGMA` introspection, `VACUUM INTO` backups — with an explicit, honest list of what cannot
-  close (no procedures, no roles or grants, no typed TVPs) and one case where the panel pushes back
-  on the principle itself (don't move the version-conflict check into a trigger).
+  `RETURNING`, `json_each` batches, views, `STRICT` tables, structured `PRAGMA` introspection,
+  `VACUUM INTO` backups — with an explicit, honest list of what cannot close (no procedures, no
+  roles or grants, no typed TVPs) and **two** cases where the panel pushes back on the principle
+  itself: don't move the version-conflict check into a trigger (§1.7.3), and don't make views
+  writable (§1.7.4's P-VIEW, new in revision 4).
+- **Test control gets three levels, not one (§2.6, revision 4).** `ResetSchema(N)` is the existing
+  `Schema_DropAll` + `Schema_ApplyTo(N)` nuke-and-pave, unchanged. Underneath it and *separate from
+  it* sits a data ladder — `ClearAllData()` → `ClearTables(subset)` → `DeleteRow`/`CaptureRow`/
+  `RestoreRow` and a `using`-scoped `RemoveRow` — that leaves every schema object, including
+  `__SchemaHistory`, untouched. Table-level clear is **not** a decomposition of the schema wipe
+  (they are two ladders; only the data one decomposes), the clear executor **derives** its table
+  set and FK delete order by introspection rather than carrying a hand-written list (issue #34's
+  lesson, applied where it would otherwise recur verbatim), and the whole surface sits below the
+  version check and below the object graph on purpose — it builds fixtures, it is not the thing
+  under test. Two concrete cross-engine traps are pinned by contract test: identity/rowid
+  reseeding after a clear, and a snapshot's schema version.
+- **Views are a read surface, and the business layer cannot write through one — structurally
+  (§2.7, revision 4).** Resetting needs no special view handling at the *data* level (a view holds
+  no rows), but `Schema_DropAll` must drop views before tables and `Schema_Verify` must include
+  them, view definitions never use `SELECT *` (it resolves at prepare time on SQLite and at create
+  time on SQL Server), and a view change is its own numbered step. The read/write asymmetry is
+  enforced by four stacked type-system properties rather than by documentation: separate
+  `IMoneyQuery`/`IMoneyStore` ports, query results marked `IProjection` and never `IAggregateRoot`
+  (so `SaveOne(row)` does not compile), projections carrying **no** `RowVersion` (so a stale
+  version cannot be smuggled from a report into a write), and the business layer never naming a
+  view at all. **`INSTEAD OF` triggers are demoted from revision 2's "adopt selectively" to "do
+  not adopt now"**, kept as a deferred single-candidate spike with a standing "never above
+  `IMoneyStore`" constraint, and enforced by a per-engine contract test asserting the schema owns
+  no `INSTEAD OF` trigger. One narrow confirmation is flagged back to the owner (§2.7.3): whether
+  the rule is "nothing ever writes through a view" or "the business layer never does" — the panel
+  recommends the latter as the rule and the former as the current state, and nothing waits on the
+  answer.
 - **Test subsystem**: `MyMoney.TestKit` as a true library (not a test project), four test tiers
   with a new Tier-0 architecture band, four layered enforcement mechanisms for the one-way
   dependency, and `RecordingStore`/`FaultInjectingStore` so the error path is testable from day
