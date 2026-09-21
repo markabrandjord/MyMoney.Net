@@ -1,9 +1,11 @@
 using System;
 using System.Data.SQLite;
 using System.Threading;
+using MyMoney.TestKit.Contracts;
 using Walkabout.Data;
 using Walkabout.Data.Sqlite;
 using Walkabout.Data.Sqlite.Provisioning;
+using Walkabout.Data.Sqlite.TestTier;
 
 // SqliteConnectionFactory is deliberately duplicated into both SQLite assemblies (spec section
 // 1's Recommendation, enforced by Task 22), so this project - which references both - has to say
@@ -55,8 +57,10 @@ namespace MyMoney.TestKit
                     provisioner.Connection,
                     new SqliteStoreOptions(displayName, SqliteConnectionFactory.InMemoryDataSource, isTestDatabase));
 
-                return new InMemorySqliteStore(
+                var fixture = new InMemorySqliteStore(
                     displayName, provisioner, store, SqliteMoneyQuery.OpenOver(provisioner.Connection));
+                fixture.TestControl = SqliteTestControlFactory.Acquire(provisioner);
+                return fixture;
             }
             catch
             {
@@ -74,6 +78,13 @@ namespace MyMoney.TestKit
         public IMoneyStore Store => this.store;
 
         public IMoneyQuery Query { get; }
+
+        /// <summary>
+        /// The fixture's test control, over the SAME connection - an in-memory database lives
+        /// exactly as long as its connection. Obtained through the guarded factory, so the fixture
+        /// exercises the same acquisition path a test author would.
+        /// </summary>
+        public IMoneyStoreTestControl TestControl { get; private set; }
 
         public void Dispose()
         {

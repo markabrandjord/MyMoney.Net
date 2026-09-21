@@ -23,5 +23,6 @@
     <ProjectReference Include="..\MyMoney.TestKit.Contracts\MyMoney.TestKit.Contracts.csproj" />
     <ProjectReference Include="..\MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj" />
     <ProjectReference Include="..\MyMoney.Data.Sqlite.Provisioning\MyMoney.Data.Sqlite.Provisioning.csproj" />
+    <ProjectReference Include="..\MyMoney.Data.Sqlite.TestTier\MyMoney.Data.Sqlite.TestTier.csproj" />
   </ItemGroup>
 </Project>

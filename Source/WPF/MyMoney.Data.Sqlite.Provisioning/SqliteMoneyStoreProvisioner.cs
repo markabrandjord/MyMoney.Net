@@ -201,7 +201,97 @@ namespace Walkabout.Data.Sqlite.Provisioning
             }
         }
 
-        public void DropAll() => throw new NotImplementedException("Task 18.");
+        /// <summary>
+        /// Drops every object this schema family owns, INCLUDING __SchemaHistory, so
+        /// CurrentVersion() returns 0 afterwards and the next ApplyTo(N) is literally
+        /// indistinguishable from creating a new database - spec section 1.5, S-1.
+        ///
+        /// Views before tables (required on SQL Server, done here for parity of the step list -
+        /// spec section 2.7.1), then triggers, then tables in reverse-FK order. Idempotent: every
+        /// statement is IF EXISTS and the object list is introspected each time. Task 21 puts
+        /// TestDatabaseGuard.Require at the top of this method.
+        /// </summary>
+        public void DropAll()
+        {
+            using (SQLiteTransaction tx = this.connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                try
+                {
+                    using (var cmd = new SQLiteCommand("PRAGMA defer_foreign_keys = ON;", this.connection, tx))
+                    {
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    foreach (string view in ObjectNames(this.connection, tx, "view"))
+                    {
+                        Execute(this.connection, tx, $"DROP VIEW IF EXISTS \"{Quote(view)}\";");
+                    }
+
+                    foreach (string trigger in ObjectNames(this.connection, tx, "trigger"))
+                    {
+                        Execute(this.connection, tx, $"DROP TRIGGER IF EXISTS \"{Quote(trigger)}\";");
+                    }
+
+                    foreach (string table in SqliteTableOrder.ForDelete(this.connection))
+                    {
+                        Execute(this.connection, tx, $"DROP TABLE IF EXISTS \"{Quote(table)}\";");
+                    }
+
+                    Execute(this.connection, tx, $"DROP TABLE IF EXISTS \"{SqliteTableOrder.HistoryTable}\";");
+
+                    tx.Commit();
+                }
+                catch
+                {
+                    tx.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        private static IReadOnlyList<string> ObjectNames(SQLiteConnection connection, SQLiteTransaction tx, string type)
+        {
+            var names = new List<string>();
+            using (var cmd = new SQLiteCommand(
+                "SELECT name FROM sqlite_master WHERE type = @type AND name NOT LIKE 'sqlite_%';",
+                connection, tx))
+            {
+                cmd.Parameters.AddWithValue("@type", type);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        names.Add(reader.GetString(0));
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        private static void Execute(SQLiteConnection connection, SQLiteTransaction tx, string sql)
+        {
+            using (var cmd = new SQLiteCommand(sql, connection, tx))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// An identifier cannot be parameterized in any SQL dialect, so interpolation is
+        /// unavoidable here. The names come from sqlite_master introspection, never from a caller,
+        /// and a name containing a double quote is rejected rather than escaped - global
+        /// constraint R-CRUD-1's identifier rule.
+        /// </summary>
+        private static string Quote(string identifier)
+        {
+            if (identifier.IndexOf('"') >= 0)
+            {
+                throw new InvalidOperationException($"Refusing to build SQL for the identifier {identifier}.");
+            }
+
+            return identifier;
+        }
 
         /// <summary>
         /// VACUUM INTO rather than close-and-File.Copy: it is transactionally consistent and does
