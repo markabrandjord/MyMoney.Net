@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <RootNamespace>Walkabout.Data.Sqlite</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!--
+      SHIPPED, and deliberately does NOT reference MyMoney.Data.Sqlite.Provisioning: the spec's
+      section 1 Recommendation rules out both a shared Common assembly and InternalsVisibleTo,
+      and accepts ~40 lines of connection-handling duplication instead. Task 22 enforces the
+      non-reference. This assembly must contain no DROP TABLE, no VACUUM INTO over an existing
+      file, and no DELETE FROM without a WHERE Id= - spec section 1, "How the SQLite facade gets
+      its teeth".
+    -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="System.Data.SQLite" Version="2.0.4" />
+  </ItemGroup>
+</Project>

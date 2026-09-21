@@ -47,6 +47,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Data.Sqlite.Provisi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Tests.Data", "MyMoney.Tests.Data\MyMoney.Tests.Data.csproj", "{8FB6F9E7-6CBC-40AB-84DD-478DBF142F31}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyMoney.Data.Sqlite", "MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj", "{1837D806-5342-4BC7-80CA-B4A3454B6B65}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -491,6 +493,30 @@ Global
 		{8FB6F9E7-6CBC-40AB-84DD-478DBF142F31}.Release|x64.Build.0 = Release|Any CPU
 		{8FB6F9E7-6CBC-40AB-84DD-478DBF142F31}.Release|x86.ActiveCfg = Release|Any CPU
 		{8FB6F9E7-6CBC-40AB-84DD-478DBF142F31}.Release|x86.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|ARM.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|ARM.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|x64.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Debug|x86.Build.0 = Debug|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|ARM.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|ARM.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|ARM64.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|x64.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|x64.Build.0 = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|x86.ActiveCfg = Release|Any CPU
+		{1837D806-5342-4BC7-80CA-B4A3454B6B65}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
