@@ -8224,7 +8224,7 @@ genuinely user-facing and were catalogued nowhere:
 4. **What a *failed* save leaves behind** — the part of P1-WHOLE-2 nobody had looked at,
    and the single most serious thing this phase found.
 
-So: 20 scenarios, not zero and not a hundred. The coverage checklist below marks the rest
+So: 22 scenarios, not zero and not a hundred. The coverage checklist below marks the rest
 "not user-facing", each with the concrete reason the code gave.
 
 ---
@@ -8394,6 +8394,33 @@ it before a copy. **See Open Question 16.**)*
 
 ---
 
+## 9.6 Keeping a shared server safe from what the running application can do to it
+
+### P9-GUARD-1 — The everyday connection to a shared server cannot reshape the books
+While the product is open and running against books kept on a shared server, its day-to-day
+connection can only read and write the records a user's normal work touches — it cannot
+create, alter or remove a table or an index, or otherwise change the shape of the stored
+data. Reshaping the data's structure is only ever possible through the separate,
+higher-privileged setup step used once when a server is first made ready.
+*(`SqlServerBootstrapper.BootstrapServerIfNeeded` granting `MyMoneyAdmin` the `dbcreator`
+server role and creating `MyMoneyUser`/`MyMoneyTest` with none;
+`SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql`, `MyMoney_CreateCatalog.sql` for the
+schema-capable admin path; `SqlScripts/Access/*_AccessProcs.sql`'s `GRANT EXECUTE` statements
+being the only rights `MyMoneyUser` ever receives, with no table- or index-level grant of any
+kind. Cross-references P9-SERVER-1 and P9-SERVER-2.)*
+
+### P9-GUARD-2 — A capability that can empty the books out entirely exists only on a copy marked disposable
+The product's ability to wipe a set of books back to empty is not something the day-to-day
+connection can reach on a real, working set of books at all — the routines that do it are
+absent from a server database unless that database was explicitly set up as a scratch copy.
+Generalizes P9-SERVER-4: it isn't that wiping is merely hidden or discouraged on real books,
+it is that nothing capable of it is ever installed there in the first place.
+*(`SqlServerBootstrapper.CreateCatalog`'s `testDatabase` branch, which is the only code path
+that ever deploys `SqlScripts/Test/*_TestProcs.sql`, and which `GRANT EXECUTE`s each
+`_Test_Reset` procedure to `MyMoneyTest` alone, never to `MyMoneyUser`)*
+
+---
+
 ## Coverage checklist
 
 ### The five storage engines
@@ -8448,8 +8475,8 @@ it before a copy. **See Open Question 16.**)*
 | `SqlScripts/Bootstrap/MyMoney_BootstrapServer.sql` | P9-SERVER-1, P9-SERVER-2 — creates or re-passwords the three logins, idempotently |
 | `SqlScripts/Bootstrap/MyMoney_CreateCatalog.sql` | P9-SERVER-3 — creates one catalog by name, with the catalog name quoted specifically against injection |
 | `SqlScripts/Migrations/2026-09-17-add-version-column.sql` | P9-SAVE-4 — adds the per-row version counter to the eleven aggregate-root tables. **See Open Question 23** |
-| `SqlScripts/Access/*_AccessProcs.sql` (16 files) | P9-SAVE-1, P9-SAVE-2, P9-SAVE-4 — the complete set of operations the day-to-day login is permitted. **Not user-facing individually**; their user-visible consequence is that a shared server cannot be damaged by the running application beyond these operations. **See Open Question 2** |
-| `SqlScripts/Test/*_TestProcs.sql` (11 files) | P9-SERVER-4 — the wholesale-wipe procedures, deployed only into a catalog flagged as a test database |
+| `SqlScripts/Access/*_AccessProcs.sql` (16 files) | P9-SAVE-1, P9-SAVE-2, P9-SAVE-4, **P9-GUARD-1** — the complete set of operations the day-to-day login is permitted, and (via `P9-GUARD-1`) now also has a first-class scenario for its user-visible consequence: a shared server cannot be damaged or reshaped by the running application beyond these operations. **See Open Question 2** |
+| `SqlScripts/Test/*_TestProcs.sql` (11 files) | P9-SERVER-4, **P9-GUARD-2** — the wholesale-wipe procedures, deployed only into a catalog flagged as a test database |
 
 ---
 
@@ -8733,7 +8760,7 @@ that, and the qualifier no longer applies anywhere in this catalog.
 
 | | |
 |---|---|
-| Scenarios | **811** across nine phases — 161 (core model), 70 (shell), 153 (views), 106 (dialogs), 90 (reports and charts), 71 (import/export), 41 (taxes), 99 (cross-cutting), 20 (data engine internals) |
+| Scenarios | **813** across nine phases — 161 (core model), 70 (shell), 153 (views), 106 (dialogs), 90 (reports and charts), 71 (import/export), 41 (taxes), 99 (cross-cutting), 22 (data engine internals) |
 | Open questions | **193** — judgement calls, boundary decisions and suspected defects a human should confirm |
 | Phases | 9 of 9 complete |
 
