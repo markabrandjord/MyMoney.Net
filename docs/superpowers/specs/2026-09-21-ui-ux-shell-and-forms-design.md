@@ -28,10 +28,12 @@ together here for the first time:
    `dialogs-forms` (D-13–D-15) clusters — 11 decisions, all now resolved by the owner (see
    below). The register lives on that branch, not yet merged to `master`.
 
-**Not folded in yet, and flagged rather than assumed (see "Open items" below):** the
-relationship between this spec and the *already in-progress* incremental WPF-UI migration
-(issue #42, PR #51, Phase 0+1 merged). Both use WPF-UI. Neither has been told how it relates
-to the other.
+**Resolved 2026-09-21:** this redesign runs *alongside* the already-in-progress incremental
+WPF-UI migration (issue #42, PR #51, Phase 0+1 merged), not in place of it, and is scoped to
+Accounts for now — the only aggregate Plan A's business layer implements. #42 keeps
+modernizing the rest of the existing app's controls; this spec's screens are new,
+MVVM-based, and coexist with both the legacy app and #42's work rather than replacing
+either. See "Open items" item 1.
 
 ## Validation: a throwaway demo, not shipped code
 
@@ -150,26 +152,28 @@ and `panel-review-03-navigation-crosscutting.md` on `docs/scenario-capture`. Sum
 Per this session's own "deviation-check" agreement: nothing below gets silently assumed
 into an implementation plan. Each needs a yes/no or a pick from you.
 
-1. **Does this redesign replace the in-progress incremental WPF-UI migration (#42, PR #51),
-   or run alongside it?** Asked earlier this session, not yet answered directly. Two live
-   options: (a) this redesign supersedes it — stop patching old views, retire them
-   screen-by-screen as MVVM replacements land; (b) it runs alongside, scoped only to
-   business-layer-backed screens (today: Accounts), while the rest of the app keeps getting
-   the incremental Fluent-control treatment until each area is replaced too.
-2. **MVVM toolkit**: confirm `CommunityToolkit.Mvvm`, or specify something else.
-3. **Project structure**: a new UI project (name TBD — not `MyMoney.csproj`, which Plan A's
-   rules leave untouched) hosting the first rebuilt screen(s), coexisting with the legacy
-   app until (1) determines how/whether it's retired — confirm this shape, since it follows
-   directly from whichever answer (1) gets.
+1. ~~Does this redesign replace the in-progress incremental WPF-UI migration (#42, PR #51),
+   or run alongside it?~~ **Resolved 2026-09-21 — runs alongside, scoped to Accounts for
+   now.** Option (b): this redesign is scoped to business-layer-backed screens only — today
+   that means Accounts, the only aggregate Plan A implemented. The rest of the app keeps
+   getting the incremental Fluent-control treatment via #42/PR #51 until each area has a
+   business-layer slice of its own and is rebuilt in turn. No retirement of the legacy app
+   is scheduled by this decision; it narrows this spec's immediate build target to one
+   screen.
+2. **MVVM toolkit**: confirm `CommunityToolkit.Mvvm`, or specify something else. Still open.
+3. **Project structure**: **follows directly from (1).** A new UI project (name TBD — not
+   `MyMoney.csproj`, which Plan A's rules leave untouched), hosting only the Accounts screen,
+   referencing `MyMoney.Business`. Coexists indefinitely with the legacy app and with #42's
+   incremental migration — not a staged replacement of either. Project name still open.
 4. **D-2** (`domain-model` cluster, still open in the register): "should domain objects
    carry view state at all?" — flagged by the panel as a direct constraint on D-8
    (navigation state) and D-11 (category totals). Worth resolving before those two get
-   implemented, not just designed.
+   implemented, not just designed. Still open.
 5. **Accessibility gap**, flagged by the panel itself on D-6, D-7 and D-15: no accessibility
    expertise reviewed the density-control removal, the theming/High-Contrast story, or the
    Window→`ContentDialog` conversion's screen-reader/focus-trapping behavior. Real gap, not
    a formality — worth deciding whether to get real accessibility input before or during
-   implementation.
+   implementation. Still open.
 
 ## Non-goals
 
