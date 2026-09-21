@@ -206,6 +206,27 @@ creation (§1.5 S-1), so there is nothing to retrofit when a production database
 was false from the start. §2.6.8 verifies the idempotency claim against the design rather than
 assuming it, and tightens one previously-implicit case (`DeleteRow` on an already-absent row).
 
+**Revision 10 (2026-09-20, same day).** A belated recording, not new work: the owner answered §4
+item 1 — *rebuild in place or in a parallel `Source/Rebuild/` tree* — early in this document's
+review process, before several of the intervening revisions, but the coordinating session at the
+time failed to dispatch the recording. This revision closes that gap now; nothing about the
+decision itself is new.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "In place." | §4 item 1 (now resolved, not open); §4.1 and the closing summary updated to match |
+
+**The outcome, in one line:** the rebuild happens **in place**, in the existing `Source/WPF/` tree
+— not in a parallel `Source/Rebuild/` tree. Revision 2's note on this item already stands: nuke-
+and-pave removed the strongest argument for a parallel tree (*"the existing database format must
+keep working while the new one is built"*), which materially de-risked the in-place choice without
+itself deciding it — that de-risking is why the decision was an easy one once made, not a
+justification invented after the fact. §7's assumption of *in place, incrementally* — already
+stated as an assumption throughout this document — is now the settled answer, not a placeholder.
+§5's slice plan needed no edit: every deliverable in the slice table is already named by assembly
+(`MyMoney.Data.Sqlite`, `MyMoney.TestKit`, etc.), not by a tree path, so it never hedged on this
+question in the first place.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -2551,11 +2572,16 @@ builders, since it is the same `query → model` shape.
 These are not things the panel is dodging — each is a product or appetite question that a
 technical panel cannot legitimately answer.
 
-1. **Does the rebuild happen in place, or in a parallel tree?** Replace `MyMoney.Data` and friends
-   incrementally with the app building and running throughout, or start `Source/Rebuild/` with the
-   current app frozen until the new stack catches up? This is the single biggest sequencing
-   decision and it trades "always shippable" against "one clean cut." Everything in §7 assumes
-   *in place, incrementally*; say so if that's wrong.
+1. ~~**Does the rebuild happen in place, or in a parallel tree?**~~ **Resolved — in place.** The
+   owner's decision, verbatim: **"In place."** The rebuild replaces `MyMoney.Data` and friends
+   incrementally, in the existing `Source/WPF/` tree, with the app building and running throughout
+   — not a parallel `Source/Rebuild/` tree with the current app frozen until the new stack catches
+   up. This was decided early in the review process, before several of the later revisions; it is
+   recorded here belatedly (revision 10), not newly decided. Revision 2's note on this item is the
+   relevant context for why the call was easy: nuke-and-pave had already removed the strongest
+   argument for a parallel tree (*"the existing database format must keep working while the new one
+   is built"*), materially de-risking the in-place option without itself deciding it. Everything in
+   §7 assumed *in place, incrementally*; that assumption is now the settled answer.
 
 2. ~~**Does the shipped SQLite path still need D-34's file lease?**~~ **Resolved in revision 3 —
    no.** D-37's downstream effects had said *"since SQL Server does not ship to end users, C (a
@@ -2664,7 +2690,7 @@ Today's guidance touches four of the seven. Stated explicitly, per the revision'
 
 | # | Status after revision 2 | Status after revision 3 |
 |---|---|---|
-| 1 — in place vs. parallel tree | **Reframed, and materially de-risked.** The strongest argument for a parallel tree was always *"the existing database format must keep working while the new one is built."* S-0 removes it: there is no data to preserve and no user to keep shippable for. That does not *decide* the question — build-breakage and reviewability arguments survive untouched — but it takes the scariest constraint off the table, and it strengthens §7's assumption of *in place, incrementally*. Still the owner's call. | Unchanged. |
+| 1 — in place vs. parallel tree | **Reframed, and materially de-risked.** The strongest argument for a parallel tree was always *"the existing database format must keep working while the new one is built."* S-0 removes it: there is no data to preserve and no user to keep shippable for. That does not *decide* the question — build-breakage and reviewability arguments survive untouched — but it takes the scariest constraint off the table, and it strengthens §7's assumption of *in place, incrementally*. Still the owner's call. *(Resolved by the owner, revision 10 — see below: in place.)* | Unchanged. |
 | 2 — SQLite file lease | Unchanged. Nothing today bears on it. | **Resolved — no lease, ever, on the shipped path.** See §4 item 2 and §1.6a. The owner's simultaneous human+AI-agent goal rules a lease out; version-checked concurrency with business-layer retry is the permanent model. |
 | 3 — SQL Server feature parity throughout | **Sharpened, and partly answered by implication.** "The process should be more or less the same on SQLite and SQL Server" is a parity requirement, but specifically about *schema management*, and it is a stronger claim than round 1's framing: §1.5's step list, ledger and verify semantics must be parity **from slice 2**, not caught up at a milestone, because a ledger that only one engine has is not a ledger. The question the owner still owns is narrower than round 1 posed it: **may `IMoneyQuery` and other read-side capabilities lag on SQL Server while schema management does not?** The panel's recommendation is yes — lag the query surface, never the schema surface. | Unchanged. |
 | 4 — does whole-graph `Load()` survive | Unchanged, and worth saying why, since it's easy to assume otherwise: nuke-and-pave makes *schema* change cheap; it says nothing about whether the in-memory `MyMoney` object graph remains the domain model. Still the biggest fork in the rebuild, still undecided, and §1 still works either way. | Unchanged. |
@@ -2766,6 +2792,18 @@ changes as a result: `DatabaseEntry.TestDatabase` was already the gate (§1.8, a
 database from its creation (§1.5 S-1), and §2.6.8 adds one explicit clause (`DeleteRow`'s
 no-op-on-missing-row behavior) rather than a new mechanism. This is a recording of a product/appetite
 decision, not new design work, consistent with revisions 3 and 7's resolutions of items #2 and #4.
+
+**Net after revision 10: item #1 moves from open to resolved by the owner**, which takes the
+original-seven-plus-#8 list down to **one still open** (#3). The owner's decision, verbatim: **"In
+place."** The rebuild happens in the existing `Source/WPF/` tree, incrementally, not in a parallel
+`Source/Rebuild/` tree. Unlike #8, this is not a new decision surfacing for the first time — it was
+given early in the review process, before several of the intervening revisions, and simply went
+unrecorded until now; revision 10 is that belated recording, not new design work. See §4 item 1 for
+the decision as recorded and revision 2's row above for the de-risking context (nuke-and-pave
+removing the "existing format must keep working" argument for a parallel tree) that made the call
+easy. Nothing in this design's shape changes as a result: §7 already assumed *in place,
+incrementally* throughout, and §5's slice plan was already assembly-named rather than tree-path-named,
+so neither needed an edit beyond this recording.
 
 ---
 
@@ -3201,9 +3239,14 @@ dependency revision 8 introduced — only a new consumer of one the document alr
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: of §4's original seven items plus new item #8, **six are now
-  resolved and two remain open** — #1 (rebuild in place vs. a parallel tree) and #3 (must SQL
-  Server stay at feature parity throughout?). Resolved by the owner, in order:
+- **Still the owner's to decide**: of §4's original seven items plus new item #8, **seven are now
+  resolved and one remains open** — #3 (must SQL Server stay at feature parity throughout?).
+  Resolved by the owner, in order:
+  - **#1** — rebuild in place, not in a parallel `Source/Rebuild/` tree (revision 10; §4 item 1).
+    A belated recording rather than a new decision: the owner gave this early in the review
+    process, before several of the intervening revisions; revision 2's note on nuke-and-pave
+    de-risking the in-place option (by removing the "existing format must keep working" argument
+    for a parallel tree) is the relevant context for why the call was easy.
   - **#2** — no file lease, ever, on the shipped path (revision 3; §1.6a).
   - **#4** — whole-graph `Load()` does not survive: *"The query-based pattern replaces the
     whole-graph-in-memory pattern everywhere"* (revision 7; §4 item 4). `IMoneyQuery` is now the
