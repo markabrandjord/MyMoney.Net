@@ -1,5 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!--
+      SHIPPED. This is a real application executable, so it opts in to Directory.Build.targets'
+      MYMONEY0001 check (spec section 2.5, layer 2) exactly like MyMoney.csproj,
+      MyMoney.Business.csproj and the two Data.Sqlite assemblies. Without this property the
+      build-time tier guard is inert for this project, which is how a ProjectReference to
+      MyMoney.TestKit (and, through it, MyMoney.Data.Sqlite.TestTier's unrestricted per-table
+      DELETE FROM code) sat in the shipped output directory unnoticed.
+    -->
+    <IsProductionAssembly>true</IsProductionAssembly>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows7.0</TargetFramework>
     <UseWPF>true</UseWPF>
@@ -14,6 +23,14 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
-    <ProjectReference Include="..\MyMoney.TestKit\MyMoney.TestKit.csproj" />
+    <!--
+      The SQLite store and its schema provisioner, referenced DIRECTLY. These used to arrive
+      transitively through MyMoney.TestKit (App.xaml.cs called InMemorySqliteStore.Create),
+      which also dragged MyMoney.Data.Sqlite.TestTier - the destructive per-table wipe
+      assembly - into this app's output directory. App.xaml.cs now does the same provision-
+      then-open sequence itself, without the test tier's SqliteTestControlFactory.Acquire.
+    -->
+    <ProjectReference Include="..\MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj" />
+    <ProjectReference Include="..\MyMoney.Data.Sqlite.Provisioning\MyMoney.Data.Sqlite.Provisioning.csproj" />
   </ItemGroup>
 </Project>
