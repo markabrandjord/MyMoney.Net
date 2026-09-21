@@ -32,8 +32,15 @@ public class ShellChromeFlaUiTests
         app.Close();
     }
 
+    // This only proves the click completes without error. Verifying the actual
+    // Primary/Secondary Appearance toggle needs either a second real route to navigate
+    // away-and-back through, or an in-process test harness with direct object access to
+    // read NavAccountsButton.Appearance - neither exists yet (FlaUI/UIA is out-of-process
+    // and can't read that live property the way an in-process test could), and there's
+    // only one route (Accounts) right now, so "became Primary" is indistinguishable from
+    // "already was Primary" from outside the process.
     [Test]
-    public void NavAccountsButton_BecomesPrimaryAppearanceWhenClicked()
+    public void NavAccountsButton_ClickInvokesNavigationWithoutError()
     {
         using var app = Application.Launch(ExePath);
         using var automation = new UIA3Automation();
