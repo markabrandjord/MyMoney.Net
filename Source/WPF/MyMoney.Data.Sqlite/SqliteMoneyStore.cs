@@ -87,7 +87,35 @@ namespace Walkabout.Data.Sqlite
         public override StoreIdentity Identity => new StoreIdentity(
             this.options.DisplayName, DbFlavor.Sqlite, this.options.IsTestDatabase, this.schemaVersion);
 
-        public override IReadOnlyList<Account> LoadAccounts() => throw new NotImplementedException("Task 15.");
+        /// <summary>
+        /// Returns AGGREGATE ROOTS - objects carrying RowVersion, which is what makes a later
+        /// version-checked write possible. This is the write-preparation read spec section 2.7.2
+        /// point 3 describes: "to write, you re-read the root through IMoneyStore, which hands you
+        /// the authoritative version." Reads that do not intend to write go through IMoneyQuery
+        /// and come back as projections instead.
+        ///
+        /// Each call builds its own Accounts container. With whole-graph Load() gone there is no
+        /// long-lived container to maintain; the container exists so every returned Account has a
+        /// non-null Parent, which CLAUDE.md records as a real source of NullReferenceException in
+        /// business-layer code that walks it.
+        /// </summary>
+        public override IReadOnlyList<Account> LoadAccounts()
+        {
+            var container = new Accounts((PersistentObject)null);
+            var accounts = new List<Account>();
+
+            using (var cmd = new SQLiteCommand(
+                $"SELECT {AccountRowCodec.Columns},Version FROM Accounts ORDER BY Id;", this.connection))
+            using (SQLiteDataReader reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    accounts.Add(AccountRowCodec.Read(reader, container));
+                }
+            }
+
+            return accounts;
+        }
 
         protected override void WriteRoots(IReadOnlyList<IAggregateRoot> roots)
         {
