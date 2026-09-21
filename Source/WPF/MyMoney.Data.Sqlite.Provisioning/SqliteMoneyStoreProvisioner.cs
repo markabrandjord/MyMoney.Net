@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SQLite;
 using System.Globalization;
 
@@ -119,7 +120,12 @@ namespace Walkabout.Data.Sqlite.Provisioning
                 // step 9 of 12 must leave the database at version 8, not at "version 0 but
                 // actually partly at 9" - spec section 1.5, S-3 rule 3. BEGIN IMMEDIATE takes the
                 // write lock up front rather than upgrading mid-transaction.
-                using (SQLiteTransaction tx = this.connection.BeginTransaction(deferredLock: false))
+                //
+                // IsolationLevel.Serializable is this provider's BEGIN IMMEDIATE (ReadCommitted is
+                // its BEGIN DEFERRED). The plan wrote BeginTransaction(deferredLock: false), which
+                // is the same thing but is marked [Obsolete] "will be removed soon" - and this
+                // repo builds warning-free.
+                using (SQLiteTransaction tx = this.connection.BeginTransaction(IsolationLevel.Serializable))
                 {
                     try
                     {
