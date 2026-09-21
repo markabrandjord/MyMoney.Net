@@ -1,0 +1,29 @@
+<Project>
+
+  <!--
+    Layer 2 of the four-layer one-way-dependency enforcement (spec section 2.5).
+
+    This is the layer that beats deadline pressure, because it fails at `dotnet build`, not at a
+    test run someone might skip. Spec section 6.3: "I just need BasicsFixtureBuilder from TestKit
+    in this one production class" is a real, recurring shortcut, and a test-run-time failure is
+    easy to ignore mid-task while a build failure is not. BOTH layers, not either.
+
+    Opt-IN via <IsProductionAssembly>true</IsProductionAssembly>, so this file is inert for every
+    existing project in the tree until that property is added.
+  -->
+  <Target Name="FailOnTestTierReference"
+          AfterTargets="ResolveAssemblyReferences"
+          Condition="'$(IsProductionAssembly)' == 'true'">
+
+    <ItemGroup>
+      <TestTierReference Include="@(ReferencePath)"
+                         Condition="$([System.String]::Copy('%(FileName)').Contains('TestKit')) Or
+                                    $([System.String]::Copy('%(FileName)').Contains('TestTier'))" />
+    </ItemGroup>
+
+    <Error Condition="'@(TestTierReference)' != ''"
+           Code="MYMONEY0001"
+           Text="$(MSBuildProjectName) is a production assembly and must not reference the test tier, but resolved: @(TestTierReference->'%(FileName)', ', '). If a test genuinely needs to reach something here, the tier boundary was drawn in the wrong place - move the boundary, do not punch through it (design spec section 6.2)." />
+  </Target>
+
+</Project>

@@ -1,1 +1,7 @@
 *.cs text eol=crlf
+
+# Schema steps are hashed (SchemaStep.ComputeChecksum) and the hash is recorded in
+# __SchemaHistory, so the bytes on disk must not depend on the checkout. core.autocrlf=true
+# would otherwise smudge these to CRLF and make the same step hash differently on two
+# machines - the same class of trap CLAUDE.md records for core.autocrlf + .gitattributes.
+*.sql text eol=lf
