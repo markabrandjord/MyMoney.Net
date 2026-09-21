@@ -124,11 +124,9 @@ and `panel-review-03-navigation-crosscutting.md` on `docs/scenario-capture`. Sum
   + `ControlsDictionary` resources, `ApplicationThemeManager`/`SystemThemeWatcher` for D-7).
   Same package/version already adopted by the in-progress migration (issue #42) — not a
   second choice competing with it.
-- **MVVM** — not yet a ratified decision (see "Open items"); this spec's working assumption
-  is `CommunityToolkit.Mvvm` (source-generator based, Microsoft-maintained, the pairing
-  WPF-UI's own samples use) over hand-rolled `ICommand`/`INotifyPropertyChanged`, since a
-  from-scratch rebuild is exactly the point at which adopting a real MVVM toolkit costs the
-  least.
+- **MVVM**: `CommunityToolkit.Mvvm` (resolved 2026-09-21 — see "Open items" item 2),
+  source-generator based (`[ObservableProperty]`/`[RelayCommand]`), no forced DI container
+  or navigation framework.
 - **Data access**: view models call `MyMoney.Business` services (e.g. `AddAccountService`
   from Plan A), never `IMoneyStore`/`IMoneyQuery` directly and never the legacy
   `Database/Money.cs` object graph. A screen whose aggregate doesn't exist yet in the
@@ -160,7 +158,14 @@ into an implementation plan. Each needs a yes/no or a pick from you.
    business-layer slice of its own and is rebuilt in turn. No retirement of the legacy app
    is scheduled by this decision; it narrows this spec's immediate build target to one
    screen.
-2. **MVVM toolkit**: confirm `CommunityToolkit.Mvvm`, or specify something else. Still open.
+2. ~~MVVM toolkit: confirm `CommunityToolkit.Mvvm`, or specify something else.~~ **Resolved
+   2026-09-21 — `CommunityToolkit.Mvvm`.** Microsoft-maintained, source-generator based
+   (`[ObservableProperty]`/`[RelayCommand]`), no forced DI container or navigation
+   framework, matches WPF-UI's own sample/gallery patterns. Rejected: hand-rolled (would
+   recreate the non-standard-plumbing problem this redesign exists to escape), Prism
+   (module/region machinery this single-app project doesn't need, and a licensing-risk
+   history worth avoiding for a hobby project), ReactiveUI (steep learning curve and
+   reactive-chain risk disproportionate to mostly-simple CRUD forms).
 3. **Project structure**: **follows directly from (1).** A new UI project (name TBD — not
    `MyMoney.csproj`, which Plan A's rules leave untouched), hosting only the Accounts screen,
    referencing `MyMoney.Business`. Coexists indefinitely with the legacy app and with #42's
