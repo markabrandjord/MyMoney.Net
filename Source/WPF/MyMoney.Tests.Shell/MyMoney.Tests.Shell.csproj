@@ -14,5 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MyMoney.Shell\MyMoney.Shell.csproj" />
+    <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
+    <ProjectReference Include="..\MyMoney.TestKit\MyMoney.TestKit.csproj" />
   </ItemGroup>
 </Project>
