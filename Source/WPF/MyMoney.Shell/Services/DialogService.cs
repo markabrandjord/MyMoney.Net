@@ -11,9 +11,15 @@ namespace MyMoney.Shell.Services;
 // second one. D-13: this service does not touch the caller's data at all; cancel-restores
 // is the caller's editing-scope responsibility (Task 9), this service only reports which
 // button was pressed.
-public sealed class DialogService : IDialogService
+//
+// Not sealed: DisplayAsync below is a protected testing seam (see DialogServiceTests'
+// ControllableDialogService) so the "one dialog at a time" guard can be exercised without a
+// real ContentDialog, which needs a live visual tree and user interaction to ever complete
+// ShowAsync().
+public class DialogService : IDialogService
 {
     private ContentPresenter? host;
+    private bool isShowing;
 
     public void SetHost(ContentPresenter presenter)
     {
@@ -35,26 +41,44 @@ public sealed class DialogService : IDialogService
                 "DialogService has no host. Call SetHost from the shell window before showing a dialog.");
         }
 
-        var dialog = new ContentDialog
+        if (this.isShowing)
         {
-            Title = title,
-            Content = content,
-            PrimaryButtonText = primaryButtonText,
-            CloseButtonText = "Cancel",
+            throw new InvalidOperationException(
+                "A dialog is already being shown. DialogService only supports one dialog at a time.");
+        }
+
+        this.isShowing = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = title,
+                Content = content,
+                PrimaryButtonText = primaryButtonText,
+                CloseButtonText = "Cancel",
 #pragma warning disable CS0618 // ContentDialog.DialogHost(ContentPresenter) is WPF-UI 4.3.0's deprecated
-                               // "legacy host" property/constructor overload, superseded by
-                               // ContentDialogHost. The plan intentionally uses the ContentPresenter
-                               // shape here (SetHost's signature, see brief's Step 3) rather than
-                               // adopting ContentDialogHost, which is a bigger XAML/API surface change
-                               // out of scope for this task.
-            DialogHost = this.host,
+                                // "legacy host" property/constructor overload, superseded by
+                                // ContentDialogHost. The plan intentionally uses the ContentPresenter
+                                // shape here (SetHost's signature, see brief's Step 3) rather than
+                                // adopting ContentDialogHost, which is a bigger XAML/API surface change
+                                // out of scope for this task.
+                DialogHost = this.host,
 #pragma warning restore CS0618
-        };
+            };
 
-        var result = await dialog.ShowAsync();
+            var result = await this.DisplayAsync(dialog);
 
-        return result == ContentDialogResult.Primary
-            ? DialogOutcome.Committed
-            : DialogOutcome.Cancelled;
+            return result == ContentDialogResult.Primary
+                ? DialogOutcome.Committed
+                : DialogOutcome.Cancelled;
+        }
+        finally
+        {
+            this.isShowing = false;
+        }
     }
+
+    // Testing seam: overridden by a test double so tests can control exactly when a "shown"
+    // dialog completes, without needing a real ContentDialog inside a live visual tree.
+    protected virtual Task<ContentDialogResult> DisplayAsync(ContentDialog dialog) => dialog.ShowAsync();
 }
