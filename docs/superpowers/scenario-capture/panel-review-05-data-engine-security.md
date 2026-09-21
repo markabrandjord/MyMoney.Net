@@ -680,6 +680,40 @@ portfolio — is D-37's, and the floor above applies to it either way.
 D-37. SQL Server is in the portfolio as a developer-only configuration, physically isolated
 into its own DLL per the owner's directive; the floor above applies to it unchanged.
 
+## Owner guidance
+
+Follow-up guidance from the owner, given after the D-37 decision above, in the owner's own
+words:
+
+> It might make the most sense to start rebuilding the new system by building the data layer
+> DLLs, as well as the app and business layers of the test subsystem first. That way we can
+> ensure that we have the test processes to drive the happy path and the error path of the data
+> layer. An installation will be either SQLite, or it will be SqlServer, and if we were to
+> consider an alternative db, it would be exclusively that. The brainstorming of the data layer
+> design should consider where common control logic and import/export and reporting output logic
+> should live. Other than that, I leave it to you.
+
+**Implementation-sequencing guidance, for the future implementation plan.** When redesign
+implementation actually begins, the data-layer DLLs and the test-subsystem infrastructure for
+the app and business layers should be built first, ahead of other work — specifically so
+working test processes exercising both the happy path and the error path of the data layer
+exist from the start, rather than being added after the fact.
+
+**Single-engine-per-installation constraint — reinforces and sharpens D-37's DLL-separation
+directive.** Any single installation of the product runs exactly one storage engine: SQLite or
+SQL Server, never both, and never a runtime choice between them within one running instance. If
+an additional alternative engine is ever added in the future, it too would be an exclusive
+per-installation choice, not a third option alongside a hybrid. Where D-37's directive
+established that the SQL Server and SQLite engines must be physically separable into different
+DLLs, this sharpens that to: a given deployed installation only ever has one of them
+present/active at all.
+
+**Open question — unresolved, explicitly deferred to the future data-layer design session.**
+Where should common control logic, import/export logic, and reporting-output logic live in the
+new architecture — the data layer, the business layer, or somewhere else? The owner has flagged
+this as something that future design/brainstorming work on the data layer needs to address; it
+is not answered here.
+
 ---
 
 ## D-36 — Auto-heal integrity errors, surface them, or keep ignoring them?
