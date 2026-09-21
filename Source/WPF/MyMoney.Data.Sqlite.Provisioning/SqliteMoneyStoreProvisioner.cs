@@ -206,9 +206,42 @@ namespace Walkabout.Data.Sqlite.Provisioning
             }
         }
 
+        /// <summary>
+        /// Spec section 1.5, S-3 rule 1: a step is never edited once it has been applied
+        /// ANYWHERE. This is the detection that makes that rule observable. It is on from the
+        /// first commit rather than "when it matters", because under nuke-and-pave (section 6.7)
+        /// breaking the rule is free and invisible, so it is the first rule to erode - and
+        /// turning the check on later means turning it on against a corpus of steps nobody was
+        /// disciplined about.
+        /// </summary>
         private void VerifyNoDriftInAppliedSteps()
         {
-            // Body arrives in Task 7.
+            var known = new Dictionary<int, SchemaStep>();
+            foreach (SchemaStep step in SchemaStepCatalog.All)
+            {
+                known[step.Version] = step;
+            }
+
+            foreach (AppliedStep applied in this.AppliedSteps())
+            {
+                if (!known.TryGetValue(applied.Version, out SchemaStep step))
+                {
+                    throw new SchemaDriftException(
+                        $"'{this.options.DisplayName}' records schema step {applied.Version} "
+                        + $"('{applied.StepName}'), which this build does not carry. This database was "
+                        + $"paved by a newer build; this one knows steps 1..{SchemaStepCatalog.LatestVersion}.");
+                }
+
+                if (!string.Equals(applied.ChecksumHash, step.ChecksumHash, StringComparison.Ordinal))
+                {
+                    throw new SchemaDriftException(
+                        $"Schema step {applied.Version} ('{step.Name}') has been edited since it was "
+                        + $"applied to '{this.options.DisplayName}' on {applied.AppliedUtc} by "
+                        + $"{applied.AppliedBy}. An applied step is immutable - a mistake in it is "
+                        + "fixed by a new step, never by editing it, or every database that already "
+                        + "ran it silently disagrees with every database that has not.");
+                }
+            }
         }
     }
 }
