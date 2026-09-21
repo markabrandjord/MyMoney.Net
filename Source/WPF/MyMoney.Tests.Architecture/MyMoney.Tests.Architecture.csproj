@@ -18,5 +18,6 @@
     <!-- This is the ONE test project allowed to reference the WPF UI project (Task 22 adds it),
          because inspecting production assemblies is its job. -->
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
+    <ProjectReference Include="..\MyMoney.TestKit.Contracts\MyMoney.TestKit.Contracts.csproj" />
   </ItemGroup>
 </Project>
