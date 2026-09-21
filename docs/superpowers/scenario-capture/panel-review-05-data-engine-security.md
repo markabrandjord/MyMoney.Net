@@ -214,6 +214,10 @@ own initiative, because B's cost is entirely a consequence of D-37, not of this 
 ever appears in `File ▸ New`. Whether a *place* choice exists at all is not this panel's call
 and is flagged under D-37.
 
+**Resolved via the D-37 owner decision** — see "Owner decision" under D-37. SQL Server is
+developer/DEBUG-only, so no place choice is surfaced to end users; this alternative-A
+recommendation stands as written.
+
 ---
 
 ## D-33 — Is there a power-user data surface, and what is it?
@@ -516,6 +520,11 @@ with no second copy anywhere — and it must not be allowed to wait on this deci
 books at the same time' a promise this product makes?" That is a product-scope call the panel
 cannot make, it is tightly coupled to D-37, and the panel genuinely split on it.
 
+**Resolved via the D-37 owner decision** — see "Owner decision" under D-37. SQL Server is
+developer-only, so alternative C (a file lease) is what the shipped SQLite path needs; A+B
+remains the target specifically for the developer-only SQL Server engine, not a shipped-product
+requirement.
+
 ---
 
 ## D-35 — Which storage engines does the redesign keep, and what must each do?
@@ -666,6 +675,10 @@ is currently the weakest item in it.
 
 **No.** The panel is confident. The only variable — whether the server store is in the
 portfolio — is D-37's, and the floor above applies to it either way.
+
+**That variable is now resolved via the D-37 owner decision** — see "Owner decision" under
+D-37. SQL Server is in the portfolio as a developer-only configuration, physically isolated
+into its own DLL per the owner's directive; the floor above applies to it unchanged.
 
 ---
 
@@ -960,6 +973,63 @@ acceptable answer and the product should actively warn against it.
 change shape depending on it. It is not a technical question: it is "is this a single-user
 product?"
 
+## Owner decision
+
+**Ratified: developer/DEBUG-only (Alternative A).** SQL Server is not a shipped configuration.
+It remains a developer and testing engine, available in DEBUG builds, and is not exposed to
+end users in a release build.
+
+**In the owner's own words:**
+
+> Right now I am the only one interested in SQL Server. I think it will be useful enabling
+> multi-user scenarios in the future, and enabling AI agents to be running in parallel with me.
+> But the people on the repository that I subscribed to 'MoneyTools' are more interested in the
+> ease of use of a single user scenario. So for now this is a developer, DEBUG release only
+> feature. This feature could be disabled by conditional compile directives, and having the SQL
+> Server and the SQLite engines in different DLLs in the data layer.
+
+**Architectural directive beyond the panel's proposal.** Alternative A as the panel wrote it
+leaned on `#if DEBUG` guards and deleting user-facing traces from the release build. The owner
+is requiring something stronger: **physical separation** of the SQL Server engine and the
+SQLite engine into different DLLs within the data layer, so the SQL Server engine can be
+excluded from a release build or deployment outright — not merely conditionally compiled
+inline. `#if DEBUG` alone is not sufficient; the released assembly set should not contain the
+SQL Server engine at all.
+
+The owner's stated reason for keeping the SQL Server engine alive at all, rather than deleting
+it, is to leave the door open for future multi-user scenarios and for running AI agents in
+parallel with the owner themselves. That framing is why D-34's more thorough concurrency work
+(alternative A+B) still has a home — as the target for the SQL Server engine specifically, not
+as a near-term requirement of the shipped product.
+
+**Downstream effects:**
+
+- **D-32 (engine choice for the user).** Holds as the panel recommended: alternative A, no
+  engine choice ever surfaced to end users. `File ▸ New` asks no engine question in any build
+  configuration; the debug engine submenu stays debug-only — and, per the DLL-separation
+  directive, becomes physically absent from a release build rather than merely hidden.
+- **D-34 (concurrency guarantee scope).** The panel's recommendation was conditional — "A+B if
+  SQL Server ships, otherwise C, a file lease." Since SQL Server does not ship to end users,
+  **C (a file lease) is what the shipped SQLite path needs.** The more thorough A+B
+  (a version-checked batch save path, aggregate-root-level concurrency granularity) can still
+  be the target specifically for the SQL Server engine, in service of the owner's stated future
+  multi-user/parallel-agent goal — but it is now explicitly a developer-configuration concern,
+  not a blocking requirement for the redesign's default shipped path. (The #58
+  lost-edit-on-failed-commit defect remains a must-fix regardless, as the panel already noted.)
+- **D-35 (which engines survive).** SQLite is confirmed as the shipped floor. SQL Server
+  survives as a developer-only configuration, physically isolated per the DLL-separation
+  directive above.
+- **D-38 (which SQL Server engine is the real one).** Unchanged recommendation — the
+  stored-procedure engine (alternative A) — now clearly scoped as developer/future-multi-user
+  tooling rather than a near-term shipping concern; its priority drops accordingly, as the
+  panel already anticipated.
+
+This reframes the panel's own "can two people in my household use this at once?" question
+raised earlier in this section: it is not a near-term shipped-product requirement. It is
+explicitly one of the multi-user/parallel-agent futures the owner is deliberately keeping the
+door open for via a physically separable engine, not a load-bearing feature of the default
+product.
+
 ---
 
 ## D-38 — Which SQL Server engine is the real one?
@@ -1101,6 +1171,10 @@ base-class extraction, because that refactor touches SQLite.
 ### Needs-your-decision flag
 
 **No.** Confident and unanimous. The only variable is priority, which follows D-37.
+
+**That variable is now resolved via the D-37 owner decision** — see "Owner decision" under
+D-37. SQL Server is developer-only, so this recommendation drops to cleanup priority rather
+than a near-term security fix.
 
 ---
 
