@@ -19,5 +19,7 @@
          because inspecting production assemblies is its job. -->
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.TestKit.Contracts\MyMoney.TestKit.Contracts.csproj" />
+    <ProjectReference Include="..\MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj" />
+    <ProjectReference Include="..\MyMoney.Data.Sqlite.Provisioning\MyMoney.Data.Sqlite.Provisioning.csproj" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 using System;
 using MyMoney.TestKit.Contracts;
+using Walkabout.Data;
 using Walkabout.Data.Sqlite.Provisioning;
 
 namespace Walkabout.Data.Sqlite.TestTier
@@ -22,7 +23,7 @@ namespace Walkabout.Data.Sqlite.TestTier
                 throw new ArgumentNullException(nameof(provisioner));
             }
 
-            // Task 21 inserts TestDatabaseGuard.Require(provisioner.Identity, "Test control") here.
+            TestDatabaseGuard.Require(provisioner.Identity, "Test control (schema, data and row reset)");
             return new SqliteMoneyStoreTestControl(provisioner);
         }
     }

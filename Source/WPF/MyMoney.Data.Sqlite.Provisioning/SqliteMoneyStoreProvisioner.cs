@@ -213,6 +213,9 @@ namespace Walkabout.Data.Sqlite.Provisioning
         /// </summary>
         public void DropAll()
         {
+            // FIRST statement, so a refusal leaves nothing partially done.
+            TestDatabaseGuard.Require(this.Identity, "Drop the whole schema");
+
             using (SQLiteTransaction tx = this.connection.BeginTransaction(IsolationLevel.Serializable))
             {
                 try
@@ -325,6 +328,9 @@ namespace Walkabout.Data.Sqlite.Provisioning
 
         public void Delete()
         {
+            // FIRST statement, so a refusal leaves nothing partially done.
+            TestDatabaseGuard.Require(this.Identity, "Delete the database");
+
             string dataSource = this.options.DataSource;
             this.connection.Close();
 
