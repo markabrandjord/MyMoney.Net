@@ -165,8 +165,35 @@ namespace Walkabout.Data.Sqlite.Provisioning
             }
         }
 
-        // Verify, DropAll, Backup and Delete arrive in Tasks 8, 18, 9 and 9.
-        public SchemaVerifyResult Verify() => throw new NotImplementedException("Task 8.");
+        // DropAll, Backup and Delete arrive in Tasks 18, 9 and 9.
+
+        /// <summary>
+        /// The expected object set is NOT a hand-maintained list. It is produced by paving a
+        /// scratch :memory: database to this database's current version with the very same
+        /// executor, then introspecting that. Hand-list-free by construction (issue #34's lesson,
+        /// spec section 2.6.4), identical to the comparison slice 2b's equality test performs, and
+        /// cheap enough to be an assertion rather than a ritual - a :memory: pave is DDL against
+        /// an empty page cache with no fsync and no journal (spec section 2.4).
+        /// </summary>
+        public SchemaVerifyResult Verify()
+        {
+            int version = this.CurrentVersion();
+            SchemaSnapshot actual = SchemaSnapshot.Capture(this.connection);
+            SchemaSnapshot expected = CaptureExpected(version);
+
+            return new SchemaVerifyResult(version, SchemaSnapshot.Diff(expected, actual));
+        }
+
+        /// <summary>Pave a throwaway in-memory database to <paramref name="version"/> and introspect it.</summary>
+        public static SchemaSnapshot CaptureExpected(int version)
+        {
+            using (var scratch = Open(new SqliteProvisioningOptions(
+                "<expected>", SqliteConnectionFactory.InMemoryDataSource, true)))
+            {
+                scratch.ApplyTo(version);
+                return SchemaSnapshot.Capture(scratch.Connection);
+            }
+        }
 
         public void DropAll() => throw new NotImplementedException("Task 18.");
 
