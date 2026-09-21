@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using MyMoney.Shell.Services;
 using MyMoney.Shell.ViewModels;
 using MyMoney.Shell.Views;
+using Walkabout.Business.AppServices;
 using Walkabout.Data;
 using Wpf.Ui.Appearance;
 using Wpf.Ui.Controls;
@@ -15,17 +16,21 @@ public partial class MainWindow : FluentWindow
     private readonly IThemeService themeService;
     private readonly IStatusService statusService;
     private readonly INavigationService navigationService;
+    private readonly IDialogService dialogService;
     private readonly IMoneyQuery query;
+    private readonly AddAccountService addAccountService;
 
     public MainWindow(IThemeService themeService, IStatusService statusService,
-        INavigationService navigationService, IDialogService dialogService, IMoneyQuery query)
+        INavigationService navigationService, IDialogService dialogService, IMoneyQuery query, IMoneyStore store)
     {
         InitializeComponent();
 
         this.themeService = themeService;
         this.statusService = statusService;
         this.navigationService = navigationService;
+        this.dialogService = dialogService;
         this.query = query;
+        this.addAccountService = new AddAccountService(store, query);
 
         this.statusService.Changed += this.OnStatusChanged;
         this.RefreshStatus();
@@ -44,7 +49,7 @@ public partial class MainWindow : FluentWindow
             if (route == RouteId.Accounts)
             {
                 var viewModel = new AccountsListViewModel(this.query);
-                this.ContentHost.Content = new AccountsView(viewModel);
+                this.ContentHost.Content = new AccountsView(viewModel, this.dialogService, this.addAccountService);
                 viewModel.LoadCommand.Execute(null);
             }
         };

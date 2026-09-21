@@ -2,10 +2,18 @@
 <UserControl x:Class="MyMoney.Shell.Views.AccountsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              AutomationProperties.AutomationId="AccountsPage">
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <ui:Button x:Name="AddAccountButton" AutomationProperties.AutomationId="AddAccountButton"
+                   Grid.Row="0" Content="+ Add Account" Appearance="Primary"
+                   HorizontalAlignment="Left" Margin="0,0,0,8" Click="AddAccountButton_Click"/>
         <ListView x:Name="AccountsListView" AutomationProperties.AutomationId="AccountsListView"
-                  ItemsSource="{Binding Accounts}">
+                  Grid.Row="1" ItemsSource="{Binding Accounts}">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="200"/>

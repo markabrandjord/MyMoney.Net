@@ -25,6 +25,6 @@ public partial class App : Application
         // concern worth its own design pass rather than a MainWindow constructor detail.
         var fixture = MyMoney.TestKit.InMemorySqliteStore.Create(isTestDatabase: true);
 
-        new MainWindow(themeService, statusService, navigationService, dialogService, fixture.Query).Show();
+        new MainWindow(themeService, statusService, navigationService, dialogService, fixture.Query, fixture.Store).Show();
     }
 }
