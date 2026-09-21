@@ -403,11 +403,30 @@ with C as a staging post, rather than C as the destination. The panel did not re
 this and it does not need resolving now — C is the next move either way, and whether a
 full view-model layer follows is a question best answered after C exists.
 
+### Owner decision
+
+**Resolved 2026-09-21.** The owner accepted the panel's recommended sequence in full:
+**Alternative C** (view state moves to a per-view, identity-keyed side table; the domain
+model carries no view members) as the redesign's target, plus **fixing the current
+`ChangeTracker` bug immediately**, independent of the redesign timeline. The owner also
+worked through a concrete browsing/editing scenario (walk accounts next/previous, edit the
+current one) to confirm the boundary: temporary/screen state belongs entirely to the
+UI/ViewModel layer; the business and data layers stay stateless per call and never held
+any view state to begin with — C's side-table pattern applies only to the domain model, not
+to every architectural layer.
+
+The step-1 bug fix (move `Category.IsEditing`/`Security.IsExpanded` to
+`OnTransientChanged`; stop `ChangeTracker.OnMoneyChanged` from registering a `ChangeList`
+entry for `None`/`TransientChanged`) is accepted as its own near-term piece of work,
+separate from and not blocked on the UI/UX redesign.
+
 ### Needs your decision?
 
-**No.** The panel is confident. Step 1 is an uncontroversial bug fix with a user-visible
-benefit and no data impact; step 2 is the cheapest design that removes the class of
-problem.
+**Resolved 2026-09-21 — see "Owner decision" above.**
+
+Original flag, kept for context: No. The panel is confident. Step 1 is an uncontroversial
+bug fix with a user-visible benefit and no data impact; step 2 is the cheapest design that
+removes the class of problem.
 
 ---
 
@@ -1542,7 +1561,7 @@ convention above is offered as ready to adopt.
 | # | Decision | Panel's recommendation | Needs your decision? |
 |---|---|---|---|
 | D-1 | Envelope budgeting / category funds | **A** — leave it out, with a deliberate migration; **C (funds-as-accounts) ruled out unconditionally**; if envelopes ever ship, **B** as a virtual allocation ledger (probably framed as savings goals) | **Resolved** — deferred as a future feature, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-1's "Owner decision" |
-| D-2 | View state on domain objects | **A now, C as the target** — fix the change-tracker and move two properties to the transient path immediately; in the redesign, view state moves to an identity-keyed side table. **B (full view-model layer) rejected on cost** | No |
+| D-2 | View state on domain objects | **A now, C as the target** — fix the change-tracker and move two properties to the transient path immediately; in the redesign, view state moves to an identity-keyed side table. **B (full view-model layer) rejected on cost** | **Resolved** — owner accepted A+C in full, bug fix scheduled independently of the redesign; see D-2's "Owner decision" |
 | D-3 | Budgeting grain | **C** — no "budgeted" flag at all; a stored plan plus derived actuals. Delete the dead plumbing regardless. Keep exclusion as an explicit feature | **Resolved** — deferred jointly with D-1, tracked in [#69](https://github.com/markabrandjord/MyMoney.Net/issues/69); see D-3's "Owner decision" |
 | D-4 | Currency model | **A's fixes behind a dated conversion seam** — fix the conversion cache and the short-circuit, declare the convention, make the source configurable. **B rejected**; **C** named as the shape only if multi-currency becomes real | **Resolved** — minimal/best-effort, tracked in [#70](https://github.com/markabrandjord/MyMoney.Net/issues/70); see D-4's "Owner decision" |
 | D-28 | Sales with no cost basis | **B as destination, C as interim, A opt-in only** — ship the flag fix now with tests, never silently drop a sale, build user-supplied opening lots | **Partly** — prioritisation of opening lots |
