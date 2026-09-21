@@ -177,6 +177,35 @@ the flag it reads is carried on the open store handle (`StoreIdentity.IsTestData
 re-fetched from config at the call site, so the guard reads the flag off the same object the writes
 go to. Reasoning, the three layers of what a user actually sees, and the honest crack, in §1.9.
 
+**Revision 9 (2026-09-20, same day).** A recording revision, not a design one: the owner resolved
+§4 item 8 — *when does the nuke-and-pave phase end, and what is the trigger* — in a way that
+dissolves the question as the panel originally framed it, rather than answering it on the panel's
+own terms.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "If a db is a test db, it is always a test db. If it is not, it never is a test db. You get to set that attribute at create time, and it remains as long as the db remains. When the test routine calls a SP that clears the part of the db that it needs to resume testing, when that SP completes, nuke and pave is over. The[se] routines should be idempotent." | §4 item 8 (now resolved, not open); §1.5 S-0 gets a clarifying cross-reference; new §2.6.8 states and checks the idempotency property; §4.1, §6.7 and the closing summary are updated to match |
+
+**The outcome, in one line:** there is no single project-wide moment to name, because the question
+was never really about the *project* — it is about the *database*, and `DatabaseEntry.TestDatabase`
+is a permanent attribute fixed at that database's creation, not a phase any database passes through.
+A database created as test can always be reset; a database created as production never could be,
+from the instant it existed. This is the exact same permanent, per-database flag revision 8's §1.9
+already built `StoreIdentity.IsTestDatabase` and `TestDatabaseGuard` around for sample data — this
+revision is the recording that the flag's permanence is not just an implementation convenience,
+it is the entire answer to "when does nuke-and-pave end." "Nuke and pave is over" describes what
+happens every time a test-reset routine (§2.6's `ClearAllData`/`ClearTables`/`ClearTable`/
+`ResetSchema`, already designed in revision 4) *finishes running* — a routine, repeated event during
+testing, not a one-time milestone — which is exactly why the owner's second sentence, that these
+routines must be idempotent, is load-bearing rather than a side remark: idempotency is what makes
+"nuke and pave is over" true after *every* call, not just the first. This also closes the panel's
+original underlying worry about compatibility properties being hard to retrofit: every database,
+test or production, goes through the same versioned `Schema_ApplyTo` machinery from its first
+creation (§1.5 S-1), so there is nothing to retrofit when a production database eventually appears
+— it was never a test database that "graduated," it is simply a database whose `TestDatabase` flag
+was false from the start. §2.6.8 verifies the idempotency claim against the design rather than
+assuming it, and tightens one previously-implicit case (`DeleteRow` on an already-absent row).
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -501,6 +530,17 @@ This is an explicit, time-boxed decision, not a permanent property, and §1.8 st
 become true before it expires. The panel accepts it — it is the correct trade for this phase, and
 pretending otherwise would buy migration ceremony with no data behind it. §6.7 names the one risk
 it does create.
+
+**Revision 9 sharpens this rather than changing it (§4 item 8).** "Time-boxed" is true of *this
+project's current databases*, which all happen to be test databases today, but it is not a clock
+running against the project as a whole. The real boundary is per-database and permanent:
+`DatabaseEntry.TestDatabase` is set once, at that database's creation, and never changes for as
+long as the database exists — the same flag revision 8's §1.9 reads as `StoreIdentity.IsTestDatabase`
+to guard sample data. A database created as test can always be nuked and paved; a database created
+as production never could be, from the moment it was created. There is no future instant at which
+*today's* test databases stop being nukeable — they don't graduate; a later, separately-created
+production database simply never has the capability reachable at all. See §4 item 8 for the full
+reasoning and §2.6.8 for the idempotency property this resolution depends on.
 
 ### S-1. The unified mechanism
 
@@ -1366,6 +1406,11 @@ Two further notes, flagged rather than designed:
   > second and is not destructive at all — so a reader who stops at the word "destructive" would
   > wrongly conclude it is out of the guard's scope. It is not, and §1.9 is why. The mechanism is
   > unchanged; only the sentence describing what it covers is.
+
+  > **Revision 9 promotes this same permanence from a note to the actual resolution of §4 item 8.**
+  > The flag's "set once at creation, never changed" property is not just an implementation detail
+  > supporting the future upgrade workflow or a scope-widening for sample data — it is the entire
+  > answer to "when does nuke-and-pave end." See §4 item 8.
 - **App-binary/schema compatibility is a two-sided question this document only half-answers.**
   `Schema_ApplyTo` handles "the app is newer than the database." The reverse — an older binary
   opening a database at a *higher* version than it knows — needs a refusal, not a best-effort open.
@@ -2139,6 +2184,71 @@ itself is in question. The TestKit fixture base should choose this per engine so
 never encode the choice — and slice 9's measurement gate (§2.4) should record all three numbers
 rather than just the one it currently plans to.
 
+### 2.6.8 Idempotency — the owner's explicit requirement, checked against the design *(new in revision 9)*
+
+Resolving §4 item 8, the owner stated a requirement this section had not previously made explicit:
+*"When the test routine calls a SP that clears the part of the db that it needs to resume testing,
+when that SP completes, nuke and pave is over. The[se] routines should be idempotent."* That is a
+concrete, checkable claim about the operations in this section, not a general aspiration — so it is
+checked here per operation rather than declared once for all of them.
+
+**The schema ladder — idempotent by construction.** `ResetSchema(N)` is unconditionally
+`Schema_DropAll()` then `Schema_ApplyTo(N)` (§1.5 S-1). Neither step is conditioned on "was this
+already reset" — `Schema_DropAll` drops every object the family owns whether or not anything is
+there to drop, and `Schema_ApplyTo(N)` always starts from whatever `Schema_CurrentVersion()`
+reports, which is 0 immediately after a drop. Calling `ResetSchema(N)` twice in a row produces the
+identical schema both times; there is no state a second call could find that the first call didn't
+already produce.
+
+**The data ladder — idempotent by construction.** `ClearAllData()`, `ClearTables(subset)`, and
+`ClearTable<TRoot>()` are all, per §2.6.4, `DELETE FROM t` with no `WHERE` clause, per table, in
+FK-order, inside one transaction. A `DELETE` with no `WHERE` against a table that is already empty
+deletes zero rows and succeeds on both engines — nothing in the design conditions success on the
+table being non-empty first. Calling any of these operations any number of times in a row leaves
+the same tables in the same empty state after every call. `ClearOptions.ResetIdentity: true`
+(§2.6.4's cross-engine trap) does not break this: reseeding an identity/rowid counter that is
+already at its reset value is itself a no-op reset to the same value, not an error.
+
+**Row-level reads (`CaptureRow`, `TryCaptureRow`, `CaptureRows`, `RowCount`) are trivially
+idempotent** — they do not mutate anything, so this property is not in question for them.
+
+**`DeleteRow` — idempotent, but this document had not said so, and now does.** §2.6.2 and §2.6.5
+state that `DeleteRow` does not cascade and rolls back on an FK violation, but neither place said
+what happens when `id` does not exist. A plain `DELETE FROM t WHERE Id = @id` that matches no row
+is a normal zero-rows-affected success on both engines, not an error — so `DeleteRow` is idempotent
+as designed *provided* the implementation does not add an "assert exactly one row was affected"
+check that this document never specified. **Revision 9 closes that gap explicitly: `DeleteRow(table,
+id)` must succeed as a no-op when `id` is already absent.** This is the one place in this section
+where revision 9 adds a constraint rather than merely documenting one that was already implied — a
+test-reset call site can now call `DeleteRow` unconditionally, without first checking existence, and
+stay idempotent.
+
+**`RestoreRow`/`RestoreRows` — deliberately *not* idempotent, and that is correct, not a gap.**
+§2.6.5 point 2 requires `RestoreRow` to reinsert **verbatim** — same `Id`, same `RowVersion`, every
+column — specifically so a restored row doesn't break references or dodge the version-conflict
+tests it exists to support. That means calling `RestoreRow` a second time with the same snapshot is
+a primary-key violation *by design*: the row it would insert already exists, because the first call
+put it there. This is not a violation of the owner's requirement, because `RestoreRow` is not one of
+"the[se] routines" the owner is describing — it is not a routine that "clears the part of the db it
+needs to resume testing." It is the single-shot inverse half of a capture-then-delete pair, meant to
+run exactly once per `RemoveRow`, normally from `IRowScope.Dispose` (§2.6.5 point 3: *"Row is back,
+byte-for-byte... Dispose restores inside its own transaction and throws if the restore fails, rather
+than swallowing"* — a throw on a *second* Dispose, or on any double-restore, is the correct behavior
+under that contract, not a bug to fix). A test author who wants a repeatable, always-safe-to-call
+reset uses `ClearAllData`, `ClearTables`, `ClearTable`, or `ResetSchema` — all four idempotent as
+shown above. Stating the distinction here stops a future reader from assuming every
+`IMoneyStoreTestControl` member shares one idempotency contract; they do not, and the difference is
+intentional, not an oversight.
+
+**Net:** every operation that actually matches the owner's "SP that clears the part of the db it
+needs to resume testing" description — `ResetSchema`, `ClearAllData`, `ClearTables`, `ClearTable` —
+is idempotent as this design already had it, with one explicit tightening added here (`DeleteRow`'s
+no-op-on-missing-row behavior). `RestoreRow`/`RestoreRows` are a narrower, single-shot kind of
+operation, correctly excluded from that property. No implementation change is required by this
+revision; §2.6.2's interface comments and the eventual contract-test suite (§2.6.6's anti-drift
+pattern) should each gain one line pinning `DeleteRow`'s no-op-on-missing behavior so it is asserted,
+not just stated in prose.
+
 ---
 
 ## 2.7 Views: reset behavior, and the read/write asymmetry *(new in revision 4)*
@@ -2518,15 +2628,35 @@ technical panel cannot legitimately answer.
    `MyMoney.TestKit` separately"*) is **confirmed on placement and amended on protection**: it
    stays in `MyMoney.Business`, and it gains a guard the recommendation did not have.
 
-8. **(New, revision 2.) When does the nuke-and-pave phase end, and what is the trigger?**
-   §1.5 S-0 accepts nuke-and-pave *for this phase*, and §1.8 keeps the exit affordable — but
-   "eventually" is not a criterion. The panel cannot set this one: it is a product decision about
-   when the owner's own data stops being disposable. What the panel needs is the **trigger**, not
-   the date — e.g. *"the first database I import real Quicken data into and intend to keep."*
-   Naming the trigger now matters more than the timing, because §1.8's three compatibility
-   properties are cheap to hold continuously and expensive to establish retroactively, and because
-   the day the phase ends should be a decision someone makes, not a thing that turns out to have
-   already happened.
+8. ~~**(New, revision 2.) When does the nuke-and-pave phase end, and what is the trigger?**~~
+   **Resolved in revision 9.** §1.5 S-0 accepted nuke-and-pave *for this phase*, and §1.8 kept the
+   exit affordable — but "eventually" was not a criterion, so the panel asked the owner for the
+   **trigger**, not the date — e.g. *"the first database I import real Quicken data into and intend
+   to keep."* The owner's answer dissolves the question rather than answering it on the panel's own
+   terms:
+
+   > "If a db is a test db, it is always a test db. If it is not, it never is a test db. You get to
+   > set that attribute at create time, and it remains as long as the db remains. When the test
+   > routine calls a SP that clears the part of the db that it needs to resume testing, when that
+   > SP completes, nuke and pave is over. The[se] routines should be idempotent."
+
+   There is no single project-wide moment for the panel to name, because there was never really a
+   project-wide phase to end — only a per-database, permanent attribute
+   (`DatabaseEntry.TestDatabase`, already in the registry config, §1.5 S-0; the same flag revision
+   8's §1.9 reads as `StoreIdentity.IsTestDatabase` to guard sample data) fixed once at that
+   database's creation and never changed afterward. A database created as test can always be nuked
+   and paved; a database created as production never could be, from the instant it existed. Every
+   database — test or production alike — goes through the *same* versioned `Schema_ApplyTo`
+   machinery from its first creation (§1.5 S-1), so there is nothing to retrofit when a production
+   database eventually appears: it is a database whose `TestDatabase` flag was false from the start,
+   not an existing test database that "graduated." "Nuke and pave is over" simply describes what
+   happens every time a test-reset routine (§2.6's `ClearAllData`/`ClearTables`/`ClearTable`/
+   `ResetSchema`, already designed in revision 4) *finishes running* — routine and repeated during
+   testing, not a one-time milestone — which is why the owner's second sentence ("these routines
+   should be idempotent") is load-bearing rather than a side note: idempotency is exactly what makes
+   "nuke and pave is over" true after *every* call to a reset routine, not just the first. §2.6.8
+   verifies that property against the design rather than assuming it, and adds one explicit
+   tightening (`DeleteRow`'s no-op-on-missing-row behavior) where the design had left it implicit.
 
 ### 4.1 Re-scoring the round-1 list against today's guidance
 
@@ -2621,6 +2751,21 @@ here. One adjacent confusion worth pre-empting, since both involve XML: `SampleD
 `Export(path)` writes the **sample-data spec** (`SampleData.xml` — the payee/account frequency
 histogram) via `XmlSerializer`, which is *not* `IDataFormat`'s whole-model round-trip and is
 unaffected by #5's deferral. §1.9's sample-data work does not wait on XML.
+
+**Net after revision 9: item #8 moves from open to resolved by the owner**, which takes the
+original-seven-plus-#8 list down to **two still open** (#1, #3). The owner's resolution reframes
+rather than answers the panel's original "name the trigger" request — there is no project-wide
+trigger, because `DatabaseEntry.TestDatabase` is a permanent, per-database attribute fixed at
+creation (the same flag revision 8's §1.9 already built `StoreIdentity.IsTestDatabase` and
+`TestDatabaseGuard` around), and "nuke and pave is over" simply describes a test-reset routine
+finishing, not a milestone the project passes through once. See §4 item 8 for the reasoning and the
+owner's verbatim clarification, §1.5 S-0 for the cross-reference into the schema-management design,
+and §2.6.8 for the idempotency property the resolution depends on. Nothing in this design's shape
+changes as a result: `DatabaseEntry.TestDatabase` was already the gate (§1.8, and now doubly so via
+§1.9's `TestDatabaseGuard`), the versioned schema machinery already applied identically to every
+database from its creation (§1.5 S-1), and §2.6.8 adds one explicit clause (`DeleteRow`'s
+no-op-on-missing-row behavior) rather than a new mechanism. This is a recording of a product/appetite
+decision, not new design work, consistent with revisions 3 and 7's resolutions of items #2 and #4.
 
 ---
 
@@ -2777,8 +2922,15 @@ fails. Several specific expressions of it:
   existing database ran. §1.5 S-4's caveat is honest that the mechanism does not prevent this;
   slice 2b's equality test is what makes the omission visible.
 - **The "end of the phase" never gets declared** — it just turns out, retrospectively, to have
-  happened three months ago on a database somebody started caring about. Hence open item #8: the
-  panel wants the *trigger* named, not the date.
+  happened three months ago on a database somebody started caring about. This was open item #8;
+  **resolved in revision 9**: there is no single project-wide phase to declare the end of —
+  `DatabaseEntry.TestDatabase` is fixed per database at creation, so a database that starts as test
+  never "graduates," and a database that starts as production never has nuke-and-pave reachable at
+  all (§4 item 8). That resolution removes the *ambiguity* this bullet names, but not the underlying
+  habit-formation risk itself: nothing about a permanent, per-database flag stops someone from
+  continuing to depend on a database marked `TestDatabase: true` past the point it should have been
+  replaced by a real one — that remains a people/process risk, not something the flag design can
+  close by itself.
 - **`Schema_DropAll` exists and works, in a codebase whose only guard is a config flag.** §1.8 and
   slice 5b address this; flagged here because "we're in the test phase" is precisely the reasoning
   that makes a destructive operation feel safe to leave unguarded, and precisely the reasoning that
@@ -3049,10 +3201,9 @@ dependency revision 8 introduced — only a new consumer of one the document alr
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: of §4's original seven items, **five are now resolved and two
-  remain open** — #1 (rebuild in place vs. a parallel tree) and #3 (must SQL Server stay at feature
-  parity throughout?) — plus new item #8, *what event ends the nuke-and-pave phase?* The panel
-  wants #8's trigger named, not the date. Resolved by the owner, in order:
+- **Still the owner's to decide**: of §4's original seven items plus new item #8, **six are now
+  resolved and two remain open** — #1 (rebuild in place vs. a parallel tree) and #3 (must SQL
+  Server stay at feature parity throughout?). Resolved by the owner, in order:
   - **#2** — no file lease, ever, on the shipped path (revision 3; §1.6a).
   - **#4** — whole-graph `Load()` does not survive: *"The query-based pattern replaces the
     whole-graph-in-memory pattern everywhere"* (revision 7; §4 item 4). `IMoneyQuery` is now the
@@ -3067,3 +3218,10 @@ dependency revision 8 introduced — only a new consumer of one the document alr
     rather than dismissed, and belongs on the tracker.
   - **#7** — sample data: shipped, customer-reachable, **and** test-database-only (revision 8;
     §1.9). The only one of revision 8's three that needed design rather than recording.
+  - **#8** — what ends the nuke-and-pave phase: there is no project-wide trigger to name, because
+    `DatabaseEntry.TestDatabase` is a permanent, per-database attribute fixed at creation, and
+    "nuke and pave is over" describes a test-reset routine finishing rather than a milestone
+    (revision 9; §4 item 8). *"If a db is a test db, it is always a test db... [these reset]
+    routines should be idempotent"* — §2.6.8 confirms the reset routines this depends on
+    (`ResetSchema`, `ClearAllData`, `ClearTables`, `ClearTable`) are idempotent as designed, with
+    one explicit tightening added (`DeleteRow`'s no-op-on-missing-row behavior).
