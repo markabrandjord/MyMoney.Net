@@ -18,7 +18,8 @@
                     Text="{Binding Currency, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12"/>
 
         <TextBlock x:Name="ErrorText" AutomationProperties.AutomationId="AddAccountErrorText"
-                   Text="{Binding ErrorMessage}" Foreground="Firebrick"
+                   Text="{Binding ErrorMessage}"
+                   Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                    Visibility="{Binding ErrorMessage, Converter={StaticResource NullToCollapsedConverter}}"/>
     </StackPanel>
 </UserControl>

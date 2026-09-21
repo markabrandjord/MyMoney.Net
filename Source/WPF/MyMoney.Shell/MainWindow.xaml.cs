@@ -40,6 +40,15 @@ public partial class MainWindow : FluentWindow
             concreteDialogService.SetHost(this.DialogHost);
         }
 
+        // Same shape as the DialogService host hand-off above: the window reference that
+        // SystemThemeWatcher needs is a UI detail, so it is handed to the concrete service
+        // rather than widening IThemeService. Without it, "Follow system" resolves the OS theme
+        // once and never notices a later change.
+        if (themeService is ThemeService concreteThemeService)
+        {
+            concreteThemeService.AttachWindow(this);
+        }
+
         this.navigationService.Navigated += (_, route) =>
         {
             this.NavAccountsButton.Appearance = route == RouteId.Accounts
@@ -49,7 +58,7 @@ public partial class MainWindow : FluentWindow
             if (route == RouteId.Accounts)
             {
                 var viewModel = new AccountsListViewModel(this.query);
-                this.ContentHost.Content = new AccountsView(viewModel, this.dialogService, this.addAccountService);
+                this.ContentHost.Content = new AccountsView(viewModel, this.dialogService, this.statusService, this.addAccountService);
                 viewModel.LoadCommand.Execute(null);
             }
         };

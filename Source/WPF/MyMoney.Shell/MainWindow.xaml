@@ -66,7 +66,16 @@
         <Popup x:Name="ActivityPopup" AutomationProperties.AutomationId="ActivityPopup"
                Placement="Top" PlacementTarget="{Binding ElementName=ActivityButton}"
                StaysOpen="False" AllowsTransparency="True">
-            <Border Background="White" BorderBrush="Gray" BorderThickness="1" CornerRadius="6" Padding="8" MinWidth="260">
+            <!-- Theme-aware brushes, not literal colours (D-7): Background="White" here was a
+                 real dark-mode bug - the entries inside are rendered with the theme's text
+                 colour, which is near-white in Dark, on a hardcoded white card. The keys below
+                 were verified against WPF-UI 4.3.0's own ThemesDictionary (both Light and Dark)
+                 rather than guessed. TextElement.Foreground is pinned too because the entry
+                 TextBlocks are created in code-behind (MainWindow.RefreshStatus). -->
+            <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    TextElement.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="8" MinWidth="260">
                 <StackPanel x:Name="ActivityListPanel"/>
             </Border>
         </Popup>

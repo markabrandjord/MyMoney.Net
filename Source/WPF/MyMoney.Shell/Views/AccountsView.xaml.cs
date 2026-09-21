@@ -11,13 +11,16 @@ public partial class AccountsView : UserControl
 {
     private readonly AccountsListViewModel listViewModel;
     private readonly IDialogService dialogService;
+    private readonly IStatusService statusService;
     private readonly AddAccountService addAccountService;
 
-    public AccountsView(AccountsListViewModel listViewModel, IDialogService dialogService, AddAccountService addAccountService)
+    public AccountsView(AccountsListViewModel listViewModel, IDialogService dialogService,
+        IStatusService statusService, AddAccountService addAccountService)
     {
         InitializeComponent();
         this.listViewModel = listViewModel;
         this.dialogService = dialogService;
+        this.statusService = statusService;
         this.addAccountService = addAccountService;
         this.DataContext = listViewModel;
     }
@@ -56,6 +59,14 @@ public partial class AccountsView : UserControl
             if (addViewModel.Succeeded)
             {
                 await this.listViewModel.LoadCommand.ExecuteAsync(null);
+
+                // D-5's status model had no producers at all until this: the status bar read
+                // "Ready" and the activity list "(0)" for the whole app's life, however much
+                // the user did. Adding an account is the one completed, user-initiated action
+                // this slice has, so it is the one that reports. ShowStatus is the transient
+                // line; LogActivity is the durable entry behind the Activity button.
+                this.statusService.ShowStatus($"Account added: {addViewModel.Name}");
+                this.statusService.LogActivity($"Added account '{addViewModel.Name}'");
                 return;
             }
 
