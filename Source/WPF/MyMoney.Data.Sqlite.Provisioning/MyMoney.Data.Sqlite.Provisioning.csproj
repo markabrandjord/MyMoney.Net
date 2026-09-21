@@ -1,19 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsProductionAssembly>true</IsProductionAssembly>
     <TargetFramework>net10.0-windows7.0</TargetFramework>
-    <RootNamespace>Walkabout</RootNamespace>
+    <RootNamespace>Walkabout.Data.Sqlite.Provisioning</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- SHIPPED. Creating a file is not a privileged act in any meaningful sense, and per-test
+         provisioning speed is load-bearing, so SQLite provisioning stays in-process - spec
+         section 1's Recommendation. -->
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="System.Data.SQLite" Version="2.0.4" />
-    <PackageReference Include="System.IO.FileSystem.AccessControl" Version="5.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Schema\*.sql" />
   </ItemGroup>
 </Project>
