@@ -17,6 +17,14 @@ public partial class App : Application
         var navigationService = new NavigationService();
         var dialogService = new DialogService();
 
-        new MainWindow(themeService, statusService, navigationService, dialogService).Show();
+        // This plan's whole scope runs against an in-memory SQLite fixture, deliberately, not
+        // as a placeholder. Opening the user's real, registry-selected database file
+        // (DatabaseFactory/DatabaseRegistry - see MyMoney.Data/DatabaseFactory.cs, already
+        // built) is a separate, already-solved problem that belongs to a follow-up plan, once
+        // more than one screen exists and "which database is open" is a real cross-screen
+        // concern worth its own design pass rather than a MainWindow constructor detail.
+        var fixture = MyMoney.TestKit.InMemorySqliteStore.Create(isTestDatabase: true);
+
+        new MainWindow(themeService, statusService, navigationService, dialogService, fixture.Query).Show();
     }
 }

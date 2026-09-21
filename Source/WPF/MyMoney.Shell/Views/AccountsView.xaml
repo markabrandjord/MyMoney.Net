@@ -1,0 +1,19 @@
+<!-- Source/WPF/MyMoney.Shell/Views/AccountsView.xaml -->
+<UserControl x:Class="MyMoney.Shell.Views.AccountsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="AccountsPage">
+    <Grid>
+        <ListView x:Name="AccountsListView" AutomationProperties.AutomationId="AccountsListView"
+                  ItemsSource="{Binding Accounts}">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="200"/>
+                    <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Type}" Width="140"/>
+                    <GridViewColumn Header="Currency" DisplayMemberBinding="{Binding Currency}" Width="100"/>
+                    <GridViewColumn Header="Opening Balance" DisplayMemberBinding="{Binding OpeningBalance, StringFormat=C}" Width="140"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </Grid>
+</UserControl>
