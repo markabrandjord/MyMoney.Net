@@ -27,6 +27,29 @@ each piece landed:
 Round 1's §4 open-items list is re-scored at the end of §4: today's guidance **resolves one**,
 **reframes two**, and **adds one**.
 
+**Revision 3 (2026-09-20, same day, separate conversation).** The owner clarified the product's
+actual concurrency goal while resolving D-34 in the `panel-review-05-data-engine-security.md`
+scenario-capture document: the shipped application must be able to service **a single human user
+and potentially an AI agent working at the same time** — genuine simultaneous access, not just
+protection against rare accidental overlap. This directly resolves open item #2 from §4 (left
+"unchanged" as of revision 2) and reverses the assumption behind it:
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "If we do [service a human and an AI agent at once] the race condition between the two updaters is possible. So we just have to be able to write transactions that know how to recover if the transactions fail. The retry logic should probably be in the business layer." | §4 item 2 (now resolved, not open); new §1.6a states the data-layer/business-layer split explicitly |
+| "Yes, version-checked concurrency, retry in business layer. And the test business layer should have one or more APIs that will have a means to test this functionality." | §2.4 — `FaultInjectingStore` formalized as the test-tier conflict-simulation API; §5 slice 7 updated to build the retry loop and test it |
+
+**What this changes, concretely:** the shipped SQLite path keeps version-checked optimistic
+concurrency (`ConcurrencyConflictException` on a stale `RowVersion`) as its permanent concurrency
+model — there is no lease to design, build, or fall back to. Nothing in this document's schema,
+provisioning, tiering, or `IMoneyStore` design changes shape as a result, because that design
+already assumed version-checked writes throughout (§1.6, R-CRUD-4) — a file lease was never
+actually built into any candidate here; it was an *open question* (§4 item 2) about whether the
+shipped product should additionally serialize access on top of the existing version check. That
+question is now closed: no lease, ever, on the shipped path. The changes below thread the "retry
+lives in the business layer, and the test tier must be able to trigger a conflict on demand"
+architecture through the sections that talk about the conflict contract, T-1, and the slice plan.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -531,6 +554,41 @@ comment already records — `CREATE OR ALTER PROCEDURE` eagerly validating colum
 *existing* tables, so `Payees_AccessProcs.sql` failed before the `Version` column migration ran —
 stops being a comment explaining a hand-ordered sequence and becomes a step number.
 
+### 1.6a Concurrency: version-checked on the shipped path, retry lives in the business layer
+*(New in revision 3, resolving §4 item 2.)*
+
+The owner has settled the product-scope question that was open as of revision 2: the shipped
+application must support **a single human user and potentially an AI agent working against the
+same books at the same time** — real simultaneous access, not merely tolerance of rare accidental
+overlap. A lease (one exclusive holder, everyone else waits or is read-only) is the wrong
+mechanism for that goal — it would force the human and the agent to take turns. **The shipped
+SQLite path's permanent concurrency model is version-checked optimistic concurrency, exactly as
+R-CRUD-4 already states it** — there is no lease anywhere in this design, and none is being added.
+
+What revision 3 makes explicit is the **layer split**, in the owner's own words: *"We just need to
+know that the transaction completed normally, or we need to fall back and re-query and then
+re-try the transaction... The retry logic should probably be in the business layer."*
+
+- **The data layer's contract stays exactly what R-CRUD-4 already says: attempt the write, report
+  success, or throw `ConcurrencyConflictException` carrying the store's actual current version.**
+  It does not retry, re-query, or decide how to reapply a change — that would require knowing what
+  the caller's intent *was*, which is a business concept the store must not know about, for the
+  same reason §3.1 already keeps "prompt" and "recent file" out of the store.
+- **The business layer owns the retry loop.** On a caught `ConcurrencyConflictException`, an
+  `AppServices`/use-case method (§3.1) re-queries current state, decides how to reapply the
+  intended change (which may be "reapply verbatim," "merge," or "surface a conflict to the
+  caller" — a policy choice per use case, not a data-layer concern), and retries the write. This
+  is new logic, not a relocation of existing logic — no retry loop exists anywhere in the codebase
+  today; today's behavior is "the conflict propagates to the UI as a message box" (per the
+  superseded D-34 discussion this revision replaces).
+- **The test tier needs a first-class way to trigger this on demand.** See §2.4's
+  `FaultInjectingStore` — it is designed for exactly this and is formalized in revision 3 as the
+  answer to the owner's *"the test business layer should have one or more APIs that will have a
+  means to test this functionality."*
+
+This is additive to R-CRUD-4, not a change to it — R-CRUD-4 already described an
+engine-independent conflict *contract*; 1.6a states who is on the other end of it.
+
 ---
 
 ## 1.7 New design principle: SQLite should use SQLite (Data Engine Expert)
@@ -727,7 +785,16 @@ afterthought. Add two things it doesn't have:
 - **`FaultInjectingStore`** — a decorator configured to throw on the Nth call, or to throw
   `ConcurrencyConflictException` for a named root, or to fail mid-`SaveBatch`. This is the
   concrete answer to the owner's *"test processes to drive the happy path **and the error path**
-  of the data layer"*.
+  of the data layer"*. **Revision 3: this is also the formal answer to the owner's separate,
+  later requirement that "the test business layer should have one or more APIs that will have a
+  means to test [conflict/retry] functionality"** (§1.6a) — `FaultInjectingStore.ThrowConflictFor
+  (rootId)` (or equivalent) is the one, first-class, documented way a business-layer test
+  deliberately provokes a `ConcurrencyConflictException` and asserts on the `AppServices` retry
+  loop's behavior, superseding the old ad hoc pattern this formalizes (save a `MockDatabase` root
+  once, then mutate its `RowVersion` to a stale value before saving again — a real mechanism, but
+  an incidental side effect of test setup rather than a named capability). Because `MockStore` is
+  deleted below, `FaultInjectingStore` wrapping the real in-memory SQLite store is not just *a*
+  way to test this, it is *the* way.
 
 **Sub-decision T-1:** should the default business-test double be a hand-written `MockStore` at all,
 or should it be **`RecordingStore`/`FaultInjectingStore` wrapped around a real SQLite in-memory
@@ -933,13 +1000,16 @@ technical panel cannot legitimately answer.
    decision and it trades "always shippable" against "one clean cut." Everything in §7 assumes
    *in place, incrementally*; say so if that's wrong.
 
-2. **Does the shipped SQLite path still need D-34's file lease?** D-37's downstream effects said
-   *"since SQL Server does not ship to end users, C (a file lease) is what the shipped SQLite path
-   needs"* — but the persistence-concurrency work has since given SQLite real version-checked,
-   conflict-detecting saves, and the owner's stated AI-agent-in-parallel scenario runs on SQLite
-   too. Is the lease still wanted (single-writer, simple, honest), or superseded by optimistic
-   concurrency? This is a product promise about what two simultaneous writers on one machine are
-   told.
+2. ~~**Does the shipped SQLite path still need D-34's file lease?**~~ **Resolved in revision 3 —
+   no.** D-37's downstream effects had said *"since SQL Server does not ship to end users, C (a
+   file lease) is what the shipped SQLite path needs"* — but the owner has since decided, in the
+   `panel-review-05-data-engine-security.md` scenario-capture document, that the shipped product's
+   actual concurrency goal is a human and an AI agent working the same books at once, which a
+   lease actively defeats. **The shipped SQLite path keeps version-checked optimistic concurrency
+   permanently; no lease is built.** Retry on a detected conflict lives in the business layer, not
+   the data layer. See §1.6a for the resolution and its consequences for this design (in short:
+   none to the schema/store shape, because R-CRUD-4 already assumed version-checked writes — the
+   consequence is entirely in the new business-layer retry loop and its test-tier support).
 
 3. **Must SQL Server stay at feature parity throughout the rebuild?** Every new store capability
    (starting with `IMoneyQuery`) implemented twice and contract-tested twice, or may the SQL Server
@@ -982,19 +1052,24 @@ technical panel cannot legitimately answer.
 
 Today's guidance touches four of the seven. Stated explicitly, per the revision's brief:
 
-| # | Status after revision 2 |
-|---|---|
-| 1 — in place vs. parallel tree | **Reframed, and materially de-risked.** The strongest argument for a parallel tree was always *"the existing database format must keep working while the new one is built."* S-0 removes it: there is no data to preserve and no user to keep shippable for. That does not *decide* the question — build-breakage and reviewability arguments survive untouched — but it takes the scariest constraint off the table, and it strengthens §7's assumption of *in place, incrementally*. Still the owner's call. |
-| 2 — SQLite file lease | Unchanged. Nothing today bears on it. |
-| 3 — SQL Server feature parity throughout | **Sharpened, and partly answered by implication.** "The process should be more or less the same on SQLite and SQL Server" is a parity requirement, but specifically about *schema management*, and it is a stronger claim than round 1's framing: §1.5's step list, ledger and verify semantics must be parity **from slice 2**, not caught up at a milestone, because a ledger that only one engine has is not a ledger. The question the owner still owns is narrower than round 1 posed it: **may `IMoneyQuery` and other read-side capabilities lag on SQL Server while schema management does not?** The panel's recommendation is yes — lag the query surface, never the schema surface. |
-| 4 — does whole-graph `Load()` survive | Unchanged, and worth saying why, since it's easy to assume otherwise: nuke-and-pave makes *schema* change cheap; it says nothing about whether the in-memory `MyMoney` object graph remains the domain model. Still the biggest fork in the rebuild, still undecided, and §1 still works either way. |
-| 5 — `XmlStore` as a day-one export format | **Arguably resolved, in the direction of "yes, sooner."** Under nuke-and-pave, an XML export is the only thing that lets a developer keep a hand-built scenario across a re-pave. That is a genuine new argument for it being early rather than deferred — but it is a scope call, so it stays on the list with a recommendation attached rather than being ticked off unilaterally. |
-| 6 — credential storage | Unchanged. Panel still recommends now. |
-| 7 — sample data: product or test? | **Reframed, and now more urgent.** Under nuke-and-pave, "re-populate a freshly paved database with something to look at" is a routine developer action, which makes `SampleDataGenerator` load-bearing for daily work rather than a nice-to-have feature. The panel's recommendation firms up: **keep it a product feature in `MyMoney.Business`**, and let the test tier seed through `MyMoney.TestKit` separately, rather than merging the two — but this needs the owner's confirmation more than it did this morning, not less. |
+| # | Status after revision 2 | Status after revision 3 |
+|---|---|---|
+| 1 — in place vs. parallel tree | **Reframed, and materially de-risked.** The strongest argument for a parallel tree was always *"the existing database format must keep working while the new one is built."* S-0 removes it: there is no data to preserve and no user to keep shippable for. That does not *decide* the question — build-breakage and reviewability arguments survive untouched — but it takes the scariest constraint off the table, and it strengthens §7's assumption of *in place, incrementally*. Still the owner's call. | Unchanged. |
+| 2 — SQLite file lease | Unchanged. Nothing today bears on it. | **Resolved — no lease, ever, on the shipped path.** See §4 item 2 and §1.6a. The owner's simultaneous human+AI-agent goal rules a lease out; version-checked concurrency with business-layer retry is the permanent model. |
+| 3 — SQL Server feature parity throughout | **Sharpened, and partly answered by implication.** "The process should be more or less the same on SQLite and SQL Server" is a parity requirement, but specifically about *schema management*, and it is a stronger claim than round 1's framing: §1.5's step list, ledger and verify semantics must be parity **from slice 2**, not caught up at a milestone, because a ledger that only one engine has is not a ledger. The question the owner still owns is narrower than round 1 posed it: **may `IMoneyQuery` and other read-side capabilities lag on SQL Server while schema management does not?** The panel's recommendation is yes — lag the query surface, never the schema surface. | Unchanged. |
+| 4 — does whole-graph `Load()` survive | Unchanged, and worth saying why, since it's easy to assume otherwise: nuke-and-pave makes *schema* change cheap; it says nothing about whether the in-memory `MyMoney` object graph remains the domain model. Still the biggest fork in the rebuild, still undecided, and §1 still works either way. | Unchanged. |
+| 5 — `XmlStore` as a day-one export format | **Arguably resolved, in the direction of "yes, sooner."** Under nuke-and-pave, an XML export is the only thing that lets a developer keep a hand-built scenario across a re-pave. That is a genuine new argument for it being early rather than deferred — but it is a scope call, so it stays on the list with a recommendation attached rather than being ticked off unilaterally. | Unchanged. |
+| 6 — credential storage | Unchanged. Panel still recommends now. | Unchanged. |
+| 7 — sample data: product or test? | **Reframed, and now more urgent.** Under nuke-and-pave, "re-populate a freshly paved database with something to look at" is a routine developer action, which makes `SampleDataGenerator` load-bearing for daily work rather than a nice-to-have feature. The panel's recommendation firms up: **keep it a product feature in `MyMoney.Business`**, and let the test tier seed through `MyMoney.TestKit` separately, rather than merging the two — but this needs the owner's confirmation more than it did this morning, not less. | Unchanged. |
 
-Net: **one resolved by the panel** (T-1, §2.4 — it was a sub-decision, not on this list, but it was
-the largest genuinely-open technical question in round 1), **two reframed** (#1, #3), **two
-strengthened with recommendations** (#5, #7), **one added** (#8), and **two untouched** (#2, #4).
+Net after revision 2: **one resolved by the panel** (T-1, §2.4 — it was a sub-decision, not on this
+list, but it was the largest genuinely-open technical question in round 1), **two reframed** (#1,
+#3), **two strengthened with recommendations** (#5, #7), **one added** (#8), and **two untouched**
+(#2, #4).
+
+**Net after revision 3:** item **#2 moves from untouched to resolved by the owner** (not the
+panel — this one was explicitly the owner's to decide, and they decided it). #4 remains the only
+fully open item among the original seven; #8 (nuke-and-pave's exit trigger) remains open as well.
 
 ---
 
@@ -1029,7 +1104,7 @@ flag:
 | 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl` (wipe/reset) implemented as `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery | The SQLite facade, for real — and the owner's nuke-and-pave, as a first-class operation rather than a script |
 | **5b** | `TestDatabase`-flag refusal in the provisioner contract (§1.8): destructive operations fail loudly against an entry not marked as a test database | The only guard that currently exists becomes enforced rather than assumed |
 | 6 | `MyMoney.Tests.Architecture` — all seven Tier-0 tests from §2.5 | The guarantees are enforced, not asserted |
-| 7 | `AddAccountService` in `MyMoney.Business` + its in-memory-store-backed tests incl. the conflict path | The business layer is callable with no UI present |
+| 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException`, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one |
 | 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine | The tiering maps twice, the schema mechanism is parity (§4.1 #3), and the contract suite is genuinely shared |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
 | 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveBatch` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
@@ -1245,6 +1320,13 @@ worked case.
 - **CRUD and batch writes stay parameterized and transactional, stated as requirements**
   (§1.6, R-CRUD-1..5) rather than carried forward implicitly, including the TVP-per-batch pattern
   and the engine-independent conflict contract.
+- **Concurrency, resolved (§1.6a, revision 3): version-checked optimistic concurrency, permanently,
+  on the shipped SQLite path — no file lease.** The owner's actual goal is a human and an AI agent
+  working the same books at once, which a lease would defeat by serializing access. The data layer
+  keeps reporting conflicts (`ConcurrencyConflictException`, unchanged); the business layer gains a
+  new retry loop (re-query, reapply, retry) that does not exist today; and `FaultInjectingStore`
+  (§2.4) is formalized as the test-tier's first-class API for deliberately provoking a conflict to
+  test that loop. This closes §4 item 2, which revision 2 had left open.
 - **New principle P-SQLITE** (§1.7): express behavior in SQLite where SQLite can express it —
   `RETURNING`, `json_each` batches, views, `INSTEAD OF` triggers, `STRICT` tables, structured
   `PRAGMA` introspection, `VACUUM INTO` backups — with an explicit, honest list of what cannot
@@ -1268,6 +1350,8 @@ worked case.
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: §4's seven items, re-scored in §4.1 (two reframed by today's
-  guidance, two strengthened with recommendations, two untouched) plus a new #8 — *what event ends
-  the nuke-and-pave phase?* The panel wants the trigger named, not the date.
+- **Still the owner's to decide**: of §4's original seven items, six remain open in some form
+  (four reframed or strengthened with recommendations in revision 2: #1, #3, #5, #7; one fully
+  untouched: #4, whether whole-graph `Load()` survives) plus new item #8 — *what event ends the
+  nuke-and-pave phase?* **One item is now resolved**: #2 (the file-lease question), closed by the
+  owner in revision 3 — see §1.6a. The panel wants #8's trigger named, not the date.
