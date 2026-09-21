@@ -22,7 +22,13 @@ namespace MyMoney.TestKit
     public sealed class FaultInjectingStore : IMoneyStore
     {
         private readonly IMoneyStore inner;
-        private readonly HashSet<long> conflictingRootIds = new HashSet<long>();
+
+        /// <summary>
+        /// Root id -> how many more writes touching it should conflict. A COUNT, not a set: a test
+        /// for "the retry loop gives up after N attempts" registers the same id N times, and a set
+        /// would silently collapse that to a single conflict and let the second attempt succeed.
+        /// </summary>
+        private readonly Dictionary<long, int> conflictingRootIds = new Dictionary<long, int>();
         private readonly Dictionary<int, Exception> scheduled = new Dictionary<int, Exception>();
         private int callNumber;
 
@@ -33,8 +39,15 @@ namespace MyMoney.TestKit
 
         public StoreIdentity Identity => this.inner.Identity;
 
-        /// <summary>The next write touching this root id conflicts; the one after it does not.</summary>
-        public void ThrowConflictFor(long rootId) => this.conflictingRootIds.Add(rootId);
+        /// <summary>
+        /// The next write touching this root id conflicts; the one after it does not. Calling it
+        /// N times queues N conflicts for that id.
+        /// </summary>
+        public void ThrowConflictFor(long rootId)
+        {
+            this.conflictingRootIds.TryGetValue(rootId, out int pending);
+            this.conflictingRootIds[rootId] = pending + 1;
+        }
 
         /// <summary>Throw <paramref name="exception"/> on the Nth write call (1-based).</summary>
         public void ThrowOnCall(int number, Exception exception) => this.scheduled[number] = exception;
@@ -86,8 +99,17 @@ namespace MyMoney.TestKit
 
             foreach (IAggregateRoot root in roots)
             {
-                if (this.conflictingRootIds.Remove(root.Id))
+                if (this.conflictingRootIds.TryGetValue(root.Id, out int pending) && pending > 0)
                 {
+                    if (pending == 1)
+                    {
+                        this.conflictingRootIds.Remove(root.Id);
+                    }
+                    else
+                    {
+                        this.conflictingRootIds[root.Id] = pending - 1;
+                    }
+
                     throw new ConcurrencyConflictException(
                         (PersistentObject)root,
                         ((root as PersistentObject)?.RowVersion ?? 0) + 1,

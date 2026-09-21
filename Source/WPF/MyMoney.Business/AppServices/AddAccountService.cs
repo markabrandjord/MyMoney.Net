@@ -17,6 +17,23 @@ namespace Walkabout.Business.AppServices
     }
 
     /// <summary>
+    /// Raised when a use case gave up after MaxAttempts version conflicts. Distinct from
+    /// ConcurrencyConflictException so a caller can tell "this one write lost a race" from "we
+    /// kept losing"; the last conflict is carried as InnerException.
+    /// </summary>
+    public sealed class ConcurrencyRetryExhaustedException : Exception
+    {
+        public ConcurrencyRetryExhaustedException(int attempts, Exception inner)
+            : base($"Gave up after {attempts} attempts - another writer kept changing the same data.",
+                   inner)
+        {
+            this.Attempts = attempts;
+        }
+
+        public int Attempts { get; }
+    }
+
+    /// <summary>
     /// The AppServices band in MyMoney.Business, alongside the existing DatabaseLifecycle, which
     /// is already exactly this shape and is the working precedent - spec section 3.1.
     ///
@@ -40,21 +57,65 @@ namespace Walkabout.Business.AppServices
             this.query = query ?? throw new ArgumentNullException(nameof(query));
         }
 
+        /// <summary>
+        /// How many times a use case reapplies its intent before giving up. Three is a starting
+        /// default: the product's stated concurrency goal is ONE human and possibly ONE agent
+        /// (spec section 1.6a), so a third consecutive loss means something other than ordinary
+        /// contention is happening and spinning longer would hide it.
+        /// </summary>
+        public const int MaxAttempts = 3;
+
+        /// <summary>
+        /// The business-layer retry loop spec section 1.6a puts here rather than in the data
+        /// layer: the store cannot retry, because reapplying a change requires knowing what the
+        /// caller's INTENT was, and intent is a business concept the store must not know about.
+        ///
+        /// This is NEW logic, not a relocation - no retry loop exists anywhere in the codebase
+        /// today; today's behaviour is that the conflict propagates to the UI as a message box.
+        ///
+        /// It catches ConcurrencyConflictException AND NOTHING WIDER. SaveRoot/DeleteRoot's
+        /// precondition failures are ArgumentException - caller bugs, unconditionally
+        /// reproducible - and a loop that caught them would retry a call that can only ever fail
+        /// the same way, turning an immediate crash into a spin (spec section 1.6a consequence 1).
+        ///
+        /// It re-runs the WHOLE use case body, not just the failed write, because the reason the
+        /// first attempt failed is that its state was stale: the id and the duplicate-name check
+        /// both have to be re-derived from current data.
+        ///
+        /// Retrying is legal at all only because a failed write leaves the root's change state
+        /// untouched - R-CRUD-2's postCommitActions deferral, pinned per engine by the contract
+        /// suite's AfterAConflict_TheSameCallIsStillAdmissible (spec section 1.6a consequence 2).
+        /// </summary>
         public Account AddAccount(string name, AccountType type, string currency)
         {
             ValidateName(name);
 
-            foreach (AccountRow row in this.query.ListAccounts(AccountQuery.All))
+            ConcurrencyConflictException lastConflict = null;
+
+            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
-                if (string.Equals(row.Name, name, StringComparison.OrdinalIgnoreCase))
+                foreach (AccountRow row in this.query.ListAccounts(AccountQuery.All))
                 {
-                    throw new DuplicateAccountNameException(name);
+                    if (string.Equals(row.Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new DuplicateAccountNameException(name);
+                    }
+                }
+
+                Account account = this.BuildAccount(name, type, currency);
+
+                try
+                {
+                    this.store.SaveRoot(account);
+                    return account;
+                }
+                catch (ConcurrencyConflictException conflict)
+                {
+                    lastConflict = conflict;
                 }
             }
 
-            Account account = this.BuildAccount(name, type, currency);
-            this.store.SaveRoot(account);
-            return account;
+            throw new ConcurrencyRetryExhaustedException(MaxAttempts, lastConflict);
         }
 
         /// <summary>
