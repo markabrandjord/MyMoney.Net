@@ -14,10 +14,10 @@
                        Content="+ Add Account" Appearance="Primary"
                        Margin="0,0,8,0" Click="AddAccountButton_Click"/>
             <ui:Button x:Name="EditAccountButton" AutomationProperties.AutomationId="EditAccountButton"
-                       Content="Edit" IsEnabled="False"
+                       Content="Edit Account" IsEnabled="False"
                        Margin="0,0,8,0" Click="EditAccountButton_Click"/>
             <ui:Button x:Name="DeleteAccountButton" AutomationProperties.AutomationId="DeleteAccountButton"
-                       Content="Delete" IsEnabled="False"
+                       Content="Delete Account" IsEnabled="False"
                        Click="DeleteAccountButton_Click"/>
         </StackPanel>
         <ListView x:Name="AccountsListView" AutomationProperties.AutomationId="AccountsListView"
