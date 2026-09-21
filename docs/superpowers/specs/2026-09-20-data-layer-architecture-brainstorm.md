@@ -102,6 +102,26 @@ omissions otherwise:
   that does not exist. The new names apply to the **rebuilt `IMoneyStore` port**, which is created
   in slice 1 and first implemented in slice 3.
 
+**Revision 6 (2026-09-20, same day).** A follow-up to revision 5 that looks like another naming
+question and is not one: there is a real semantic decision under it. The owner objected to calling
+`SaveRoot` to perform a *delete*, proposed three fully separate methods, and asked the panel to
+judge that against the coordinating session's counter-proposal rather than ratify either.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "I don't like calling `SaveRoot`/`SaveOne<T>` to perform a **delete** — 'Save' reads wrong for that operation." | New §1.6c. The objection is **upheld**, and on a stronger ground than taste: a `Save` call that removes a row is invisible at the call site and at code review, and this codebase has a live way for a root to become deleted behind a caller's back |
+| "My instinct is three separate methods — `AddRoot`/`UpdateRoot`/`DeleteRoot` — accepting that it gives up some code sharing." | §1.6c, option (b) — **not adopted.** The panel's reason is different from, and stronger than, the code-sharing cost the owner already anticipated |
+| *(Coordinating session's counter-proposal)* "Three thin public wrappers that each assert the root is in the claimed state, over one shared internal dispatch." | §1.6c, option (c) — **adopted in mechanism, amended in shape.** The shared internal and the asserting wrapper are kept; one of the three wrappers is rejected on evidence |
+
+**The outcome, in one line:** the single-root write surface becomes **`SaveRoot<TRoot>` plus
+`DeleteRoot<TRoot>`** — `Save` never performs a delete again, because it now *refuses* a root
+marked deleted — with `SaveRoots` and `SaveTransfer` unchanged in name and shape, and all four
+routed through **one** internal insert/update/delete executor so R-CRUD-2's atomicity and
+post-commit deferral stay written exactly once. **Add and Update are deliberately not split**,
+because the panel found real call sites that genuinely cannot know which of the two they are
+performing, while no call site is ever unsure whether it is deleting. Reasoning, and what each of
+the three options actually costs, in §1.6c.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -250,11 +270,13 @@ two engines' schemas have quietly drifted before.
 > #34 needs.
 
 **What happens to `IDatabase`'s three write methods and `IAggregateRoot`:** they move onto
-`IMoneyStore` **unchanged in behavior, renamed in revision 5** — `SaveOne<T>` → `SaveRoot<TRoot>`,
-`SaveBatch` → `SaveRoots`, `SaveTransfer` unchanged (§1.6b). They are the one part of the current
-data layer with a proven, three-engine, ~60-test shared contract behind them; nothing here
-justifies reopening their *semantics*, and revision 5 does not — it changes two names and no
-guarantee. Two changes around them:
+`IMoneyStore` **unchanged in behavior, renamed in revision 5 and split from three methods into four
+in revision 6** — `SaveOne<T>` → `SaveRoot<TRoot>` **+ `DeleteRoot<TRoot>`**, `SaveBatch` →
+`SaveRoots`, `SaveTransfer` unchanged (§1.6b, §1.6c). They are the one part of the current data
+layer with a proven, three-engine, ~60-test shared contract behind them; nothing here justifies
+reopening their *semantics*, and neither revision does — revision 5 changes two names, revision 6
+changes which name a caller types to reach the already-existing delete branch, and neither changes
+a guarantee. Two changes around them:
 
 - **`Save(MyMoney)` does not exist on `IMoneyStore`.** R1 said to retire it; it is still on
   `IDatabase` today. The rebuild is the clean moment.
@@ -579,7 +601,10 @@ tabular-input sprocs that write multiple records as one transaction. Both alread
 Phase 2 persistence-concurrency work. Round 1 carried them forward *implicitly* ("the three write
 methods move onto `IMoneyStore` unchanged"). Revision 2 states them as requirements, because an
 implicit carry-forward is a thing a later slice can quietly drop. *(Revision 5 renames two of the
-three — `SaveRoot`/`SaveRoots`/`SaveTransfer`, per §1.6b — without touching any requirement below.)*
+three — `SaveRoot`/`SaveRoots`/`SaveTransfer`, per §1.6b. Revision 6 splits the delete branch out
+of `SaveRoot` into a named `DeleteRoot<TRoot>`, making it four methods, per §1.6c. Neither touches
+any requirement below: every one of R-CRUD-1..5 applies to all four methods, because all four run
+through the same internal executor.)*
 
 **R-CRUD-1 — every store write is parameterized.** No SQL built by string concatenation with a
 value in it, on either engine. This is already true of every write path today. *(It is not yet true
@@ -588,8 +613,9 @@ of two schema-introspection reads: `SqliteDatabase.cs:218` and `:230` interpolat
 identifiers, so it is not a live injection vector — but both live in code §1.5 deletes, and the
 replacement introspection in `Schema_Verify` must not reintroduce the pattern.)*
 
-**R-CRUD-2 — every store write is atomic at the call boundary.** `SaveRoot`, `SaveTransfer` and
-`SaveRoots` each either apply completely or not at all, including their in-memory side effects.
+**R-CRUD-2 — every store write is atomic at the call boundary.** `SaveRoot`, `DeleteRoot`,
+`SaveTransfer` and `SaveRoots` each either apply completely or not at all, including their
+in-memory side effects.
 SQL Server achieves this inside the proc (`SET XACT_ABORT ON; BEGIN TRANSACTION;`); SQLite achieves
 it with `BeginTransaction()` plus the `postCommitActions` deferral that keeps `RowVersion`/
 `OnUpdated()` from being applied to the object graph until the commit actually succeeded. That
@@ -647,8 +673,35 @@ re-try the transaction... The retry logic should probably be in the business lay
 This is additive to R-CRUD-4, not a change to it — R-CRUD-4 already described an
 engine-independent conflict *contract*; 1.6a states who is on the other end of it.
 
+**Two consequences revision 6 adds here, because §1.6c's state assertions sit directly in this
+loop's path.** Both are small and both are the kind of thing that is expensive to discover later:
+
+1. **The retry loop must not catch the assertion exception, and the assertion must not be a
+   `ConcurrencyConflictException`.** §1.6c's `SaveRoot`/`DeleteRoot` throw when the root is not in
+   a state the method admits. That is a *caller bug* — a programming error, not a runtime race —
+   and it is unconditionally reproducible. If it were signalled with the same exception type the
+   retry loop catches, the loop would re-query, reapply and retry a call that can only ever fail
+   the same way, turning an immediate, obvious crash into a spin. So the assertion throws
+   `ArgumentException` (the *argument's* state is wrong, not the store's), the retry loop catches
+   `ConcurrencyConflictException` **and nothing wider**, and §2.4's `FaultInjectingStore` gets one
+   more job: proving the loop lets an `ArgumentException` straight through.
+2. **A failed write leaves the root's change state untouched, which is what makes retry legal at
+   all.** R-CRUD-2's `postCommitActions` deferral already guarantees this — `OnUpdated()` never runs
+   unless the commit succeeded — so after a caught `ConcurrencyConflictException` a root that was
+   `Changed` is still `Changed` and a root that was `Deleted` is still `Deleted`. The retry can
+   therefore call the *same* method again and pass the same assertion. Under a unified `SaveRoot`
+   this was true but invisible; with a state precondition on the method it becomes load-bearing,
+   so it is stated rather than assumed, and it belongs in the Tier-2 contract suite as
+   *"after a conflict, the same call is still admissible."*
+
 ### 1.6b Naming the store's write methods — `SaveRoot` / `SaveRoots` / `SaveTransfer`
 *(New in revision 5. Developer leading, per the panel's C#/.NET idiom brief.)*
+
+> **Read §1.6c next.** Everything in this subsection still holds — revision 6 does not reopen any
+> of it — but revision 6 adds a **fourth** method, `DeleteRoot<TRoot>`, and narrows what `SaveRoot`
+> accepts. §1.6c is the authoritative statement of the final write surface; §1.6b is where the
+> `Root`-not-`One` and `Roots`-not-`Batch` reasoning lives, and revision 6 reuses that reasoning
+> rather than re-deriving it.
 
 **First, what is settled and not up for discussion here.** The owner has confirmed the *mechanism*:
 these stay **generic (templated) methods**, one body serving `Account`, `Category`, `Transaction`,
@@ -697,6 +750,9 @@ void SaveRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;   // was SaveOne<
 void SaveRoots(IReadOnlyList<IAggregateRoot> roots);             // was SaveBatch
 void SaveTransfer(Transaction from, Transaction to);             // unchanged - see below
 ```
+
+*(Revision 6 adds `void DeleteRoot<TRoot>(TRoot root)` beside `SaveRoot` and narrows `SaveRoot` to
+refuse a deleted root. The three names above are unchanged by that; see §1.6c.)*
 
 **Keep the verb, change the noun.** `Save` is the right verb and is not the problem: it is the
 word the domain, the UI, the existing `IDatabase`, and the stored procs all already use, and
@@ -780,6 +836,336 @@ cannot be generic over differing column shapes. They are named for what each one
 the mapping between them lives in the engine adapter, which is the only place that should know
 both vocabularies. Recorded here so a later slice does not "align" them in either direction.
 
+### 1.6c Should a delete be reached by calling `Save`? — `SaveRoot` + `DeleteRoot`
+*(New in revision 6. Developer leading on the C# shape; Adversarial Expert and Test Engineer
+contributing the sections marked as theirs.)*
+
+The owner: *"I don't like calling `SaveRoot` to perform a delete — 'Save' reads wrong for that
+operation."* Their instinct was three fully separate methods. The coordinating session
+counter-proposed three thin asserting wrappers over one shared internal. The panel was asked to
+judge all three rather than ratify either, and the answer is **neither of them exactly** — the
+evaluation below finds a fact about what `SaveRoot` actually does that changes the arithmetic.
+
+#### First: the objection is upheld, and not as a matter of taste
+
+Three independent reasons, in increasing weight:
+
+1. **A destructive call that does not say so is invisible at review.** The line
+   `store.SaveRoot(account)` is character-for-character identical whether that account is being
+   created, edited, or permanently removed — the difference lives in a field on the object, set
+   somewhere else. Nothing in the call site, the diff, or the grep result distinguishes them.
+   Every other place in this design treats "the destructive operation should be nameable and
+   findable" as a property worth paying for — §1's whole tier split, §2.6.4's
+   `TestDatabase` guard, §6.1's honest statement of what the SQLite facade can claim. A write port
+   where the delete is unnameable is out of step with the rest of the document.
+2. **This codebase has a live way for a root to become deleted behind a caller's back.**
+   `PersistentObject.OnDelete()` is a **soft** delete — it flips one field and fires an event; it
+   does not remove anything from its container, and it has no guard of any kind (CLAUDE.md records
+   this for `Category`, where only the *UI* layer checks whether transactions still reference the
+   category). So a root reaching the store marked `Deleted` when its caller believed it was merely
+   edited is a reachable state, not a thought experiment. Under a unified `SaveRoot`, that is a
+   **silent wrong-behaviour** class: the row disappears and the call that did it reads like a save.
+3. **The verb's object is wrong.** §1.6b's whole move was cardinality → subject (`One` → `Root`).
+   Revision 6 finds the subject was still slightly off: the thing being saved is not the root, it
+   is *the root's pending change*, and one of those changes is a removal. "Save the account"
+   describing a deletion is a genuine mismatch between what the name says and what happens.
+
+#### Second: what `SaveRoot` actually does today — checked, not recalled
+
+This is the fact that reshapes the decision, and it is not what the framing of the question
+assumed. `SaveRoot` does **not** have three internal outcomes. It has four, and the fourth is not
+reachable by any name:
+
+| Root's `ChangeType` | What the store does (`SqliteDatabase.SaveOneCategory`, `:1141`; same shape per root type) |
+|---|---|
+| `Inserted` | `INSERT`, then post-commit `RowVersion = 1`, `OnUpdated()` |
+| `Changed` | version-checked `UPDATE`; zero rows → `ConcurrencyConflictException` |
+| `Deleted` | version-checked `DELETE`; zero rows → `ConcurrencyConflictException` |
+| `None` | **falls through the whole `if`-ladder to the comment "No pending change - nothing to do."** — a legal, silent no-op |
+
+Two further facts, both verified in the tree rather than assumed, because the proposals below
+stand or fall on them:
+
+- **The state space is closed and the three predicates are mutually exclusive.**
+  `PersistentObject.change` is a single field (`Money.cs:455`) and only four values are ever
+  assigned to it — `None`, `Changed`, `Inserted`, `Deleted` (`:484`, `:492`, `:501`, `:513`,
+  `:548`). `ChangeType`'s other four members (`Reloaded`, `Rebalanced`, `ChildChanged`,
+  `TransientChanged`) are only ever *event-argument* values and never reach the field. So an
+  assertion of the form "this root is `Inserted`" is well-defined and cannot be ambiguously true
+  alongside another. **This was the panel's first worry about the asserting-wrapper proposal and
+  it is not a real one.**
+- **`OnUpdated()` deliberately does not clear `Deleted`** (`Money.cs:479-486`: `if (this.change !=
+  ChangeType.Deleted)`). A root stays `IsDeleted` forever after a successful delete. That matters
+  twice below.
+- **A root whose own state is `None` can still have real work to do.** `SaveOneTransaction`
+  (`SqliteDatabase.cs:1875-1958`) runs `SaveTransactionSplitsAndInvestment` **regardless** of the
+  transaction's own change state — so a `Transaction` at `None` with a dirty `Split` writes rows
+  through a call that produces no statement for the root itself. The root's change state is a
+  description of the root's *row*, not of what the call does.
+
+The consequence for this decision is direct: **"three separate operations" is a description of
+three SQL branches, not of three caller intentions**, and a method named `UpdateRoot` would, for a
+`Transaction`, routinely `INSERT` and `DELETE` split rows. Any option that promises "each method
+does one kind of thing" is promising something the aggregate boundary does not deliver.
+
+#### The three options, evaluated
+
+**(a) Keep `SaveRoot` unified, exactly as revision 5 left it.**
+
+- *Buys:* the smallest surface; zero divergence risk against the one part of the data layer that
+  already has a proven, three-engine, ~60-test contract behind it; and — the strongest single
+  argument for it — **it handles the call sites that genuinely do not know their own state.** The
+  2026-09-16 call-site inventory's Group 1 is literally *"Dialog OK / `DataGrid.RowEditEnding`"*,
+  and a grid row commit (`SecuritiesView.OnDataGridCommit`, `TransactionsView.OnDataGridCommit`)
+  receives one object out of the row's `DataContext` with no idea whether it is the grid's
+  new-row placeholder or an existing row being edited. A create-or-edit dialog is the same shape.
+- *Costs:* the three reasons in the first section above. The delete is unnameable, unfindable, and
+  reachable by accident.
+
+**(b) Three fully independent methods, no shared internals (the owner's instinct).**
+
+- *Buys:* the clearest possible names, and each method's SQL readable in one place.
+- *Costs:* three, and the owner already anticipated only the first.
+  1. **The code sharing given up is specifically the part that must not be given up.** R-CRUD-2's
+     `postCommitActions` deferral is described in this document as *"a genuinely hard-won
+     behavior — a stale `RowVersion` claiming a commit the rollback undid is a silent-corruption
+     bug"*, carried forward *verbatim*. Three independent methods means three copies of the
+     transaction/rollback/deferral scaffolding, hence three places for that bug to reappear, and
+     nothing forcing them to agree.
+  2. **It does not actually remove the unified dispatch — it duplicates it.** `SaveRoots` takes a
+     heterogeneous, mixed-state collection *by definition* (reconciliation, merges: some roots
+     changed, some deleted), so the insert/update/delete dispatch has to exist inside the batch
+     path no matter what is done to the singular one. Option (b) buys three names at the price of
+     a **second** implementation of something that is required anyway. On both engines today,
+     `SaveOne<T>` is literally `SaveBatch(new[] { root })` — one identical line
+     (`SqliteDatabase.cs:994`, `SqlServerStoredProcDatabase.cs:1710`) — so this is not a
+     hypothetical duplication being avoided; it is an existing de-duplication being undone.
+  3. **It pushes the dispatch into every caller.** Every create-or-edit call site becomes
+     `if (x.IsInserted) store.AddRoot(x); else store.UpdateRoot(x);`. That is the store's one
+     branch re-written N times in the business layer, which is issue #34's lesson (a hand-repeated
+     decision drifts; a derived one cannot) applied at the write port instead of the clear list.
+
+**(c) Three thin asserting wrappers over one shared internal (the coordinator's proposal).**
+
+- *Buys:* cost 1 and cost 2 of option (b) vanish — the deferral, the transaction and the version
+  check stay written once — while the caller still types a name that says what they mean. And the
+  assertion is not decorative: reason 2 in the first section is a real, reachable, silent
+  wrong-behaviour class that `UpdateRoot`'s `!IsDeleted` check converts into an immediate throw.
+- *Costs:* **cost 3 of option (b) survives completely.** `AddRoot` asserting `IsInserted` and
+  `UpdateRoot` asserting `IsChanged` are exactly as hostile to a create-or-edit call site as three
+  independent methods are — more so, because now the wrong guess *throws* rather than quietly
+  doing the right thing. The proposal fixes (b)'s structural problem and inherits (b)'s ergonomic
+  one.
+
+#### The Adversarial Expert's stress-test of (c), as asked
+
+*Is the "assert the state matches" check valuable, or dead weight that will never fire?*
+**Split verdict, and the split is the whole finding.**
+
+- The **delete-related half is live** — that is, a save refusing a root marked deleted, and a
+  delete requiring one. It fires on the one transition that genuinely happens behind a caller's
+  back (`OnDelete()`'s guardless soft delete, reason 2 above), and the behaviour it prevents is row
+  loss. That is the highest-value assertion available anywhere on this port.
+- The `AddRoot`/`UpdateRoot` half is **mostly dead, and where it is not dead it is wrong.** For it
+  to fire usefully, a caller would have to *believe* a root is new when it is persisted, or vice
+  versa. But a caller that knows which one it is does not get it wrong, and a caller that does not
+  know cannot call either — so the check does not catch a mistake, it manufactures one. The
+  create-or-edit grid commit is not an edge case: it is Group 1, the single largest category in
+  the call-site inventory this whole write surface was carved out of.
+
+*Is there a real scenario where a caller genuinely does not know the object's state before
+calling?* **Yes, and it is the common case, which is the opposite of what the counter-proposal
+assumed.** `DataGrid.RowEditEnding` fires identically for the new-row placeholder and for an edit
+of an existing row; the handler pulls one object from `e.Row.DataContext` and has one code path
+(`SecuritiesView.xaml.cs:254`). A create-or-edit dialog (`AccountDialog`, used for both) is the
+same. Conversely, the panel could not construct a call site that is unsure whether it is deleting:
+deletion in this app is always a separate, deliberately-invoked command (`CategoriesControl.
+Delete()`, a Delete menu item, a row-delete gesture), never the tail of an edit commit. **The
+insert/update distinction is frequently unknown to the caller; the delete distinction never is.**
+That asymmetry is the recommendation.
+
+*Does asserting state in the singular methods, while `SaveRoots`/`SaveTransfer` take mixed-state
+collections and assert nothing, create an asymmetry worth naming?* **Yes — name it, and it is
+smaller under the recommendation than under (c).**
+
+- `SaveRoots` **cannot** assert: mixed state is its purpose. Reconciliation commits a set of
+  changed transactions; a merge commits a survivor (changed) plus a victim (deleted) in one
+  transaction. Requiring uniform state would destroy the method.
+- `SaveTransfer` **cannot** assert either: creating a new transfer passes two `Inserted`
+  transactions, while `TransformTwoTransactionIntoTransfer` links two *existing* ones and passes
+  two `Changed`.
+- So `SaveRoots(new[] { root })` is, and remains, a one-line unvalidated route to the same
+  executor the validated methods guard. **This is a real crack and the document says so rather than
+  claiming a guarantee it does not have** — it is the same shape as §6.2's `InternalsVisibleTo`
+  warning, arriving at the write port. Three things keep it honest: the batch method's name makes
+  a single-element call visibly odd at review; the Tier-0 write-surface test below pins the public
+  member set so a fourth unvalidated singular method cannot quietly appear; and under the
+  recommendation only **one** distinction is being guarded, so there is exactly one thing the back
+  door can be used to dodge instead of three.
+
+#### The recommendation: (c)'s mechanism, two wrappers instead of three
+
+```csharp
+public interface IMoneyStore            // MyMoney.Business, alongside today's IDatabase
+{
+    // Insert-or-update. Refuses a root marked deleted.
+    void SaveRoot<TRoot>(TRoot root)   where TRoot : PersistentObject, IAggregateRoot;
+
+    // Remove. Refuses a root not marked deleted.
+    void DeleteRoot<TRoot>(TRoot root) where TRoot : PersistentObject, IAggregateRoot;
+
+    // Unchanged from revision 5. Mixed-state by definition; assert nothing.
+    void SaveRoots(IReadOnlyList<IAggregateRoot> roots);
+    void SaveTransfer(Transaction from, Transaction to);
+}
+```
+
+with, in each implementation, **one** private executor that all four call — the existing
+insert/update/delete dispatch, unchanged, including its transaction, its version check and its
+`postCommitActions` deferral.
+
+Preconditions, stated exactly, because the loose version of them is wrong:
+
+| Method | Admits | Throws `ArgumentException` on | Why not tighter |
+|---|---|---|---|
+| `SaveRoot` | `Inserted`, `Changed`, `None` | `Deleted` | `None` must be admitted: a `Transaction` at `None` with a dirty `Split` is a real, necessary write (`SaveOneTransaction` runs the owned-children pass regardless of the root's own state). Requiring `IsChanged` would reject it, and there would be no other method to call |
+| `DeleteRoot` | `Deleted` | `Inserted`, `Changed`, `None` | Exact, because the caller always knows |
+
+**`SaveRoot` therefore keeps a silent no-op path** (a genuinely clean root with genuinely clean
+children), and the panel states that plainly rather than implying the name is now fully precise:
+the store cannot tell "clean, nothing to do" from "clean root, dirty children" without inspecting
+owned children, which is engine-specific work that belongs below the port, not in a precondition.
+What `SaveRoot` now guarantees is the thing the owner actually asked for, stated at exactly the
+strength it holds: **it will never remove the root's own row.** It can still delete rows belonging
+to that root's *owned children* — a saved `Transaction` whose `Split` was removed deletes that
+split — because the aggregate is the commit unit and a `Split` has no boundary of its own (§1.6b).
+The looser claim ("`SaveRoot` never deletes anything") is the one a reader will assume, so the
+precise one is written here and repeated in the honest-costs list below.
+
+#### Why this is the right trade, in plain terms
+
+The owner's objection is that one word is doing two jobs. The fix is to give the second job its own
+word — not to split the first job in half as well. Creating and editing are two jobs the *caller*
+usually cannot tell apart at the moment of the call (the grid does not know whether the row you
+just finished typing is new); deleting is a job the caller always knows it is doing, because
+deleting is always something a person deliberately asked for. So the split that matches reality is
+one cut, not two. Making two cuts would force every "save whatever the user just typed" call site
+to first ask a question it has no business asking, and to get it wrong sometimes — and the new
+method would then throw in the caller's face for a distinction that never mattered to it.
+
+And the cut that is made is the valuable one twice over: the delete becomes greppable (you can ask
+"what in this codebase can remove an account?" and get an answer), and the accident where a root
+was marked deleted somewhere else and a save quietly removed it now stops at the door.
+
+#### Developer: the C# shape, and whether the shared mechanism stays reachable
+
+The question that decides whether the validated names mean anything: **can a caller still reach the
+unvalidated dispatch?** Three sub-answers.
+
+1. **The shared executor is not on the port at all, and is not `public`.** `IMoneyStore` declares
+   the four methods above and nothing else write-side. The dispatch is a `protected abstract void
+   WriteRoots(IReadOnlyList<IAggregateRoot> roots)` on an abstract `MoneyStoreBase` in
+   `MyMoney.Business` (beside the port, no engine code in it), implemented once per engine. The
+   four public methods are **non-virtual** members of that base: each validates, wraps its argument
+   if needed, and calls `WriteRoots`. Nothing public reaches the executor except through one of the
+   four. `internal` + `InternalsVisibleTo` is explicitly not the mechanism here — §6.2.
+2. **Writing the validation once, in the base, is the point.** If each engine carried its own copy
+   of the precondition, the two engines could disagree about what `SaveRoot` admits, which is
+   exactly the class of divergence §6.8 exists to catch and the contract suite exists to police —
+   at which point the check has become another thing to keep in sync. One base-class
+   implementation, one behaviour, one test. It also removes real duplication that exists today:
+   `SaveOne<T>` is the same one-line delegation on both engines (`SqliteDatabase.cs:994`,
+   `SqlServerStoredProcDatabase.cs:1710`), and that line moves into the base and is deleted twice.
+3. **Decorators are unaffected, and should not derive from the base.** `RecordingStore` and
+   `FaultInjectingStore` (§2.4) implement `IMoneyStore` directly and forward each of the four
+   public methods to the inner store, where the precondition fires. They record and inject at the
+   *public* level, which is what they want anyway (`SaveRoot(Account#3, v2)` is a more useful
+   recording than `WriteRoots([...])`). `protected abstract WriteRoots` being unreachable from a
+   decorator is therefore not a constraint to work around — it is the correct shape.
+
+One rejected alternative worth recording: C# default interface implementations would let the four
+validated methods live on `IMoneyStore` itself over a single abstract member, with no base class.
+It works on .NET 10 and it is elegant. The panel declines it for the same reason §1's Candidate A
+notes about assembly count — *"not the shape most .NET developers reach for first; needs the
+reasoning written down or it gets 'simplified' back in six months"* — and here the abstract base
+costs nothing the DIM version saves.
+
+#### Test Engineer: what this changes in the test plan
+
+**Yes, this needs real coverage, and it lands in two tiers, not one.** A precondition that is only
+documented is a comment.
+
+1. **Tier 0, new — the write surface is exactly the four named methods.** Reflection over
+   `IMoneyStore`: the set of public write members is `{SaveRoot, DeleteRoot, SaveRoots,
+   SaveTransfer}` and no other, and none of them is an unvalidated singular-root method. This is
+   the test that gives the design its value over time, because the whole benefit evaporates the day
+   someone adds a convenience `Save<T>` back. It sits beside §2.7.2's
+   `StoreWriteMethods_AcceptOnlyAggregateRoots`, which is unchanged in intent but now enumerates
+   four members instead of three.
+
+   ```
+   StoreWriteSurface_IsExactlyTheFourNamedMethods        (revision 6, §1.6c)
+   ```
+2. **Tier 2, new — the preconditions actually throw, per engine.** Six cases, cheap and fast:
+   `SaveRoot` on a `Deleted` root throws `ArgumentException` **and writes nothing**; `DeleteRoot`
+   on an `Inserted`, a `Changed` and a `None` root each throw and write nothing; `SaveRoot` on a
+   `None` root whose owned child is dirty **succeeds and writes the child** (the case a tighter
+   precondition would have broken — this is the regression test for the mistake the panel nearly
+   made); and, per §1.6a, *after a `ConcurrencyConflictException` the same call is still
+   admissible*, which is what makes the business-layer retry loop legal.
+
+   These run per engine in the shared contract suite even though the check lives once in
+   `MoneyStoreBase`. That is deliberate and cheap: the contract suite's job is to prove the two
+   engines are indistinguishable through the port, and a precondition is part of the port's
+   observable behaviour.
+3. **`FaultInjectingStore` gains one job** (§2.4, §1.6a): proving the retry loop lets an
+   `ArgumentException` through rather than retrying it. A caller-bug exception caught by a retry
+   loop becomes a spin, and that is a nastier failure than the original bug.
+4. **Nothing else in the test plan moves.** §2.6's test-control ladder, §2.6.4's `ResetIdentity`
+   parity assertion and §2.7.2's projection tests are untouched — they sit either below the port
+   (test control) or on the type system (projections), and neither cares how many names the write
+   surface has.
+
+#### The honest costs
+
+- **`SaveRoot` is still not a fully precise name.** It admits `None` and no-ops. See the table
+  above for why that is deliberate and why the alternative is worse.
+- **`SaveRoot` can still cause `DELETE` statements to run** — for *owned children*. Saving a
+  `Transaction` whose `Split` was removed deletes that split's row. This is correct (the aggregate
+  is the unit, and the split has no commit boundary of its own — §1.6b), but it means the guarantee
+  is precisely *"`SaveRoot` never removes the root's own row"*, not *"`SaveRoot` never deletes
+  anything."* Worth stating in exactly those words, because the looser claim is the one a reader
+  will assume.
+- **`DeleteRoot` (store) now sits one character from `DeleteRow` (test control, §2.6.2), and they
+  do dangerously different things** — version-checked domain delete versus raw, unchecked,
+  below-the-graph row removal. §1.6b already accepted a one-character tax for
+  `SaveRoot`/`SaveRoots`; this is a second one and it is the more dangerous of the two. Mitigations,
+  none of which is "be careful": they live in different assemblies, are reached through different
+  interfaces, and the test-control one is obtainable only through the guarded factory of §2.6.4.
+  §2.6.3's comparison table is amended in this revision to lead with the two names side by side, so
+  the collision lands in the one place the difference is explained.
+- **A latent issue this rename surfaces rather than creates, flagged not fixed.** Because
+  `OnUpdated()` never clears `Deleted` (`Money.cs:482`), and because a root that was created and
+  then deleted before any save is also `Deleted`, `DeleteRoot` can be handed a root that was never
+  persisted — whereupon the version-checked `DELETE` affects zero rows and raises
+  `ConcurrencyConflictException`, which is a misleading diagnosis of "this row was never there."
+  The same is true of calling delete twice. This behaviour exists today under `SaveRoot` and is not
+  a regression; a named `DeleteRoot` merely makes it *statable*. **Recommendation: the Tier-2
+  contract suite pins the intended answer** (the panel's view is that deleting a never-persisted
+  root should be a no-op, detectable via `RowVersion == 0`, but that is a semantics call the
+  implementation slice should make deliberately rather than inherit).
+
+#### Alternatives the panel considered and rejected *(revision 6)*
+
+| Candidate | Why not |
+|---|---|
+| `AddRoot` / `UpdateRoot` / `DeleteRoot`, fully independent (owner's instinct) | Three copies of R-CRUD-2's post-commit deferral; does not remove the unified dispatch because `SaveRoots` needs it anyway; and it pushes an `if (x.IsInserted)` branch into every create-or-edit call site. See option (b) above |
+| `AddRoot` / `UpdateRoot` / `DeleteRoot` as asserting wrappers (coordinator's proposal) | Right mechanism, one wrapper too many. The Add/Update assertion cannot fire on a caller that knows its own state and *falsely* fires on the many that do not — Group 1's grid-row and create-or-edit-dialog commits. Adopted in its shared-internal form; see the recommendation |
+| `SaveChanges<TRoot>(root)`, EF Core's naming, keeping one method | Genuinely tempting: EF's `SaveChanges` deletes rows and surprises nobody, because the noun is *changes*, not the entity. Rejected because it fixes the reading and not the finding — the delete is still unnameable and ungreppable, and reason 2's behind-your-back soft delete still lands silently. It also invites the unit-of-work reading §1.6b rejected for `Commit` |
+| `SaveRoot` / `RemoveRoot` | Pure naming preference over `DeleteRoot`. `Delete` matches the SQL, matches `ChangeType.Deleted`, matches the domain's `OnDelete()`, and matches §2.6.2's `DeleteRow`. `Remove` is already spoken for by `RemoveRow`/`RemoveRows`, where it means *"temporarily, and restored on `Dispose`"* — the opposite of permanence |
+| Keep unified `SaveRoot` and add `DeleteRoot` as an *alias* both admitting any state | The worst of both: two names that do the same thing teach a reader that the distinction is cosmetic, and the assertion — the one part with real bug-catching value — is gone |
+| Fold delete into `IMoneyStoreTestControl` and leave `IMoneyStore` write-only-ish | Category error. Deleting an account is a domain operation with version checks and domain semantics (§2.6.3's table). Test control is fixture machinery that runs *below* the version check and is not shipped |
+
 ---
 
 ## 1.7 New design principle: SQLite should use SQLite (Data Engine Expert)
@@ -807,7 +1193,7 @@ Engine version 3.53.4 ships with all of these (§0.1); none needs a package chan
 | **`CHECK` constraints** | Not emitted | Domain invariants enforced by the engine on both engines instead of by C# on one | **Adopt** for invariants that are genuinely schema-level (non-negative where truly non-negative, enum ranges). Resist the urge to push business rules in: a `CHECK` that fires is an opaque error, and §7's UI note about plain-language failures applies |
 | **`STRICT` tables** (3.37+) | Not used — SQLite's default dynamic typing silently accepts a string in an `INTEGER` column | Column types that actually mean something, which is *exactly* the kind of SQL-Server-alike behavior this principle is about. It is also the single cheapest way to stop a type mismatch surviving a SQLite test and failing on SQL Server | **Adopt.** Strong recommendation; low cost since the schema is being rebuilt from zero anyway |
 | **Generated columns** (3.31+) | Not used | Derived values computed by the engine rather than assigned in C# | **Note, don't adopt yet.** No current need; listing it so the option is known |
-| **`UPSERT` (`ON CONFLICT DO UPDATE`)** (3.24+) | Not used | Insert-or-update in one statement | **Note, don't adopt.** The store's write paths are explicitly branch-on-`IsInserted`/`IsChanged`/`IsDeleted` because the *change type* is a domain concept carrying version semantics. Collapsing it into an upsert would lose the conflict check, which is a regression dressed as a simplification |
+| **`UPSERT` (`ON CONFLICT DO UPDATE`)** (3.24+) | Not used | Insert-or-update in one statement | **Note, don't adopt.** The store's write paths are explicitly branch-on-`IsInserted`/`IsChanged`/`IsDeleted` because the *change type* is a domain concept carrying version semantics. Collapsing it into an upsert would lose the conflict check, which is a regression dressed as a simplification. **Revision 6 does not change this**: splitting `DeleteRoot` out of `SaveRoot` (§1.6c) changes which *name* a caller types, not the internal branching — `SaveRoot` still chooses `INSERT` or `UPDATE` by change type inside one executor, and it does so for the same version-semantics reason this row gives for refusing to let SQL make that choice instead |
 | **`PRAGMA index_list` / `table_info` / `foreign_key_list`** | `TableExists` scrapes `sqlite_master.sql` text | Structured schema introspection — exactly what `Schema_Verify` (§1.5, S-4) needs, and what issue #34's suggested fix named | **Adopt.** Required by §1.5 regardless |
 | **`PRAGMA foreign_key_check`, `integrity_check`, `quick_check`** | Not used | An engine-native consistency assertion usable by the test tier and by the deferred backup/restore verification (§1.8) | **Adopt** in the test tier and provisioner |
 | **`ATTACH DATABASE` + `VACUUM INTO`** | `VACUUM INTO` noted as absent-by-design from the store tier | A file-level backup/duplication primitive that is transactionally consistent, unlike `File.Copy` of a live WAL database | **Adopt in the provisioner tier**, where §3.2 already puts engine-native backup — and note it is *better* than the close-and-`File.Copy` round 1 described, because it does not require closing |
@@ -988,7 +1374,11 @@ afterthought. Add two things it doesn't have:
   explicitly shape (b) of the business-layer testing responsibility and is currently done by
   inference.
 - **`FaultInjectingStore`** — a decorator configured to throw on the Nth call, or to throw
-  `ConcurrencyConflictException` for a named root, or to fail mid-`SaveRoots`. This is the
+  `ConcurrencyConflictException` for a named root, or to fail mid-`SaveRoots`. **Revision 6 adds
+  one more job** (§1.6c, §1.6a): proving the business-layer retry loop lets an `ArgumentException`
+  — the exception `SaveRoot`/`DeleteRoot` raise when a root is not in a state the method admits —
+  straight through, instead of treating it as a conflict and retrying a call that can only fail
+  identically forever. This is the
   concrete answer to the owner's *"test processes to drive the happy path **and the error path**
   of the data layer"*. **Revision 3: this is also the formal answer to the owner's separate,
   later requirement that "the test business layer should have one or more APIs that will have a
@@ -1106,16 +1496,26 @@ MyMoneyData_HasNoWpfAssemblyReference               (carry forward, per-engine n
 TestsBusiness_DoesNotReferenceTheWpfUiProject       (fixes 2.1 #2)
 
 ProjectionTypes_DoNotImplementIAggregateRoot        (revision 4, §2.7.2)
-StoreWriteMethods_AcceptOnlyAggregateRoots          (revision 4, §2.7.2)
+StoreWriteMethods_AcceptOnlyAggregateRoots          (revision 4, §2.7.2 - now four members, §1.6c)
+
+StoreWriteSurface_IsExactlyTheFourNamedMethods      (revision 6, §1.6c)
 ```
 
 The fourth one is the test that makes D-37 real rather than aspirational, and it is the one most
 likely to be quietly deleted when it becomes inconvenient — so it should assert against an actual
 `dotnet publish -c Release` output directory, not against a `.csproj`.
 
-The last two are revision 4's; they are what turns *"the business layer knows views are read-only"*
-from a sentence in a document into a property of the compiled assemblies. §2.7.2 gives their exact
-shape.
+`ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` are
+revision 4's; they are what turns *"the business layer knows views are read-only"* from a sentence
+in a document into a property of the compiled assemblies. §2.7.2 gives their exact shape.
+
+`StoreWriteSurface_IsExactlyTheFourNamedMethods` is revision 6's, and it is the test that makes
+§1.6c's split worth having a year from now: `IMoneyStore`'s public write members are exactly
+`SaveRoot`, `DeleteRoot`, `SaveRoots` and `SaveTransfer`, with no unvalidated singular-root method
+beside them. The benefit of naming the delete disappears the moment someone re-adds a convenience
+`Save<T>` that does everything, and this is the thing that has to be deliberately amended for that
+to happen. The *behavioural* half — that the preconditions genuinely throw — is Tier-2 and per
+engine; §1.6c's Test Engineer note lists the six cases.
 
 ---
 
@@ -1221,10 +1621,15 @@ strictly better than the single `Seed` the earlier revisions implied, because it
 ### 2.6.3 Why these cannot just be done through `IMoneyStore` — the justification for the tier
 
 A reviewer's first reaction to `DeleteRow` should be *"`IMoneyStore` can already delete."* It can,
-and that is a different operation:
+and that is a different operation. **Revision 6 makes this table load-bearing rather than
+explanatory**, because §1.6c names the store's delete `DeleteRoot<TRoot>` — one character from
+`DeleteRow`, and the two do dangerously different things. This is the place that difference is
+documented; §1.6c's honest-costs list points here:
 
-| Through `IMoneyStore` | Through `IMoneyStoreTestControl` |
+| Through `IMoneyStore` — `DeleteRoot<TRoot>(root)` | Through `IMoneyStoreTestControl` — `DeleteRow(table, id)` |
 |---|---|
+| Takes a **root object**, typed, generic-constrained to `IAggregateRoot` | Takes a **`TableRef` and a raw `long` id**. No object, no type relationship to the domain at all |
+| Refuses a root not marked `Deleted` (`ArgumentException`, §1.6c) — the domain has to have agreed the thing is going | Refuses nothing. The row's change state is not consulted because there is no object to consult |
 | Version-checked; throws `ConcurrencyConflictException` on a stale `RowVersion` (R-CRUD-4) | No version check at all. A test that has no idea what version a row is at can still remove it |
 | Applies domain semantics — `SaveTransfer` touches both sides, deleting a transfer's other side is refused when reconciled | Applies none. One row, one table. If the result violates an FK, the engine says so and the operation rolls back |
 | Runs `postCommitActions`, updates the in-memory graph, marks objects `OnUpdated()` | Runs below the object graph entirely |
@@ -1443,14 +1848,18 @@ and critically, **no projection implements `IAggregateRoot`.** Since every write
 is generically constrained to roots —
 
 ```csharp
-void SaveRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;
+void SaveRoot<TRoot>(TRoot root)   where TRoot : IAggregateRoot;
+void DeleteRoot<TRoot>(TRoot root) where TRoot : IAggregateRoot;   // revision 6, §1.6c
 void SaveRoots(IReadOnlyList<IAggregateRoot> roots);
 ```
 
-— `store.SaveRoot(transactionRow)` does not compile. Not "is discouraged", not "throws at
-runtime": there is no overload it can bind to. A business-layer developer who tries to write back
-something they queried discovers it at the moment they type it, which is the only feedback loop
-that reliably works.
+— `store.SaveRoot(transactionRow)` does not compile, and neither does
+`store.DeleteRoot(transactionRow)`. Not "is discouraged", not "throws at runtime": there is no
+overload either can bind to. A business-layer developer who tries to write back something they
+queried discovers it at the moment they type it, which is the only feedback loop that reliably
+works. Revision 6's split does not weaken this in any way — it adds a fourth member carrying the
+*same* constraint, which is exactly what `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.5) exists
+to keep true as the family grows.
 
 **3. Projections carry no `RowVersion`.** This is the subtle one and it matters more than it
 looks. If a projection carried a version, a determined developer could construct a root from a
@@ -1488,8 +1897,13 @@ StoreWriteMethods_AcceptOnlyAggregateRoots
 ```
 
 The second is the one that earns its place over time: the property is easy to hold today when
-`IMoneyStore` has three write methods, and easy to lose on the day someone adds a fourth that
-takes a DTO "just for this one import path."
+`IMoneyStore` has a small, closed write surface, and easy to lose on the day someone adds a method
+that takes a DTO "just for this one import path." **Revision 6 is the first live test of that
+test** — it adds a fourth write method (`DeleteRoot`), and the right outcome was that the new
+member had to satisfy the same admission rule rather than the rule bending to accommodate it. It
+did. Note the division of labour with revision 6's own Tier-0 test: this one polices what the write
+methods *accept*; `StoreWriteSurface_IsExactlyTheFourNamedMethods` polices *how many there are and
+what they are called*.
 
 ### 2.7.3 The `INSTEAD OF` triggers tension, stated and resolved
 
@@ -1742,6 +2156,16 @@ has already made and can defend, not a question the panel is unable to answer:
 > the recommendation either way; a "no, make it absolute" answer costs one line in §1.7.1 and one
 > sentence in §2.7.3.
 
+**Net after revisions 5 and 6: no change to this list either.** Both were write-port naming and
+shape questions; neither touches a product or appetite decision. Revision 6 raises **no** new item
+for the owner and adds no confirmation request — unlike revision 4's views question, the panel had
+the evidence it needed in the tree (the 2026-09-16 call-site inventory, `PersistentObject`'s
+change-state machinery, and what the store's dispatch actually does per root type) and could answer
+outright rather than hand part of it back. §1.6c does flag **one latent implementation-semantics
+question** — what `DeleteRoot` should do with a root that was never persisted — but deliberately
+routes it to slice 3 and its contract test rather than up to the owner, because it is a behaviour
+to pin, not a trade-off to choose.
+
 ---
 
 ## 5. Recommended starting point, sanity-checked
@@ -1770,12 +2194,12 @@ flag:
 | 1 | `IMoneyStore` / `IMoneyStoreProvisioner` / `IMoneyQuery` ports (in `MyMoney.Business`), `MyMoney.TestKit.Contracts` with `IMoneyStoreTestControl` | The tier split exists as types before any engine implements it |
 | 2 | `MyMoney.Data.Sqlite.Provisioning` — the §1.5 executor: `__SchemaHistory` ledger, per-step transactions, checksums, `ApplyTo`/`CurrentVersion`/`Verify`; steps creating `Accounts` + FK-target tables as `STRICT` | Schema-as-versioned-artifact, not reflection-to-DDL; and the upgrade mechanism exists before anything needs upgrading |
 | **2b** | **The fresh-vs-upgraded schema-equality test** (§1.5 S-4): build at N; build at N−1 then `ApplyTo(N)`; assert introspected schemas identical. Include a step that adds an index to a table created by an earlier step — the issue #34 shape | **Issue #34 cannot recur.** The upgrade path runs on every build from here on |
-| 3 | `MyMoney.Data.Sqlite` — `SaveRoot<Account>`, `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven single-root save pattern (today's `SaveOne`, renamed `SaveRoot` in revision 5 — §1.6b) survives the reshape, engine-side |
+| 3 | `MyMoney.Data.Sqlite` — `SaveRoot<Account>` **and `DeleteRoot<Account>`** over one shared `WriteRoots` executor on `MoneyStoreBase` (§1.6c), `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven single-root save pattern (today's `SaveOne`, renamed `SaveRoot` in revision 5 — §1.6b, and split into save/delete in revision 6 — §1.6c) survives the reshape, engine-side, with the insert/update/delete dispatch still written exactly once |
 | 4 | `MyMoney.TestKit` — in-memory-SQLite store fixture (T-1), `RecordingStore`, `FaultInjectingStore`, `StoreContractTests` base with the Account cases | Happy path **and** error path from day one, as the owner asked — over a real engine, not a mock |
 | 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl`'s **schema** level (`ResetSchema` = `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery) **and its data/row levels** (§2.6): introspection-derived `ClearAllData`/`ClearTables`/`ClearTable`, `CaptureRow`/`DeleteRow`/`RestoreRow` + the `RemoveRow` scope, `TableRef` with its anti-drift contract test, and the `ResetIdentity` parity assertion (§2.6.4) | The SQLite facade, for real; the owner's nuke-and-pave as a first-class operation rather than a script; and a reset granularity a test can actually aim (§2.6) |
 | **5b** | `TestDatabase`-flag refusal in the provisioner contract (§1.8): destructive operations fail loudly against an entry not marked as a test database | The only guard that currently exists becomes enforced rather than assumed |
-| 6 | `MyMoney.Tests.Architecture` — all nine Tier-0 tests from §2.5, including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2); plus the Tier-2 *schema owns no `INSTEAD OF` trigger* check per engine (§2.7.3) | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule |
-| 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException`, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one |
+| 6 | `MyMoney.Tests.Architecture` — all ten Tier-0 tests from §2.5, including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2) and revision 6's `StoreWriteSurface_IsExactlyTheFourNamedMethods` (§1.6c); plus the Tier-2 *schema owns no `INSTEAD OF` trigger* check per engine (§2.7.3) and §1.6c's six per-engine precondition cases | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule, and "`SaveRoot` cannot remove a row," which is a behaviour a test proves rather than a name that implies it |
+| 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException` **and nothing wider**, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand and to prove an `ArgumentException` from §1.6c's preconditions is *not* retried | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one — with the caller-bug/race distinction pinned rather than assumed |
 | 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine, plus the `Test/*` half of §2.6 (`dbo.Test_ClearTables` taking a table-name TVP, deployed only into a `TestDatabase: true` catalog) | The tiering maps twice, the schema mechanism is parity (§4.1 #3), the contract suite is genuinely shared, and §2.6.4's `ResetIdentity` divergence is pinned rather than discovered |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
 | 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveRoots` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
@@ -1988,17 +2412,33 @@ worked case.
   `IMoneyStoreProvisioner` / `IMoneyStoreTestControl`) plus a non-store `IDataFormat`, and make
   each tier of each engine **its own assembly** (Candidate A), so privilege separation is
   "the code isn't in the build output" rather than "the code is politely hidden."
-- **Keep `IAggregateRoot` and the three write methods unchanged in behavior, renamed in revision 5
-  for clarity** (§1.6b): `SaveOne<T>` → **`SaveRoot<TRoot>`**, `SaveBatch` → **`SaveRoots`**,
-  `SaveTransfer` **kept as-is** because it was already named after what it saves rather than how
-  many — it is the pattern, not the exception. The methods stay **generic**, which the owner has
-  confirmed is the point (one body per operation instead of one per entity type); only the nouns
-  change, from cardinality (`One`, `Batch`) to subject (`Root`, `Roots`), matching §2.6.2's
-  existing `ClearTable`/`ClearTables`, `CaptureRow`/`CaptureRows` convention. The SQL procs
-  (`Currencies_SaveBatch` et al.) are deliberately **not** renamed — they are necessarily
-  per-entity and read fine. Also retire `Save(MyMoney)`; **add `IMoneyQuery`**, a closed, typed
-  filter/aggregate port (not `IQueryable`), because reporting needs SQL-side filtering and
-  subtotaling that doesn't exist today.
+- **Keep `IAggregateRoot` and the write methods unchanged in behavior, renamed in revision 5 and
+  split from three into four in revision 6** (§1.6b, §1.6c): `SaveOne<T>` → **`SaveRoot<TRoot>`**,
+  `SaveBatch` → **`SaveRoots`**, `SaveTransfer` **kept as-is** because it was already named after
+  what it saves rather than how many — it is the pattern, not the exception. The methods stay
+  **generic**, which the owner has confirmed is the point (one body per operation instead of one
+  per entity type); the nouns changed from cardinality (`One`, `Batch`) to subject (`Root`,
+  `Roots`), matching §2.6.2's existing `ClearTable`/`ClearTables`, `CaptureRow`/`CaptureRows`
+  convention.
+- **Revision 6: a delete is no longer reached by calling `Save` (§1.6c).** The owner objected that
+  `SaveRoot` performing a delete reads wrong, and the panel upheld it on stronger ground than
+  taste — the destructive call was unnameable and ungreppable, and `OnDelete()`'s guardless soft
+  delete makes "a root got marked deleted elsewhere and my save silently removed the row" a
+  reachable bug rather than a hypothetical. **`DeleteRoot<TRoot>` is split out; `SaveRoot` now
+  refuses a root marked deleted.** Insert and update are deliberately **not** split from each
+  other: the call-site inventory's largest group is *"Dialog OK / `DataGrid.RowEditEnding`"*, which
+  genuinely cannot know whether the row it is committing is new or existing, whereas no call site
+  is ever unsure it is deleting. All four methods route through **one** private executor
+  (`protected abstract WriteRoots` on a `MoneyStoreBase` in the port assembly), so R-CRUD-2's
+  atomicity and its hard-won post-commit deferral stay written exactly once and the two engines
+  cannot disagree about the precondition. The named asymmetry: `SaveRoots` and `SaveTransfer` are
+  mixed-state by definition and assert nothing, so `SaveRoots(new[] { root })` remains a one-line
+  unvalidated route to the same executor — stated as a real crack rather than papered over, and
+  bounded by a Tier-0 test pinning the public write surface to exactly those four members.
+- Also retire `Save(MyMoney)`; **add `IMoneyQuery`**, a closed, typed filter/aggregate port (not
+  `IQueryable`), because reporting needs SQL-side filtering and subtotaling that doesn't exist
+  today. The SQL procs (`Currencies_SaveBatch` et al.) are deliberately **not** renamed — they are
+  necessarily per-entity and read fine.
 - **Schema management becomes one versioned mechanism with several entry points** (§1.5): an
   ordered list of immutable steps, a `__SchemaHistory` ledger with checksums, one per-step
   transaction, and `Schema_ApplyTo`/`CurrentVersion`/`Verify`/`DropAll` — real stored procs on SQL
@@ -2043,7 +2483,7 @@ worked case.
   time on SQL Server), and a view change is its own numbered step. The read/write asymmetry is
   enforced by four stacked type-system properties rather than by documentation: separate
   `IMoneyQuery`/`IMoneyStore` ports, query results marked `IProjection` and never `IAggregateRoot`
-  (so `SaveRoot(row)` does not compile), projections carrying **no** `RowVersion` (so a stale
+  (so neither `SaveRoot(row)` nor `DeleteRoot(row)` compiles), projections carrying **no** `RowVersion` (so a stale
   version cannot be smuggled from a report into a write), and the business layer never naming a
   view at all. **`INSTEAD OF` triggers are demoted from revision 2's "adopt selectively" to "do
   not adopt now"**, kept as a deferred single-candidate spike with a standing "never above
