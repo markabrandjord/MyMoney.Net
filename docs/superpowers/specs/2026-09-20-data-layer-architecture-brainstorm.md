@@ -122,6 +122,26 @@ because the panel found real call sites that genuinely cannot know which of the 
 performing, while no call site is ever unsure whether it is deleting. Reasoning, and what each of
 the three options actually costs, in §1.6c.
 
+**Revision 7 (2026-09-20, same day).** A recording revision, not a design one: the owner answered
+§4 item 4, the document's single biggest open architectural fork, and this revision records that
+decision in place rather than re-deriving or redesigning around it — §1 was already built, by
+deliberate construction, to work either way.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| "The query-based pattern replaces the whole-graph-in-memory pattern everywhere." | §4 item 4 (now resolved, not open); §4.1 adds the "Net after revision 7" note; the closing summary is updated to match |
+
+**The outcome, in one line:** whole-graph `Load()` (reading the entire dataset into one in-memory
+`MyMoney` object graph at startup, which the app then works against directly) **does not survive**.
+Every part of the application goes through targeted queries against the data layer — not just
+reports, which is what originally motivated `IMoneyQuery` — instead of walking an already-loaded
+object tree. This is the larger-rewrite option, chosen deliberately. Because §1's design already
+worked either way by construction, no candidate, port shape, or slice changes as a result; the two
+places that described `IMoneyQuery` as reports-scoped (§1's introduction of the port, and §7's
+summary bullet) are tightened to say so plainly, and item #3's "lag the query surface on SQL
+Server" recommendation is flagged as framing that may now be stale — without being resolved here,
+per the owner's instruction that this is a recording pass, not a new design pass.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -282,7 +302,11 @@ a guarantee. Two changes around them:
   `IDatabase` today. The rebuild is the clean moment.
 - **`IAggregateRoot.Id` stays `long`.** Non-negotiable, already load-bearing.
 
-**New: `IMoneyQuery`, the read-side port issue #5's Reports finding requires.** Not `IQueryable`
+**New: `IMoneyQuery`, the read-side port issue #5's Reports finding requires.** *(Revision 7: the
+owner has since decided `Load()` does not survive — see §4 item 4 — which makes `IMoneyQuery` the
+universal read-access pattern for the whole application, not a reports-specific addition. Reports
+remains the finding that first surfaced the need; it is no longer the boundary of its scope.)* Not
+`IQueryable`
 — the SQL Server tier is stored-proc-only, so an expression-tree provider is literally
 impossible there, and an `IQueryable` that silently materializes everything and filters in
 memory is worse than no abstraction at all. Instead, a closed, typed request:
@@ -2086,12 +2110,17 @@ technical panel cannot legitimately answer.
    (starting with `IMoneyQuery`) implemented twice and contract-tested twice, or may the SQL Server
    tier lag and be caught up at milestones? The cost is real, recurring, and paid on every slice.
 
-4. **Does whole-graph `Load()` survive?** The `MyMoney` object graph with its `PersistentObject`
-   change tracking assumes "load everything at startup, hold it in memory." The `IMoneyQuery` port
-   makes incremental, query-backed loading *possible*. This is the biggest architectural fork in
-   the entire rebuild — it decides whether `Money.cs`'s object graph survives as the domain model
-   or becomes a view over queries. The panel deliberately designed §1 to work **either way**
-   (`LoadAll` stays on `IMoneyStore` for now), but this can't stay undecided for long.
+4. ~~**Does whole-graph `Load()` survive?**~~ **Resolved in revision 7 — no.** The `MyMoney`
+   object graph with its `PersistentObject` change tracking assumed "load everything at startup,
+   hold it in memory." The `IMoneyQuery` port made incremental, query-backed loading *possible*;
+   this was the biggest architectural fork in the entire rebuild — it decided whether `Money.cs`'s
+   object graph survives as the domain model or becomes a view over queries. The owner's decision,
+   verbatim: **"The query-based pattern replaces the whole-graph-in-memory pattern everywhere."**
+   `Load()` does not survive. Every part of the application — not only reports, which is what
+   originally motivated `IMoneyQuery` — goes through targeted queries against the data layer
+   instead of walking an already-loaded object tree. The panel deliberately designed §1 to work
+   **either way by construction**, so nothing in this design's shape changes as a result; this is a
+   recording of the decision, not new design work. See §4.1 for what this leaves stale elsewhere.
 
 5. **Is `XmlStore` kept as an export format from day one?** D-35 says yes-as-a-format (disaster
    recovery, human-readable, "the only way off the product"). Whether `IDataFormat` and an XML
@@ -2165,6 +2194,22 @@ outright rather than hand part of it back. §1.6c does flag **one latent impleme
 question** — what `DeleteRoot` should do with a root that was never persisted — but deliberately
 routes it to slice 3 and its contract test rather than up to the owner, because it is a behaviour
 to pin, not a trade-off to choose.
+
+**Net after revision 7: item #4 moves from untouched to resolved by the owner.** The owner has
+decided: *"The query-based pattern replaces the whole-graph-in-memory pattern everywhere."*
+`Load()` does not survive; see §4 item 4 for the decision as recorded. This is a recording of a
+product/appetite decision, not new design work — §1 was already designed to work either way by
+construction, so nothing here changes shape.
+
+One piece of framing elsewhere in this section is now stale as a direct consequence, flagged here
+rather than resolved: **item #3's table row** (SQL Server feature parity) recommends letting
+`IMoneyQuery` and other read-side capabilities lag on SQL Server "while schema management does
+not," on the premise that the query surface's main consumer was reports. With whole-graph `Load()`
+gone, `IMoneyQuery` is how *every* read reaches the data layer, on every engine — so a lagging
+query surface on SQL Server would mean the SQL Server tier can't serve ordinary application reads,
+not just stale reports, while schema management races ahead. Item #3 remains open and is not
+resolved here; the panel's recommendation may need revisiting in light of this, but that is the
+panel's or the owner's call to make separately, not something this recording pass decides.
 
 ---
 
@@ -2437,7 +2482,10 @@ worked case.
   bounded by a Tier-0 test pinning the public write surface to exactly those four members.
 - Also retire `Save(MyMoney)`; **add `IMoneyQuery`**, a closed, typed filter/aggregate port (not
   `IQueryable`), because reporting needs SQL-side filtering and subtotaling that doesn't exist
-  today. The SQL procs (`Currencies_SaveBatch` et al.) are deliberately **not** renamed — they are
+  today. *(Revision 7: reporting was the port's original motivating case, not its scope boundary —
+  the owner has decided the query-based pattern replaces whole-graph `Load()` everywhere, so
+  `IMoneyQuery` is now how every part of the application reads, not just reports. See §4 item 4.)*
+  The SQL procs (`Currencies_SaveBatch` et al.) are deliberately **not** renamed — they are
   necessarily per-entity and read fine.
 - **Schema management becomes one versioned mechanism with several entry points** (§1.5): an
   ordered list of immutable steps, a `__SchemaHistory` ledger with checksums, one per-step
@@ -2510,8 +2558,12 @@ worked case.
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: of §4's original seven items, six remain open in some form
-  (four reframed or strengthened with recommendations in revision 2: #1, #3, #5, #7; one fully
-  untouched: #4, whether whole-graph `Load()` survives) plus new item #8 — *what event ends the
-  nuke-and-pave phase?* **One item is now resolved**: #2 (the file-lease question), closed by the
-  owner in revision 3 — see §1.6a. The panel wants #8's trigger named, not the date.
+- **Still the owner's to decide**: of §4's original seven items, five remain open in some form
+  (four reframed or strengthened with recommendations in revision 2: #1, #3, #5, #7) plus new item
+  #8 — *what event ends the nuke-and-pave phase?* **Two items are now resolved**: #2 (the
+  file-lease question), closed by the owner in revision 3 — see §1.6a — and **#4 (whether
+  whole-graph `Load()` survives), closed by the owner in revision 7 — see §4 item 4.** The owner's
+  decision: *"The query-based pattern replaces the whole-graph-in-memory pattern everywhere."*
+  `Load()` does not survive; `IMoneyQuery` is now the universal read-access pattern, not a
+  reports-specific addition (§4.1 flags that this leaves item #3's "lag the query surface"
+  recommendation stale, without resolving it). The panel wants #8's trigger named, not the date.
