@@ -42,5 +42,10 @@ public sealed partial class AddAccountViewModel : ObservableObject
             this.Succeeded = false;
             this.ErrorMessage = ex.Message;
         }
+        catch (ArgumentException ex)
+        {
+            this.Succeeded = false;
+            this.ErrorMessage = ex.Message;
+        }
     }
 }

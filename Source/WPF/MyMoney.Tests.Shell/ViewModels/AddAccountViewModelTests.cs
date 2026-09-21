@@ -49,14 +49,32 @@ public class AddAccountViewModelTests
     }
 
     [Test]
-    public void CancelRestores_ResettingFieldsProducesAFreshViewModelState()
+    public void Commit_WithBlankName_SetsErrorMessageForValidationError()
     {
-        // D-13's contract lives here: "Cancel restores" is implemented as "the dialog that
-        // owned this view model is discarded, taking its typed-but-uncommitted state with
-        // it" - not as an in-place reset. This test documents that a freshly constructed
-        // view model has no residue from a previous, cancelled one; Task 10's dialog code
-        // constructs a NEW AddAccountViewModel every time "Add Account" is clicked, rather
-        // than reusing one, which is what actually makes cancel-restores true.
+        using var fixture = InMemorySqliteStore.Create();
+        var service = new AddAccountService(fixture.Store, fixture.Query);
+        var viewModel = new AddAccountViewModel(service)
+        {
+            Name = "   ", // blank/whitespace name
+            Type = AccountType.Checking,
+            Currency = "USD",
+        };
+
+        viewModel.CommitCommand.Execute(null);
+
+        Assert.That(viewModel.Succeeded, Is.False);
+        Assert.That(viewModel.ErrorMessage, Is.Not.Null);
+    }
+
+    [Test]
+    public void DefaultConstruction_HasCorrectDefaults()
+    {
+        // Verifies that a freshly constructed AddAccountViewModel has correct initial values.
+        // The real cancel-restore guarantee (D-13) — that typed-but-uncommitted state is
+        // discarded when a dialog is cancelled — is implemented by Task 10's dialog opening
+        // code constructing a NEW AddAccountViewModel on each "Add Account" click, rather
+        // than reusing/resetting one in place. That behavior is verified by Task 10's own
+        // tests against its dialog-opening code path, not here.
         using var fixture = InMemorySqliteStore.Create();
         var service = new AddAccountService(fixture.Store, fixture.Query);
 
