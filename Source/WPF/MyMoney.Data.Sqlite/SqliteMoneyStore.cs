@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SQLite;
 using System.Globalization;
 
@@ -90,9 +91,14 @@ namespace Walkabout.Data.Sqlite
 
         protected override void WriteRoots(IReadOnlyList<IAggregateRoot> roots)
         {
+            var accounts = new List<Account>(roots.Count);
             foreach (IAggregateRoot root in roots)
             {
-                if (!(root is Account))
+                if (root is Account account)
+                {
+                    accounts.Add(account);
+                }
+                else
                 {
                     // Not NotImplementedException-as-a-capability-signal (spec section 3.2): this
                     // is a deliberate, tested statement that Plan A's vertical stops at Account.
@@ -104,7 +110,177 @@ namespace Walkabout.Data.Sqlite
                 }
             }
 
-            throw new NotImplementedException("Task 12.");
+            // BEGIN IMMEDIATE: take the write lock up front rather than upgrading mid-transaction,
+            // so the collision pre-check below cannot be invalidated by a concurrent writer.
+            // IsolationLevel.Serializable is this provider's non-obsolete spelling of it.
+            using (SQLiteTransaction tx = this.connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                // EVERY in-memory side effect is deferred until after Commit() returns. If a later
+                // root in the batch conflicts, the rollback undoes every write this transaction
+                // made - including ones whose own statement already succeeded. Applying RowVersion
+                // or OnUpdated() per root instead would leave an earlier root claiming a commit
+                // the rollback undid, which is a silent-corruption bug. Carried forward verbatim
+                // from SqliteDatabase.SaveBatch - R-CRUD-2.
+                var postCommitActions = new List<Action>();
+                try
+                {
+                    var inserted = new List<Account>();
+                    var changed = new List<Account>();
+                    var deleted = new List<Account>();
+
+                    foreach (Account a in accounts)
+                    {
+                        if (a.IsInserted)
+                        {
+                            inserted.Add(a);
+                        }
+                        else if (a.IsDeleted)
+                        {
+                            deleted.Add(a);
+                        }
+                        else if (a.IsChanged)
+                        {
+                            changed.Add(a);
+                        }
+
+                        // A root at None produces no statement for its own row. Account has no
+                        // owned children, so for this slice that is the whole story - spec 1.6c's
+                        // deliberate silent no-op path.
+                    }
+
+                    this.InsertAccounts(inserted, tx, postCommitActions);
+                    this.UpdateAccounts(changed, tx, postCommitActions);
+                    this.DeleteAccounts(deleted, tx, postCommitActions);
+
+                    tx.Commit();
+                }
+                catch (Exception original)
+                {
+                    // A failing Rollback must never silently replace the original exception (the
+                    // caller needs to see a ConcurrencyConflictException), and must never leave
+                    // the caller thinking the rollback happened when it did not.
+                    try
+                    {
+                        tx.Rollback();
+                    }
+                    catch (Exception rollbackFailure)
+                    {
+                        throw new InvalidOperationException(
+                            "Rollback failed after: " + original.Message, rollbackFailure);
+                    }
+
+                    throw;
+                }
+
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
+            }
+        }
+
+        /// <summary>
+        /// One set-based statement for the whole insert group: spec section 1.7.1's adopted
+        /// json_each mechanism, the genuine table-valued-parameter equivalent on SQLite. The batch
+        /// travels as ONE bound parameter, so R-CRUD-1 holds - the JSON is a value, not
+        /// concatenated SQL. RETURNING reads the authoritative post-write version from the engine
+        /// rather than inferring it in C#.
+        /// </summary>
+        private void InsertAccounts(IReadOnlyList<Account> inserted, SQLiteTransaction tx, List<Action> postCommitActions)
+        {
+            if (inserted.Count == 0)
+            {
+                return;
+            }
+
+            foreach (Account a in inserted)
+            {
+                if (a.Id < 0)
+                {
+                    throw new ArgumentException(
+                        $"Account '{a.Name}' reached the store with no Id assigned. Id allocation is a "
+                        + "caller concern - use IMoneyQuery.NextAccountId().");
+                }
+            }
+
+            this.RejectExistingIds(inserted, tx);
+
+            var versions = new Dictionary<long, long>();
+            using (var cmd = new SQLiteCommand(
+                $"INSERT INTO Accounts ({AccountRowCodec.Columns}) "
+                + $"SELECT {AccountRowCodec.JsonExtractList()} FROM json_each(@Rows) "
+                + "RETURNING Id, Version;",
+                this.connection,
+                tx))
+            {
+                cmd.Parameters.AddWithValue("@Rows", AccountRowCodec.ToJsonArray(inserted));
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        versions[reader.GetInt64(0)] = reader.GetInt64(1);
+                    }
+                }
+            }
+
+            foreach (Account a in inserted)
+            {
+                long version = versions[a.Id];
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = version;
+                    a.OnUpdated();
+                });
+            }
+        }
+
+        /// <summary>
+        /// A primary-key collision is "someone else wrote this row since you looked", so it is
+        /// reported as ConcurrencyConflictException and section 1.6a's business-layer retry loop
+        /// covers the insert race as well as the update race. Detected by a pre-check inside the
+        /// same BEGIN IMMEDIATE transaction rather than by sniffing an engine error code:
+        /// deterministic, parameterized, and it can say WHICH root and at what stored version.
+        /// </summary>
+        private void RejectExistingIds(IReadOnlyList<Account> inserted, SQLiteTransaction tx)
+        {
+            using (var cmd = new SQLiteCommand(
+                "SELECT a.Id, a.Version FROM Accounts a JOIN json_each(@Ids) j ON a.Id = j.value LIMIT 1;",
+                this.connection,
+                tx))
+            {
+                cmd.Parameters.AddWithValue("@Ids", AccountRowCodec.IdsJsonArray(inserted));
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        long existingId = reader.GetInt64(0);
+                        long storedVersion = reader.GetInt64(1);
+                        foreach (Account a in inserted)
+                        {
+                            if (a.Id == existingId)
+                            {
+                                throw new ConcurrencyConflictException(a, storedVersion, a.RowVersion);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private void UpdateAccounts(IReadOnlyList<Account> changed, SQLiteTransaction tx, List<Action> postCommitActions)
+        {
+            if (changed.Count > 0)
+            {
+                throw new NotImplementedException("Task 13.");
+            }
+        }
+
+        private void DeleteAccounts(IReadOnlyList<Account> deleted, SQLiteTransaction tx, List<Action> postCommitActions)
+        {
+            if (deleted.Count > 0)
+            {
+                throw new NotImplementedException("Task 14.");
+            }
         }
 
         public override void Dispose()
