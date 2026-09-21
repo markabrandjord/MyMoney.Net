@@ -170,10 +170,18 @@ into an implementation plan. Each needs a yes/no or a pick from you.
    `MyMoney.csproj`, which Plan A's rules leave untouched), hosting only the Accounts screen,
    referencing `MyMoney.Business`. Coexists indefinitely with the legacy app and with #42's
    incremental migration — not a staged replacement of either. Project name still open.
-4. **D-2** (`domain-model` cluster, still open in the register): "should domain objects
-   carry view state at all?" — flagged by the panel as a direct constraint on D-8
-   (navigation state) and D-11 (category totals). Worth resolving before those two get
-   implemented, not just designed. Still open.
+4. ~~D-2 (`domain-model` cluster): "should domain objects carry view state at all?"~~
+   **Resolved 2026-09-21 — Alternative C, plus an independent bug fix.** Domain objects
+   (`Account`, `Category`, etc.) carry no view-state members; per-screen ephemeral state
+   (selection, expansion, in-progress edits) lives entirely in the UI/ViewModel layer — via
+   ordinary ViewModel properties in the common case, or an identity-keyed side table for the
+   rare case that doesn't have a natural ViewModel owner. Business and data layers stay
+   stateless per call; they never held view state and don't gain any. **Separately, fix the
+   current `ChangeTracker` spurious-dirty-flag bug immediately**, independent of this
+   redesign's timeline (`Category.IsEditing`/`Security.IsExpanded` move to
+   `OnTransientChanged`; `ChangeTracker.OnMoneyChanged` stops registering a `ChangeList`
+   entry for `None`/`TransientChanged`). Full reasoning and the rejected full-view-model
+   alternative (B) are in `panel-review-01-domain-model-taxes.md` on `docs/scenario-capture`.
 5. **Accessibility gap**, flagged by the panel itself on D-6, D-7 and D-15: no accessibility
    expertise reviewed the density-control removal, the theming/High-Contrast story, or the
    Window→`ContentDialog` conversion's screen-reader/focus-trapping behavior. Real gap, not
