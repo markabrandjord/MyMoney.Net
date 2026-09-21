@@ -142,6 +142,41 @@ summary bullet) are tightened to say so plainly, and item #3's "lag the query su
 Server" recommendation is flagged as framing that may now be stale — without being resolved here,
 per the owner's instruction that this is a recording pass, not a new design pass.
 
+**Revision 8 (2026-09-20, same day).** The owner answered three more §4 items. **Two are pure
+recordings** — a scope call and an appetite call, both deferrals, neither of which changes a line
+of design. **The third is not**: the owner's answer to the sample-data question is more nuanced
+than the yes/no the panel posed, and the nuance creates a genuine architectural tension that this
+revision resolves rather than notes.
+
+| Owner guidance | Where it is answered |
+|---|---|
+| *(item #5, XML as a day-one export format)* "**deferred**" | §4 item 5 (now resolved); §4.1's revision-8 note records what the deferral leaves unserved and which already-designed capability covers it |
+| *(item #6, credential storage)* "**later**" | §4 item 6 (now resolved); §4.1's revision-8 note |
+| *(item #7, sample data)* "test only. but in this case, they are letting the customer test the capability of the software to see what the UI and the reports look like. I guess in that sense, it could be considered a feature, but I would argue, that it should only be done on a db marked as test." | §4 item 7 (now resolved) **and new §1.9**, which works out the placement, the API shape, and where the `TestDatabase` guard is actually enforced |
+
+**Why item #7 needed design work and #5/#6 did not.** The owner's answer says two things that pull
+in opposite directions under this document's own tiering model: sample-data generation is
+*customer-reachable* (an evaluating buyer runs it to see what the UI and the reports look like —
+that is a shipped feature, not a developer convenience), **and** it must run *only against a
+database marked as a test database*. §1's protection mechanisms were built for capabilities that
+are one or the other, not both: **assembly-absence** protection (§1 Candidate A — the dangerous
+code is not in a release build's bits at all, which is how `IMoneyStoreTestControl` is protected)
+would make the feature unreachable by the very customer it exists for, while §1.8's **runtime-flag
+refusal** was scoped to *destructive* operations, which sample data is not. §1.9 resolves this:
+sample data ships in `MyMoney.Business` and is guarded by **§1.8's existing runtime mechanism, not
+a new one** — the same `TestDatabaseGuard.Require` call and the same exception type that slice 5b
+already builds for the provisioner — with the guard's stated scope widened from *"destructive
+operations"* to *"operations that must only ever touch a test database,"* of which destruction is
+now one kind and fabricating indistinguishable-from-real data is the other.
+
+**The outcome, in one line:** `SampleDataGenerator` **stays in `MyMoney.Business` and ships**,
+split into a pure, unguarded `SampleDataFactory` (deterministic, no store, no I/O) and a guarded
+`SampleDataService` whose *first statement* is `TestDatabaseGuard.Require(store.Identity, …)`; its
+write path is the **ordinary** `IMoneyStore.SaveRoots` surface with no privilege of any kind; and
+the flag it reads is carried on the open store handle (`StoreIdentity.IsTestDatabase`) rather than
+re-fetched from config at the call site, so the guard reads the flag off the same object the writes
+go to. Reasoning, the three layers of what a user actually sees, and the honest crack, in §1.9.
+
 ---
 
 ## 0. What this design is built on top of (verified, not assumed)
@@ -205,6 +240,10 @@ Plus a fourth, non-store contract for what D-35 called *formats*:
 IDataFormat            — round-trip the whole model to/from a stream. XML export, CSV export.
                          Lives in the business layer, NOT in a data-layer engine assembly.
 ```
+
+*(Revision 8: this **placement** is settled and unchanged, but its **timing** is now decided —
+§4 item 5's answer is "deferred," so neither `IDataFormat` nor an XML implementation is in the
+first slices. Nothing in §5's slice order referenced them, so nothing there changes.)*
 
 The three candidates differ in **how that tiering is enforced in .NET**, which is the only
 question with real trade-offs.
@@ -1316,6 +1355,17 @@ Two further notes, flagged rather than designed:
   "the assembly isn't shipped" protects end users but does not protect a developer running a test
   suite against the wrong registry entry. That is a real, currently-live exposure on the owner's
   own machine, not a hypothetical.
+
+  > **Revision 8 widens this bullet's scope, deliberately.** "Always compiled in" was chosen above
+  > for a developer-protection reason; revision 8 gives it a second, *customer-facing* consumer
+  > (§1.9's sample-data feature), and in doing so changes the guard's stated scope from
+  > **"destructive operations fail loudly against an entry not marked as a test database"** to
+  > **"operations that must only ever touch a test database fail loudly against an entry not
+  > marked as one."** There are now two kinds: operations that *destroy* data, and operations that
+  > *fabricate data indistinguishable from real data*. Sample-data generation is squarely the
+  > second and is not destructive at all — so a reader who stops at the word "destructive" would
+  > wrongly conclude it is out of the guard's scope. It is not, and §1.9 is why. The mechanism is
+  > unchanged; only the sentence describing what it covers is.
 - **App-binary/schema compatibility is a two-sided question this document only half-answers.**
   `Schema_ApplyTo` handles "the app is newer than the database." The reverse — an older binary
   opening a database at a *higher* version than it knows — needs a refusal, not a best-effort open.
@@ -1323,6 +1373,288 @@ Two further notes, flagged rather than designed:
   plain-language message if it exceeds the version the binary was built for. Cheap to add now,
   awkward to add once databases are out in the world. **Recommend adding it in slice 3**; not
   otherwise part of the deferred workflow.
+
+---
+
+## 1.9 Sample data — a shipped feature with a runtime test-database guard *(new in revision 8)*
+
+The owner, resolving §4 item 7, verbatim:
+
+> *"test only. but in this case, they are letting the customer test the capability of the software
+> to see what the UI and the reports look like. I guess in that sense, it could be considered a
+> feature, but I would argue, that it should only be done on a db marked as test."*
+
+That is not a yes/no answer to the question the panel asked, and it should not be recorded as one.
+Worked through, it says three separate things:
+
+1. Sample-data generation is **reachable by end customers** of a shipped release. *"Let me see what
+   the UI and the reports look like before I commit my real finances to this"* is a legitimate
+   product capability — the evaluation path this whole fork exists to walk, in fact.
+2. It is nonetheless **"test only"** in the sense the owner means: the data it produces is
+   fictitious, and it has no business being mixed into a database someone keeps.
+3. The line between those two is drawn **at the database**, not at the audience: *"only on a db
+   marked as test"* — regardless of who invokes it, or why, or from where.
+
+### 1.9.1 The tension this creates with §1's two protection mechanisms
+
+This document has established two different ways to keep a dangerous capability away from a
+database, for two different tiers, and **sample data fits neither cleanly**:
+
+| Mechanism | Where it is used today | Why it does not work here |
+|---|---|---|
+| **Assembly absence** — the code is not in a release build's bits, and production cannot even *name* the type (§1 Candidate A; `IMoneyStoreTestControl` in `MyMoney.TestKit.Contracts`, §2.5 layer 4) | `IMoneyStoreTestControl` and both `*.TestTier` implementations; `MyMoney.Data.SqlServer*` under D-37 | It would make the feature **unreachable by the customer it exists for.** If `SampleDataGenerator` lived in `MyMoney.TestKit`, a release build would contain no way to invoke it at all — which is the opposite of what the owner's first clause asks for |
+| **Runtime flag refusal** — a check against `DatabaseEntry.TestDatabase`, always compiled in, that throws (§1.8, slice 5b) | Destructive provisioner operations (`Schema_DropAll`, delete, restore-over) | Nothing structurally; but its *stated scope* was **"destructive operations"**, and sample-data generation is purely **additive**. The mechanism fits; the sentence describing it did not |
+
+The resolution is therefore the second mechanism with its scope corrected, and — importantly —
+**no new mechanism is invented.** §1.8 already put the refusal in an always-compiled-in contract
+rather than in the never-shipped test tier, for its own reasons. That decision turns out to be
+exactly what a shipped, customer-reachable, test-database-only capability needs, so sample data
+reuses the *same static method and the same exception type*, not a parallel one that can drift.
+
+### 1.9.2 Where the flag lives: on the open store handle, not at the call site
+
+The guard needs an answer to *"is the database I am about to write to marked as a test
+database?"* The naive shape passes a `DatabaseEntry` into the service's constructor. The panel
+rejects it: a caller can pass a **different** entry than the one the store was actually opened
+from, and nothing would notice. The check must read the flag off the same object the writes go to.
+
+So the identity of the open database becomes a property of the open store:
+
+```csharp
+// MyMoney.Business, beside IMoneyStore and MoneyStoreBase (§1.6c)
+public sealed record StoreIdentity(
+    string         DisplayName,      // the registry entry's key — for plain-language messages
+    DataEngineType Engine,
+    bool           IsTestDatabase,   // DatabaseEntry.TestDatabase, as of open
+    int            SchemaVersion);   // Schema_CurrentVersion() at open (§1.8's second bullet)
+
+public interface IMoneyStore
+{
+    StoreIdentity Identity { get; }   // read-only; the only new member revision 8 adds
+    // ... the four write members (§1.6c) and the reads, unchanged
+}
+```
+
+**This costs no new I/O.** §1.8 already requires the store to read `Schema_CurrentVersion()` at
+open (to refuse a database newer than the binary), and `IsTestDatabase` comes from the same
+`DatabaseEntry` that supplies the connection string. `Identity` is a read-only property, not a
+write member, so §1.6c's `StoreWriteSurface_IsExactlyTheFourNamedMethods` Tier-0 test is
+unaffected — and that test is also the reason the guard **cannot** live inside `IMoneyStore`:
+adding a fifth, gated write member would break it, and gating `SaveRoots` itself on
+`IsTestDatabase` would gate every ordinary write in the product. The guard therefore necessarily
+lives at the **capability** boundary, one layer above the store. That is a constraint the design
+derived, not a preference.
+
+**Every failure mode of the input is fail-safe**, which is worth recording because it is load-
+bearing and it is luck the panel should not rely on silently: `DatabaseEntry.TestDatabase` is a
+`bool` defaulting to `false`, so a missing JSON field, a casing regression (the exact-casing
+hazard already pinned by `DatabaseRegistryTests.Save_WritesTestDatabaseFieldWithExactCasing`), an
+unparsed registry, or a store opened from an entry that was never written all resolve to
+`false` — i.e. the capability **refuses**. There is no way for the flag to break *open*.
+
+### 1.9.3 The guard itself — one type, three call sites
+
+```csharp
+// MyMoney.Business. Always compiled in, in every configuration. Never in a *.TestKit* assembly.
+public static class TestDatabaseGuard
+{
+    public static void Require(StoreIdentity identity, string capability)
+    {
+        if (!identity.IsTestDatabase)
+        {
+            throw new TestDatabaseRequiredException(identity.DisplayName, capability);
+        }
+    }
+}
+
+public sealed class TestDatabaseRequiredException : Exception
+{
+    public string DatabaseDisplayName { get; }
+    public string Capability { get; }
+}
+```
+
+Exactly three call sites, and the third is the whole point of this section:
+
+| # | Caller | Protects | Reachable in a release build? |
+|---|---|---|---|
+| 1 | Destructive `IMoneyStoreProvisioner` operations — `Schema_DropAll`, delete, restore-over-the-top | The owner's own machine, today (§1.8) | Yes — `MyMoney.Data.Sqlite.Provisioning` is a shipped assembly (§1, Candidate A) |
+| 2 | Every `IMoneyStoreTestControl` entry point (§2.6.2) — defense in depth *behind* assembly absence | A developer running the test suite against the wrong registry entry | No — the test tier is never shipped |
+| 3 | **`SampleDataService.Populate` (revision 8)** | A customer, an agent, or a script fabricating thousands of fictitious transactions into a database someone intends to keep | **Yes — and it is the only one of the three a customer can reach** |
+
+### 1.9.4 Placement and API — the generator splits in two
+
+`SampleDataGenerator` is in `MyMoney.Business` **today** (`Source/WPF/MyMoney.Business/SampleDataGenerator.cs`,
+with the WPF-facing options-dialog half as `Walkabout.Assistance.SampleDatabase` in `MyMoney.csproj`).
+It **stays in `MyMoney.Business` and stays shipped.** What changes is that it splits along the
+guard line, so the guard has exactly one thing to sit in front of:
+
+```
+MyMoney.Business  [shipped]
+
+  Walkabout.Business.Sampling.SampleDataSpec       the SampleData histogram (accounts, payee
+                                                   frequencies, employer, paycheck) — a plain
+                                                   deserialized spec object
+
+  Walkabout.Business.Sampling.SampleDataFactory    PURE. (spec, options, quotes, seed) -> SampleDataSet
+                                                   No store, no I/O, no ambient graph, no guard.
+                                                   Deterministic for a given seed.
+
+  Walkabout.Business.AppServices.SampleDataService GUARDED. Holds an IMoneyStore. Writes through
+                                                   the ordinary write surface. Nothing else.
+```
+
+```csharp
+public sealed class SampleDataService          // AppServices band (§3.1)
+{
+    private readonly IMoneyStore store;
+
+    public void Populate(SampleDataSpec spec, SampleDataOptions options)
+    {
+        TestDatabaseGuard.Require(this.store.Identity, "Add sample data");   // FIRST statement
+        SampleDataSet set = SampleDataFactory.Build(spec, options);
+        // FK order: currencies -> accounts -> payees -> categories -> securities -> transactions
+        this.store.SaveRoots(set.Accounts);
+        this.store.SaveRoots(set.Payees);
+        // ... etc. Ordinary writes. Ordinary version checks. Ordinary retry loop (§1.6a).
+    }
+}
+```
+
+**The guard is the first statement**, before generation and long before any write, so a refusal
+costs nothing and — critically — leaves **nothing partially written**. A refusal that happened
+after three of six `SaveRoots` calls would be worse than no guard, because it would leave a
+non-test database containing fictitious accounts.
+
+`SampleDataFactory` being **pure** is not cosmetic. It means:
+
+- the existing `randomSeed:` determinism that `SampleDataRegressionTests.cs` already depends on
+  survives the reshape intact, and is testable with no database of any kind;
+- the stock-quote history the current generator needs (`Dictionary<string, StockQuoteHistory>`,
+  loaded from disk today by the WPF half) stays an **injected input** rather than an I/O
+  dependency, keeping the factory pure and the WPF half responsible for the file access it
+  already owns;
+- there is exactly one guarded entry point to protect, rather than a guard sprinkled through
+  generation code.
+
+**One concrete rewrite this revision surfaces, which is not a relocation.** Today's
+`SampleDataGenerator.Create` *mutates an ambient live `MyMoney` object graph* —
+`accounts.AddAccount(sa.Name)` against `this.money` — and relies on a later whole-graph save.
+**Revision 7 killed that shape**: `Load()` does not survive, so there is no ambient graph to
+mutate. `SampleDataFactory` must therefore **return** a `SampleDataSet` of roots rather than
+mutate anything, and `SampleDataService` writes them. This is real work, not a project-file move,
+and it should be sized as such whenever sample data gets scheduled.
+
+### 1.9.5 Is the write path special? No — and that is a decision, not an omission
+
+**`SampleDataService` writes through `IMoneyStore.SaveRoots` and nothing else.** No provisioner
+access, no test-control access, no DDL, no identity reseed, no version-check bypass, no bulk
+loader. It is an ordinary business-layer feature whose only unusual property is that it refuses to
+run against a non-test database.
+
+The tempting alternative — give it a fast privileged bulk path through the test-control tier, since
+it inserts thousands of rows — is rejected, and §2.6.2 already contains the argument: `Seed` was
+deliberately **removed** from `IMoneyStoreTestControl` because *"it stops a 'convenience' seeder
+from quietly becoming a second, domain-rule-free way to create data."* Sample data is the most
+load-bearing instance of that argument in the whole document, for a reason specific to what the
+owner said it is for: **a customer evaluating the product is evaluating what the real write path
+produces.** A sample database built by a privileged loader that skipped FK enforcement, version
+assignment or aggregate composition could look perfectly correct in the UI and the reports while
+being a shape ordinary usage cannot produce. The evaluation would then be of something that does
+not ship.
+
+Two consequences worth having, both free:
+
+- Sample-data population becomes a genuine, realistic integration exercise of `SaveRoots`, FK
+  ordering and R-CRUD-2 atomicity, at a batch size nothing else in the slice plan reaches.
+- It gives **slice 10**'s `json_each` batch benchmark (§1.7.1) a realistic workload instead of a
+  synthetic one — thousands of transactions is exactly the size at which the C#-loop-versus-
+  set-based-statement question stops being academic.
+
+### 1.9.6 What the user actually sees — three layers, and only the first is normal
+
+1. **The normal customer path meets no guard at all.** The evaluating customer's entry point is a
+   *"try it with sample data"* affordance on the new-database / welcome flow, which creates a
+   database with `TestDatabase: true` — the checkbox already exists in `NewSqliteDatabaseDialog`
+   and `NewSqlServerDatabaseDialog` — and populates it in one step. The guard is satisfied by
+   construction. This is what makes the owner's two clauses compatible in practice rather than
+   only in principle: the customer gets the capability, and the database it runs against is
+   test-marked because the flow that offered it made it so.
+2. **The command is disabled, with a reason, on a non-test database.** File ▸ Add Sample Data's
+   `CanExecute` returns false when `store.Identity.IsTestDatabase` is false, with a tooltip
+   saying why. Greyed and explained, not an error.
+3. **If the capability is reached anyway, it refuses** — `TestDatabaseRequiredException`, thrown
+   before anything is generated or written, surfaced through the existing
+   `IBusinessLayerUiCallback` port as plain language rather than a raw exception string (§7's
+   UI/UX rule):
+
+   > *"'My Real Money' is not marked as a test database. Adding sample data creates dozens of
+   > fictitious accounts and thousands of fictitious transactions that are indistinguishable from
+   > real entries once saved, so it is only allowed on a database marked as a test database.
+   > Create a new database with 'Test database' checked to try MyMoney out with sample data."*
+
+**Is layer 3 warranted given layer 2 exists?** The panel says yes, and on three specific grounds
+rather than generic defense-in-depth:
+
+- **§1.6a's concurrency model explicitly admits a non-UI actor.** The shipped product's stated
+  goal is *a human and an AI agent working the same books at once.* A `CanExecute` gate does not
+  exist for the agent. This one is decisive and it is specific to this product: the owner has
+  already decided that something which is not the UI will be calling the business layer.
+- **Slice 7's success criterion is that the business layer is callable with no UI present.** A
+  capability that is only safe because of a UI gate is, by definition, not safely callable
+  headlessly — which contradicts the slice's own goal.
+- **New call sites are the realistic failure, not a stale flag.** Sample data already has two
+  call sites in the current tree (`MainWindow.OnCommandAddSampleData` and
+  `MenuExportSampleData_Click`) plus the `ScenarioTest` DGML model, and every future one would
+  have to remember the gate. A guard *inside* the capability cannot be forgotten by a caller.
+
+### 1.9.7 How this is enforced rather than documented
+
+| Tier | Test | What it pins |
+|---|---|---|
+| 1 — Business | `SampleDataService_RefusesNonTestDatabase_AndWritesNothing` — a store double whose `Identity.IsTestDatabase` is `false`, wrapped in `RecordingStore` (§2.4): assert `TestDatabaseRequiredException` **and** that `RecordingStore` saw **zero** writes | The guard runs *before* generation and *before* any write — not after a partial one. The second assertion is the one that matters; the first alone would pass on a guard placed last |
+| 1 — Business | `SampleDataService_PopulatesTestDatabase_ThroughTheOrdinaryWriteSurface` — over the T-1 in-memory-SQLite store, assert `RecordingStore` saw only `SaveRoots` calls and no provisioner or test-control call | §1.9.5's "no privilege" claim is a property of the code, not a paragraph |
+| 1 — Business | `SampleDataFactory_IsDeterministicForASeed` — carried forward from the existing `SampleDataRegressionTests.cs`, reshaped to the factory's return-a-set signature | The existing regression protection survives the split, with no database involved |
+| 0 — Architecture | `TestDatabaseFlag_IsReadOnlyByTheSharedGuard` — IL scan of the production assemblies for callers of `StoreIdentity.get_IsTestDatabase`; the allow-list is `TestDatabaseGuard` and the UI's `CanExecute` handler | **A second, bespoke check cannot appear.** This is the test that keeps the "same mechanism, not a parallel one" property true a year from now |
+| 2 — Store contract | `StoreIdentity.IsTestDatabase` round-trips the registry entry's flag, per engine | The single input the whole guard depends on behaves identically on both engines |
+
+`TestDatabaseFlag_IsReadOnlyByTheSharedGuard` is an **IL scan**, which is heavier than the
+existing Tier-0 tests' `GetReferencedAssemblies()` checks (§2.5) — stated plainly rather than
+glossed. The panel judges it worth the weight because the failure it prevents (a second
+hand-rolled `if (entry.TestDatabase)` somewhere that drifts from the shared one) is precisely the
+failure that makes "it's the same mechanism" stop being true, and nothing cheaper catches it. The
+UI `CanExecute` allow-list entry is deliberate, not a loophole: layer 2 above *must* read the flag
+to grey the command, and it is a read with no write behind it.
+
+### 1.9.8 The honest crack, stated
+
+**The guard is on the capability, not on the data.** `SampleDataFactory` is `public` and
+unguarded, so a caller can build a `SampleDataSet` by hand and pass its roots to `SaveRoots`
+itself, and nothing refuses. This is **deliberate and correct**: `SaveRoots` of ordinary roots is
+exactly what happens when a user types transactions, and gating it would gate the product. What
+the guard protects is the *named, one-call, bulk fictitious-population feature*, which is what the
+owner's "only on a db marked as test" is actually about — a caller who reassembles it by hand has
+left the feature and is doing ordinary writes.
+
+Making `SampleDataFactory` `internal` would not close this either, and is rejected for a reason
+already in the document: it would need `InternalsVisibleTo` to stay testable, and §6.2 names that
+as the most likely crack in the whole design, with a Tier-0 test
+(`ProductionAssemblies_DeclareNoInternalsVisibleTo`) specifically forbidding it in production
+assemblies.
+
+This is the same shape of admission as §1.6c's `SaveRoots(new[] { root })` crack — a one-line
+unvalidated route to the same executor — and it is recorded here in the same spirit: bounded,
+named, and covered by a test that pins the surface rather than papered over.
+
+### 1.9.9 Where this lands in the slice plan
+
+The **guard and `StoreIdentity`** land in **slice 5b**, which already exists for exactly this
+mechanism; §5's table is updated to say so. The **`SampleDataService` rewrite itself does not land
+in slices 1–10 at all**, and deliberately so: those slices stop at `Account`, while sample data
+needs `Payee`, `Category`, `Security`, `Transaction` and owned `Split` roots. The owner's answer
+resolved *where it lives and what guards it*, not *when it is built* — so no slice is added here
+to imply a commitment that was not made. When it is scheduled, size it as the §1.9.4 rewrite, not
+as a relocation.
 
 ---
 
@@ -1523,6 +1855,8 @@ ProjectionTypes_DoNotImplementIAggregateRoot        (revision 4, §2.7.2)
 StoreWriteMethods_AcceptOnlyAggregateRoots          (revision 4, §2.7.2 - now four members, §1.6c)
 
 StoreWriteSurface_IsExactlyTheFourNamedMethods      (revision 6, §1.6c)
+
+TestDatabaseFlag_IsReadOnlyByTheSharedGuard         (revision 8, §1.9.7)
 ```
 
 The fourth one is the test that makes D-37 real rather than aspirational, and it is the one most
@@ -1532,6 +1866,13 @@ likely to be quietly deleted when it becomes inconvenient — so it should asser
 `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` are
 revision 4's; they are what turns *"the business layer knows views are read-only"* from a sentence
 in a document into a property of the compiled assemblies. §2.7.2 gives their exact shape.
+
+`TestDatabaseFlag_IsReadOnlyByTheSharedGuard` is revision 8's (§1.9.7). It is an **IL scan** —
+heavier than the four `GetReferencedAssemblies()`-style checks above, and called out as such —
+that asserts the only production callers of `StoreIdentity.get_IsTestDatabase` are
+`TestDatabaseGuard` and the UI's `CanExecute` handler. It exists to stop a *second*, hand-rolled
+`if (entry.TestDatabase)` check appearing somewhere and drifting from the shared one, which is the
+single way §1.9's "it's the same mechanism as §1.8's, not a parallel one" claim stops being true.
 
 `StoreWriteSurface_IsExactlyTheFourNamedMethods` is revision 6's, and it is the test that makes
 §1.6c's split worth having a year from now: `IMoneyStore`'s public write members are exactly
@@ -1641,6 +1982,14 @@ T-1 (§2.4) argues for everywhere else. What the test-control tier offers instea
 path: `Snapshot()` a seeded database once, `Restore()` it per test. Splitting these two apart is
 strictly better than the single `Seed` the earlier revisions implied, because it stops a
 "convenience" seeder from quietly becoming a second, domain-rule-free way to create data.
+
+> **Revision 8 makes this paragraph load-bearing outside the test tier.** §1.9.5 reaches the same
+> conclusion for the shipped sample-data feature, and cites this argument to do it: sample-data
+> generation writes through the ordinary `IMoneyStore.SaveRoots` surface rather than getting a
+> privileged bulk path here, because a customer evaluating the product is evaluating *what the
+> real write path produces*. This is also why `Snapshot`/`Restore` picked up a second job in
+> revision 8 — §4.1 notes that it, not the now-deferred XML export (§4 item 5), is what preserves
+> a hand-built scenario across a nuke-and-pave.
 
 ### 2.6.3 Why these cannot just be done through `IMoneyStore` — the justification for the tier
 
@@ -2035,7 +2384,10 @@ issue #5's own open question — §4 keeps it there.)*
   `IDataFormat { void Write(MyMoney, Stream); MyMoney Read(Stream); }`. **They must not live
   behind `IMoneyStore` and must not live in an engine assembly.** This is what finally kills
   `NotImplementedException`-as-a-capability-signal: you cannot pass a format where a store is
-  required, because they are different types in different assemblies.
+  required, because they are different types in different assemblies. *(Revision 8: the owner has
+  **deferred** `IDataFormat` and the XML implementation out of the first slices — §4 item 5. This
+  bullet's placement decision is unaffected; only the schedule is. §4.1 records what the deferral
+  leaves unserved.)*
 - **Engine-native duplication/backup/restore** (SQLite close-and-`File.Copy`; SQL Server
   `BACKUP`/`RESTORE`) → **data layer, provisioner tier**, because it is engine-specific by
   definition. Already decided by R1; this just names the tier it lands in. The Operations
@@ -2122,21 +2474,49 @@ technical panel cannot legitimately answer.
    **either way by construction**, so nothing in this design's shape changes as a result; this is a
    recording of the decision, not new design work. See §4.1 for what this leaves stale elsewhere.
 
-5. **Is `XmlStore` kept as an export format from day one?** D-35 says yes-as-a-format (disaster
-   recovery, human-readable, "the only way off the product"). Whether `IDataFormat` and an XML
-   implementation are in the *first* slices or deferred is scope, not principle.
+5. ~~**Is `XmlStore` kept as an export format from day one?**~~ **Resolved in revision 8 —
+   deferred.** The owner's decision, verbatim: **"deferred."** D-35's yes-as-a-format position is
+   untouched — XML remains the disaster-recovery, human-readable, "only way off the product"
+   format, and §3.2's placement decision (behind `IDataFormat`, in the business layer, **not**
+   behind `IMoneyStore` and **not** in an engine assembly) stands unchanged. What is decided is
+   *timing*: **`IDataFormat` and an XML implementation are not in the first implementation
+   slices.** This was always a scope call rather than a principle, and the owner has made it. No
+   design work follows; see §4.1's revision-8 note for the one argument this leaves unserved and
+   which already-designed capability covers it instead.
 
-6. **Credential storage.** The three SQL Server logins' generated passwords currently sit in
-   plaintext in `dataengine.config.json` — a live defect on the owner's own machine, already
-   flagged. Does the rebuild move them to Windows Credential Manager / DPAPI now, or is that a
-   separate tracked item? Panel recommends now (the bootstrap is being rewritten anyway); the
-   appetite call is the owner's.
+6. ~~**Credential storage.**~~ **Resolved in revision 8 — later.** The owner's decision, verbatim:
+   **"later."** The three SQL Server logins' generated passwords stay in plaintext in
+   `dataengine.config.json` for now; moving them to Windows Credential Manager / DPAPI is **not**
+   done in the near-term slices. The panel's recommendation was "now" (the bootstrap is being
+   rewritten anyway) and the owner has decided otherwise — which is what this item existed to ask.
+   The defect itself does not stop being a defect: it remains a real, live exposure on the owner's
+   own machine, deferred rather than dismissed, and it should be a tracked item rather than a
+   line in this document. No design work follows.
 
-7. **Is "sample data" a product feature or a test capability?** `SampleDataGenerator` is in
-   `MyMoney.Business` and is user-reachable (File ▸ Add Sample Data). If it stays a product
-   feature, it must **not** move into `MyMoney.TestKit`, and the first-time-population `SaveRoots`
-   path stays in the shipped product. Confirm, because it affects where a surprising amount of
-   seeding code lives.
+7. ~~**Is "sample data" a product feature or a test capability?**~~ **Resolved in revision 8 — and
+   the answer is neither of the two options the panel offered.** The owner's decision, verbatim:
+   **"test only. but in this case, they are letting the customer test the capability of the
+   software to see what the UI and the reports look like. I guess in that sense, it could be
+   considered a feature, but I would argue, that it should only be done on a db marked as test."**
+
+   Unpacked: sample-data generation is a **shippable, customer-reachable capability** (an
+   evaluating buyer runs it to see what the UI and the reports look like — that is a feature, not a
+   developer convenience), **and** it must only ever run against a database marked
+   `DatabaseEntry.TestDatabase`, whoever invokes it and from wherever. The panel's question was a
+   false binary; the owner's answer draws the line at the *database*, not the *audience*.
+
+   This one **did** need design work rather than recording, because it fits neither of §1's two
+   protection mechanisms as they stood: assembly absence would make the feature unreachable by the
+   customer it exists for, and §1.8's runtime-flag refusal was scoped to *destructive* operations,
+   which sample data is not. **See new §1.9** for the resolution: `SampleDataGenerator` stays in
+   `MyMoney.Business` and ships, split into a pure unguarded `SampleDataFactory` and a guarded
+   `SampleDataService` whose first statement is `TestDatabaseGuard.Require(store.Identity, …)` —
+   **§1.8's existing mechanism, not a new one**, with its scope widened from "destructive
+   operations" to "operations that must only ever touch a test database." The write path is the
+   ordinary `SaveRoots` surface with no privilege at all. The panel's standing recommendation
+   (*"keep it a product feature in `MyMoney.Business`, and let the test tier seed through
+   `MyMoney.TestKit` separately"*) is **confirmed on placement and amended on protection**: it
+   stays in `MyMoney.Business`, and it gains a guard the recommendation did not have.
 
 8. **(New, revision 2.) When does the nuke-and-pave phase end, and what is the trigger?**
    §1.5 S-0 accepts nuke-and-pave *for this phase*, and §1.8 keeps the exit affordable — but
@@ -2211,6 +2591,37 @@ not just stale reports, while schema management races ahead. Item #3 remains ope
 resolved here; the panel's recommendation may need revisiting in light of this, but that is the
 panel's or the owner's call to make separately, not something this recording pass decides.
 
+**Net after revision 8: items #5, #6 and #7 all move to resolved by the owner**, which takes the
+original seven down to **two still open** (#1, #3) plus #8. Two of the three were pure recordings;
+the third was not, and the difference is worth stating rather than flattening:
+
+| # | Status after revision 8 |
+|---|---|
+| 5 — `XmlStore` as a day-one export format | **Resolved — "deferred."** The owner's verbatim word. Not in the first implementation slices. §3.2's *placement* decision (business layer, behind `IDataFormat`, never behind `IMoneyStore`) is untouched — only the *timing* is decided, which is all this item ever asked. Revision 2's row in the table above had argued "yes, sooner"; that recommendation is now **overridden by the owner**, which is the correct outcome for an item the panel had explicitly flagged as a scope call it could not make unilaterally. |
+| 6 — credential storage | **Resolved — "later."** The owner's verbatim word. The panel recommended "now"; the owner decided otherwise. The plaintext passwords in `dataengine.config.json` remain a real live exposure, deferred rather than dismissed, and belong on the issue tracker rather than in this document. |
+| 7 — sample data: product or test? | **Resolved, and the answer was not one of the two options offered.** *"test only… they are letting the customer test the capability… it could be considered a feature… it should only be done on a db marked as test."* Both at once, with the line drawn at the database. This is the only one of the three that needed design rather than recording — see §4 item 7 and **new §1.9**. The panel's placement recommendation (`MyMoney.Business`, shipped, not `MyMoney.TestKit`) is **confirmed**; what it lacked was a guard, and §1.9 supplies one by widening §1.8's existing mechanism rather than inventing a second. |
+
+**What #5's deferral leaves unserved, flagged not redesigned.** Revision 2's argument for XML
+being *early* was specific and is worth not losing: under nuke-and-pave, an XML export was *"the
+only thing that lets a developer keep a hand-built scenario across a re-pave."* That need does not
+go away with the deferral. It is, however, **already served by something this document designed
+for other reasons** — §2.6.2's `IMoneyStoreTestControl.Snapshot()` / `Restore(StoreSnapshot)`,
+which preserves a seeded database across a reset and is explicitly the fast path §2.6.2 chose over
+a `Seed` method. The difference that matters, and the reason this is a flag rather than a
+substitution: `Snapshot` is **test-tier only and never shipped**, so it covers the developer's
+re-pave case but *not* D-35's disaster-recovery / "only way off the product" case, which remains
+genuinely unbuilt until `IDataFormat` is scheduled. Recorded so the deferral is not later
+mistaken for the need having evaporated.
+
+**No slice-plan reference goes stale from #5's deferral**, which the panel checked rather than
+assumed: §5's ten-slice table contains no XML, `XmlStore` or `IDataFormat` deliverable — the
+"yes, sooner" argument lived only in §4.1's row-5 recommendation above and never made it into the
+slice order. So the deferral costs nothing in §5, and the only edit it forces is the one made
+here. One adjacent confusion worth pre-empting, since both involve XML: `SampleDataGenerator`'s
+`Export(path)` writes the **sample-data spec** (`SampleData.xml` — the payee/account frequency
+histogram) via `XmlSerializer`, which is *not* `IDataFormat`'s whole-model round-trip and is
+unaffected by #5's deferral. §1.9's sample-data work does not wait on XML.
+
 ---
 
 ## 5. Recommended starting point, sanity-checked
@@ -2242,12 +2653,24 @@ flag:
 | 3 | `MyMoney.Data.Sqlite` — `SaveRoot<Account>` **and `DeleteRoot<Account>`** over one shared `WriteRoots` executor on `MoneyStoreBase` (§1.6c), `LoadAccounts`, conflict detection, `RETURNING`-read versions (§1.7.1); plus §1.8's open-time version check ("this database is newer than this binary") | The proven single-root save pattern (today's `SaveOne`, renamed `SaveRoot` in revision 5 — §1.6b, and split into save/delete in revision 6 — §1.6c) survives the reshape, engine-side, with the insert/update/delete dispatch still written exactly once |
 | 4 | `MyMoney.TestKit` — in-memory-SQLite store fixture (T-1), `RecordingStore`, `FaultInjectingStore`, `StoreContractTests` base with the Account cases | Happy path **and** error path from day one, as the owner asked — over a real engine, not a mock |
 | 5 | `MyMoney.Data.Sqlite.TestTier` — `IMoneyStoreTestControl`'s **schema** level (`ResetSchema` = `Schema_DropAll` + `ApplyTo(N)`, i.e. nuke-and-pave through the §1.5 machinery) **and its data/row levels** (§2.6): introspection-derived `ClearAllData`/`ClearTables`/`ClearTable`, `CaptureRow`/`DeleteRow`/`RestoreRow` + the `RemoveRow` scope, `TableRef` with its anti-drift contract test, and the `ResetIdentity` parity assertion (§2.6.4) | The SQLite facade, for real; the owner's nuke-and-pave as a first-class operation rather than a script; and a reset granularity a test can actually aim (§2.6) |
-| **5b** | `TestDatabase`-flag refusal in the provisioner contract (§1.8): destructive operations fail loudly against an entry not marked as a test database | The only guard that currently exists becomes enforced rather than assumed |
+| **5b** | **The shared `TestDatabase` guard** (§1.8, §1.9.3): `StoreIdentity` on `IMoneyStore` (§1.9.2), `TestDatabaseGuard.Require` + `TestDatabaseRequiredException`, wired into the provisioner's destructive operations and every `IMoneyStoreTestControl` entry point; plus Tier-0 `TestDatabaseFlag_IsReadOnlyByTheSharedGuard` and the per-engine flag round-trip test (§1.9.7) | The only guard that currently exists becomes enforced rather than assumed — **and it is built once, here, as the mechanism §1.9's shipped sample-data feature reuses rather than parallels** |
 | 6 | `MyMoney.Tests.Architecture` — all ten Tier-0 tests from §2.5, including revision 4's `ProjectionTypes_DoNotImplementIAggregateRoot` and `StoreWriteMethods_AcceptOnlyAggregateRoots` (§2.7.2) and revision 6's `StoreWriteSurface_IsExactlyTheFourNamedMethods` (§1.6c); plus the Tier-2 *schema owns no `INSTEAD OF` trigger* check per engine (§2.7.3) and §1.6c's six per-engine precondition cases | The guarantees are enforced, not asserted — including "the business layer cannot write to view-backed data," which is a compile-shaped property rather than a documented rule, and "`SaveRoot` cannot remove a row," which is a behaviour a test proves rather than a name that implies it |
 | 7 | `AddAccountService` in `MyMoney.Business`, including its conflict-retry loop (§1.6a: catch `ConcurrencyConflictException` **and nothing wider**, re-query, reapply, retry) + its in-memory-store-backed tests, using `FaultInjectingStore` to provoke a conflict on demand and to prove an `ArgumentException` from §1.6c's preconditions is *not* retried | The business layer is callable with no UI present, and version-checked concurrency with business-layer retry (§1.6a) is a working, tested pattern from the very first slice — not deferred to a later one — with the caller-bug/race distinction pinned rather than assumed |
 | 8 | `MyMoney.Data.SqlServer{,.Provisioning,.TestTier}` for the same slice: real `Schema_ApplyTo`/`Schema_Verify` procs over the same step list and same ledger, plus slice 2b's equality test per engine, plus the `Test/*` half of §2.6 (`dbo.Test_ClearTables` taking a table-name TVP, deployed only into a `TestDatabase: true` catalog) | The tiering maps twice, the schema mechanism is parity (§4.1 #3), the contract suite is genuinely shared, and §2.6.4's `ResetIdentity` divergence is pinned rather than discovered |
 | 9 | **T-1 verification gate** (§2.4): run the real business-test tier against the in-memory store; record wall time against the 60 s budget and the stated kill criterion | The decision already made is confirmed by measurement, not re-opened |
 | 10 | **`json_each` batch benchmark** (§1.7.1): SQLite `SaveRoots` as one set-based statement vs. today's C# loop, at realistic batch sizes | P-SQLITE is applied on evidence, not aesthetics — and R-CRUD-3 lands on both engines or is honestly declined on one |
+
+**Where sample data lands in this order (revision 8), and where it deliberately does not.** The
+guard is slice **5b**, above — it is the same mechanism the provisioner needs, built once (§1.9.3).
+The `SampleDataService`/`SampleDataFactory` rewrite itself is **not in slices 1–10 and is not added
+as a slice here.** Two reasons, both honest: slices 1–10 stop at `Account`, while sample data needs
+`Payee`, `Category`, `Security`, `Transaction` and owned `Split` roots; and the owner's decision
+(§4 item 7) settled *where it lives and what guards it*, not *when it is built* — so adding a
+numbered row would imply a scheduling commitment nobody made. When it is scheduled, size it as the
+§1.9.4 rewrite (the factory must *return* roots instead of mutating an ambient `MyMoney` graph,
+which revision 7 removed), not as a project-file move. One nice side effect worth remembering at
+that point: sample data is the first realistic workload for slice **10**'s `json_each` batch
+benchmark (§1.9.5).
 
 **One honest deviation from the literal instruction.** The owner's guidance says build *"the data
 layer DLLs, as well as the app and business layers of the test subsystem first."* The business
@@ -2395,6 +2818,48 @@ goals do not point the same direction at every decision. Where they conflict, th
 recommendation is that **parity wins over nativeness** — §1.7.3's version-conflict example is the
 worked case.
 
+### 6.9 The sample-data guard is a runtime check in shipped code, which is the weakest of the three protections *(new in revision 8)*
+
+§1.9 puts a customer-reachable, data-fabricating capability behind a runtime `if`, in an assembly
+that ships. Compared with the two protections around it — assembly absence (§1 Candidate A) and
+SQL Server's *different login, different process* separation (§6.1) — that is plainly the weakest
+form, and the design should not pretend otherwise. What it can and cannot claim, in §6.1's format:
+
+**Can claim:** the check is always compiled in, in every configuration, so it cannot be lost to a
+`#if` or a Release packaging decision; it is the *same* code path as the provisioner's destructive
+guard, so there is one behaviour to reason about rather than two that drift; it runs before any
+generation or any write, so a refusal leaves nothing partial; every failure mode of its input
+resolves to "refuse" (§1.9.2); and a Tier-0 IL scan keeps it the only reader of the flag.
+
+**Cannot claim:** that a production process which has the database open cannot write fictitious
+rows into it. It obviously can — `SaveRoots` is right there, and §1.9.8 says so directly. The
+guard stops the *feature*, not the *data*, and a caller who assembles a sample set by hand has
+simply left the feature.
+
+**Why the panel accepts that**, rather than reaching for a stronger mechanism:
+
+- The stronger mechanism (assembly absence) is **ruled out by the requirement itself** — the owner
+  wants an evaluating customer to reach this in a release build. There is no version of "not in the
+  shipped bits" that satisfies that. This is not a case where a better option was available and the
+  cheap one was chosen.
+- The threat model is **accident, not adversary.** The realistic failure is a new call site, a
+  script, or an agent running sample-data population against the wrong open database — all of which
+  a runtime refusal stops cleanly. A user determined to put fake transactions in their own real
+  books can type them.
+- The thing that would actually erode this over time is not the mechanism's weakness but a
+  **second, divergent copy of the check**, which is exactly what §1.9.7's Tier-0 test is aimed at.
+  That is where the panel spent the enforcement effort, and it is the right place.
+
+**The honest residual risk**, stated so it is not discovered later: `DatabaseEntry.TestDatabase`
+is a single user-settable checkbox with no confirmation and no audit, and §1.9's whole guarantee
+rests on it. A user who ticks "Test database" on a database they later fill with real financial
+data has silently re-enabled sample-data population against their real books, and nothing in this
+design notices. That is arguably an argument for the flag being *harder to set after a database has
+non-trivial data in it* — but that is a product decision about the registry UX, not a data-layer
+one, and it is flagged here rather than designed. It is the same flag §1.8 already identified as
+*"the only thing standing between a destructive operation and a database"*, so this is not a new
+dependency revision 8 introduced — only a new consumer of one the document already flagged.
+
 ---
 
 ## 7. Role notes, opt-outs, and expertise the panel does not have
@@ -2404,7 +2869,12 @@ worked case.
 - Provisioning and store failures must reach the user as plain-language messages through the
   existing callback port, not as a raw `SqlException` or `SQLiteException` string. A failed
   bootstrap that says *"Login failed for user 'MyMoneyAdmin'"* is a support ticket; the tiering
-  model makes several such failures newly reachable.
+  model makes several such failures newly reachable. **Revision 8 gives this its first concrete
+  instance in shipped, customer-facing code:** §1.9.6's `TestDatabaseRequiredException` is thrown
+  in the business layer and must surface through `IBusinessLayerUiCallback` as the plain-language
+  refusal quoted there, never as a type name — and, per the same bullet's logic, the *normal*
+  customer path is layer 1 (a "try it with sample data" flow that creates a test-marked database),
+  with the message reserved for the case a caller reached the capability another way.
 - `ReportModel`'s cells must carry formatting *intent*, not presentation. The whole point of the
   eventual Fluent/WPF-UI restyle is that it shouldn't require touching a single report class.
 
@@ -2540,6 +3010,27 @@ worked case.
   the rule is "nothing ever writes through a view" or "the business layer never does" — the panel
   recommends the latter as the rule and the former as the current state, and nothing waits on the
   answer.
+- **Sample data is a shipped feature with a runtime test-database guard (§1.9, revision 8).** The
+  owner's answer was not the product-or-test binary the panel posed: it is customer-reachable (an
+  evaluating buyer runs it *"to see what the UI and the reports look like"*) **and** restricted to
+  a database marked `DatabaseEntry.TestDatabase`, with the line drawn at the database rather than
+  the audience. That combination fits neither of §1's protection mechanisms as they stood —
+  assembly absence would hide the feature from the customer it exists for, and §1.8's runtime
+  refusal was scoped to *destructive* operations, which sample data is not. The resolution invents
+  **no new mechanism**: `SampleDataGenerator` stays in `MyMoney.Business` and ships, split into a
+  pure unguarded `SampleDataFactory` and a guarded `SampleDataService` whose first statement is
+  the **same** `TestDatabaseGuard.Require(store.Identity, …)` that slice 5b builds for the
+  provisioner — with §1.8's stated scope widened from "destructive operations" to "operations that
+  must only ever touch a test database." The flag is read off `StoreIdentity` on the **open store
+  handle**, not from a `DatabaseEntry` threaded to the call site, so the guard reads it off the
+  same object the writes go to, and every way the flag can break resolves to `false` (i.e. the
+  capability refuses). The write path is deliberately **unprivileged** — ordinary `SaveRoots`,
+  ordinary version checks, no test-control bulk loader — because a customer evaluating the product
+  is evaluating what the real write path produces. Enforcement is a Tier-1 test asserting the
+  refusal writes **nothing** plus a Tier-0 IL scan pinning the shared guard as the only reader of
+  the flag, not a paragraph. The named crack: the guard is on the capability, not the data, so
+  hand-assembling a sample set and calling `SaveRoots` is an ordinary write and is not refused —
+  correct, and the same shape of admission as §1.6c's.
 - **Test subsystem**: `MyMoney.TestKit` as a true library (not a test project), four test tiers
   with a new Tier-0 architecture band, four layered enforcement mechanisms for the one-way
   dependency, and `RecordingStore`/`FaultInjectingStore` so the error path is testable from day
@@ -2558,12 +3049,21 @@ worked case.
   fresh-vs-upgraded equality test, the test subsystem and the Tier-0 boundary tests landing
   alongside it, then the same slice on SQL Server to prove the tiering *and the schema mechanism*
   map twice.
-- **Still the owner's to decide**: of §4's original seven items, five remain open in some form
-  (four reframed or strengthened with recommendations in revision 2: #1, #3, #5, #7) plus new item
-  #8 — *what event ends the nuke-and-pave phase?* **Two items are now resolved**: #2 (the
-  file-lease question), closed by the owner in revision 3 — see §1.6a — and **#4 (whether
-  whole-graph `Load()` survives), closed by the owner in revision 7 — see §4 item 4.** The owner's
-  decision: *"The query-based pattern replaces the whole-graph-in-memory pattern everywhere."*
-  `Load()` does not survive; `IMoneyQuery` is now the universal read-access pattern, not a
-  reports-specific addition (§4.1 flags that this leaves item #3's "lag the query surface"
-  recommendation stale, without resolving it). The panel wants #8's trigger named, not the date.
+- **Still the owner's to decide**: of §4's original seven items, **five are now resolved and two
+  remain open** — #1 (rebuild in place vs. a parallel tree) and #3 (must SQL Server stay at feature
+  parity throughout?) — plus new item #8, *what event ends the nuke-and-pave phase?* The panel
+  wants #8's trigger named, not the date. Resolved by the owner, in order:
+  - **#2** — no file lease, ever, on the shipped path (revision 3; §1.6a).
+  - **#4** — whole-graph `Load()` does not survive: *"The query-based pattern replaces the
+    whole-graph-in-memory pattern everywhere"* (revision 7; §4 item 4). `IMoneyQuery` is now the
+    universal read-access pattern, not a reports-specific addition — which §4.1 flags as leaving
+    item #3's "lag the query surface on SQL Server" recommendation stale, without resolving it.
+  - **#5** — XML-as-export-format: **"deferred"** (revision 8). Not in the first slices; §3.2's
+    placement behind `IDataFormat` is untouched. §4.1 records that the developer-facing need this
+    leaves unserved (keeping a hand-built scenario across a re-pave) is already covered by
+    §2.6.2's `Snapshot`/`Restore`, while D-35's disaster-recovery case genuinely is not.
+  - **#6** — credential storage: **"later"** (revision 8). The plaintext SQL logins in
+    `dataengine.config.json` stay for now, against the panel's recommendation of "now"; deferred
+    rather than dismissed, and belongs on the tracker.
+  - **#7** — sample data: shipped, customer-reachable, **and** test-database-only (revision 8;
+    §1.9). The only one of revision 8's three that needed design rather than recording.
