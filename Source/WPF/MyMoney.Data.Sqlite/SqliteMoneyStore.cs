@@ -267,11 +267,64 @@ namespace Walkabout.Data.Sqlite
             }
         }
 
+        /// <summary>
+        /// Per-root, version-checked, with RETURNING Version so the new version is READ from the
+        /// engine rather than inferred as callerRowVersion + 1 in C# (spec section 1.7.1's
+        /// RETURNING adoption). ExecuteScalar returning null is the zero-rows signal, so one
+        /// statement gives both the conflict detection and the authoritative version.
+        ///
+        /// The version check itself stays in SQL, as a WHERE clause. Spec section 1.7.3 is
+        /// explicit that moving it into a BEFORE UPDATE trigger would make the two engines'
+        /// conflict SIGNAL genuinely different - an aborted statement with a message string on
+        /// SQLite versus a rowcount plus a follow-up SELECT on SQL Server - which is more
+        /// divergence, not less, on the most contract-tested behaviour in the data layer.
+        /// </summary>
         private void UpdateAccounts(IReadOnlyList<Account> changed, SQLiteTransaction tx, List<Action> postCommitActions)
         {
-            if (changed.Count > 0)
+            foreach (Account a in changed)
             {
-                throw new NotImplementedException("Task 13.");
+                long callerRowVersion = a.RowVersion;
+                object newVersion;
+
+                using (var cmd = new SQLiteCommand(
+                    "UPDATE Accounts SET AccountId=@AccountId, OfxAccountId=@OfxAccountId, Name=@Name, "
+                    + "Type=@Type, Description=@Description, OnlineAccount=@OnlineAccount, "
+                    + "OpeningBalance=@OpeningBalance, LastSync=@LastSync, LastBalance=@LastBalance, "
+                    + "SyncGuid=@SyncGuid, Flags=@Flags, Currency=@Currency, WebSite=@WebSite, "
+                    + "ReconcileWarning=@ReconcileWarning, CategoryIdForPrincipal=@CategoryIdForPrincipal, "
+                    + "CategoryIdForInterest=@CategoryIdForInterest, Version=Version+1 "
+                    + "WHERE Id=@Id AND Version=@ExpectedVersion "
+                    + "RETURNING Version;",
+                    this.connection,
+                    tx))
+                {
+                    AccountRowCodec.AddParameters(cmd, a);
+                    cmd.Parameters.AddWithValue("@ExpectedVersion", callerRowVersion);
+                    newVersion = cmd.ExecuteScalar();
+                }
+
+                if (newVersion == null || newVersion == DBNull.Value)
+                {
+                    throw new ConcurrencyConflictException(a, this.ReadStoredVersion(a.Id, tx), callerRowVersion);
+                }
+
+                long version = Convert.ToInt64(newVersion, CultureInfo.InvariantCulture);
+                postCommitActions.Add(() =>
+                {
+                    a.RowVersion = version;
+                    a.OnUpdated();
+                });
+            }
+        }
+
+        /// <summary>The store's actual current version for a row; 0 when the row is not there.</summary>
+        private long ReadStoredVersion(long id, SQLiteTransaction tx)
+        {
+            using (var cmd = new SQLiteCommand("SELECT Version FROM Accounts WHERE Id=@Id;", this.connection, tx))
+            {
+                cmd.Parameters.AddWithValue("@Id", id);
+                object value = cmd.ExecuteScalar();
+                return value == null || value == DBNull.Value ? 0 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
             }
         }
 
