@@ -525,6 +525,52 @@ developer-only, so alternative C (a file lease) is what the shipped SQLite path 
 remains the target specifically for the developer-only SQL Server engine, not a shipped-product
 requirement.
 
+**Superseded 2026-09-20.** The note above assumed the shipped product is single-user with only
+rare, accidental overlap (a second copy of the app left open by mistake) — which is the scenario
+a file lease is good at preventing. That assumption no longer holds: the owner has clarified that
+the shipped application needs to service **a single human user and potentially an AI agent
+working at the same time** — genuine, intentional simultaneous access, not an accident to be
+prevented. A file lease is the wrong mechanism for that goal, because it forces the human and the
+agent to take turns rather than actually work concurrently; it optimizes for the wrong failure
+mode.
+
+**Final resolution: version-checked optimistic concurrency (alternatives A+B) for the shipped
+SQLite path too, not just the developer-only SQL Server engine.** In the owner's own words,
+deciding between "fall back and re-query and retry" versus a lease: "If we do [service a human
+and an AI agent at once] the race condition between the two updaters is possible. So we just have
+to be able to write transactions that know how to recover if the transactions fail. The retry
+logic should probably be in the business layer." Confirmed: "Yes, version-checked concurrency,
+retry in business layer. And the test business layer should have one or more APIs that will have
+a means to test this functionality."
+
+This settles the pieces the panel and the D-37 cascade left open:
+
+- **One write path, aggregate-root granularity (A+B), on SQLite as the shipped store** — not
+  conditional on SQL Server shipping. The version column and the batch save path are load-bearing
+  for the default product, not a developer-only concern.
+- **Conflict detection stays in the data layer; recovery moves to the business layer.** The data
+  layer's contract stays simple: attempt the write, report success or `ConcurrencyConflictException`
+  on a version mismatch (which already exists and already does this) — it does not itself retry.
+  The business layer owns the retry loop: catch the conflict, re-query current state, decide how
+  to reapply the intended change, and retry.
+- **New requirement: the test-tier business-layer assembly needs a first-class API for
+  deliberately triggering a concurrency conflict**, so this behaviour can be tested on purpose
+  rather than hit incidentally. The project already has the raw mechanism this can be built on —
+  `MockDatabase.SaveBatch` already throws `ConcurrencyConflictException` whenever a root's
+  `RowVersion` doesn't match what's committed, and a test can already trigger it by saving a root
+  once and setting its `RowVersion` to a stale value before saving again — but that's currently an
+  incidental side effect of test setup, not a documented, supported test-tier capability. The
+  requirement is to formalize it as an explicit API.
+- This also resolves the "genuine unresolved disagreement" recorded in this section's
+  Recommendation above (Adversarial Expert / Operations Engineer vs. Data Engine Expert /
+  Architect): the disagreement was about whether concurrent editing is a scenario worth the
+  investment. It now is, by explicit product goal, not by panel vote — the owner has settled the
+  product-scope question the panel said only they could answer.
+
+The reasoning under D-35's capability floor ("participate in whatever concurrency guarantee D-34
+settles on") and any other cross-reference to D-34 in this document should be read as pointing to
+this resolution, not the superseded file-lease one.
+
 ---
 
 ## D-35 — Which storage engines does the redesign keep, and what must each do?
@@ -2035,7 +2081,7 @@ reviewed by someone who does this professionally before it is implemented.
 |---|---|---|
 | D-32 | A — no engine choice in `File ▸ New`; seam preserved, not built | Partial (deferred to D-37) |
 | D-33 | Remove the write-capable SQL console now; structured query surface as the replacement | Partial (scope of replacement) |
-| D-34 | A+B (one write path, aggregate-root granularity) *if* SQL Server ships; C (file lease) if not | **Yes** — and panel split |
+| D-34 | A+B (one write path, aggregate-root granularity), version-checked concurrency with retry in the business layer — for the shipped SQLite path too, not just SQL Server | No — resolved 2026-09-20 (superseded the earlier file-lease/D-37-cascade answer; see note in D-34) |
 | D-35 | A — one store, everything else a format; split `IDataStore` from `IDataFormat` | No |
 | D-36 | B+C — surface a non-modal review list with explicit repairs, plus a "Check my data" command | No |
 | D-37 | Panel default A (ratify developer-only), 6 of 7 | **Yes** — answer this first |
