@@ -16,13 +16,14 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Inspecting the production assemblies is this project's job, so it references each of
-         them directly. It does NOT reference ..\MyMoney\MyMoney.csproj: nothing here inspects the
-         WPF UI assembly yet. If a check for it is ever added, this is the one test project where
-         that reference would be legitimate. -->
+         them directly. MyMoney.csproj (the WPF UI assembly) is referenced here for the D-15
+         dialog allow-list check (DialogAllowListTests.cs) - this is the one test project where
+         that reference is legitimate, per the comment this replaces. -->
     <ProjectReference Include="..\MyMoney.Business\MyMoney.Business.csproj" />
     <ProjectReference Include="..\MyMoney.TestKit.Contracts\MyMoney.TestKit.Contracts.csproj" />
     <ProjectReference Include="..\MyMoney.Data.Sqlite\MyMoney.Data.Sqlite.csproj" />
     <ProjectReference Include="..\MyMoney.Data.Sqlite.Provisioning\MyMoney.Data.Sqlite.Provisioning.csproj" />
     <ProjectReference Include="..\MyMoney.Tests.Business\MyMoney.Tests.Business.csproj" />
+    <ProjectReference Include="..\MyMoney\MyMoney.csproj" />
   </ItemGroup>
 </Project>
