@@ -62,8 +62,15 @@ namespace Walkabout.Tests.Data.Sqlite
         {
             // Spec section 2.6.6's anti-drift guard. Add a table without a TableRef, or leave a
             // TableRef behind after dropping a table, and this goes red.
+            //
+            // The schema side has to come from RAW introspection, not from Control.Tables:
+            // Control.Tables is itself filtered against TableRef.All, so comparing the two could
+            // only ever catch a TableRef left behind after its table was dropped. The direction
+            // that actually bites - a table added by a new step with no TableRef - would have
+            // passed, and ClearAllData silently skips exactly such a table, which is issue #34's
+            // failure shape verbatim and the thing spec section 2.6.4 says must not recur.
             Assert.That(
-                this.Control.Tables.Select(t => t.Name).OrderBy(n => n),
+                SqliteTableOrder.DataTables(this.fixture.Connection).OrderBy(n => n),
                 Is.EqualTo(TableRef.All.Select(t => t.Name).OrderBy(n => n)));
         }
 

@@ -61,6 +61,24 @@ namespace Walkabout.Tests.Architecture
             }
         }
 
+        /// <summary>
+        /// The positive control for the test above. That test only ever asserts on what the scan
+        /// FINDS, so a scan that silently found nothing - a changed metadata layout, a renamed
+        /// accessor, a wrong path, an exception absorbed in ResolveMemberName - would report a
+        /// clean pass for every assembly while checking nothing at all. This pins that the scanner
+        /// can still see the one call site it is meant to allow.
+        /// </summary>
+        [Test]
+        public void TheIlScan_StillFindsTheOneReaderItIsMeantToAllow()
+        {
+            Assert.That(
+                CallersOf(AssemblyPath("MyMoney.Business"), "StoreIdentity", "get_IsTestDatabase"),
+                Has.Some.StartsWith("TestDatabaseGuard."),
+                "The IL scan no longer finds TestDatabaseGuard reading StoreIdentity.IsTestDatabase. "
+                + "The guard is still there, so the SCAN is broken - and a broken scan passes "
+                + "TestDatabaseFlag_IsReadOnlyByTheSharedGuard silently.");
+        }
+
         private static string AssemblyPath(string name) =>
             System.IO.Path.Combine(TestContext.CurrentContext.TestDirectory, name + ".dll");
 

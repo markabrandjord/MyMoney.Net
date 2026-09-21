@@ -121,23 +121,42 @@ namespace Walkabout.Tests.Architecture
         {
             // Spec section 1, "How the SQLite facade gets its teeth": the shipped store assembly
             // contains no DROP TABLE, no VACUUM INTO, and no DELETE FROM without a WHERE Id=.
-            // A crude but honest string scan over the assembly's UTF-8 bytes; the SQL in this
-            // assembly is all literal, so a literal scan is the right shape.
-            string path = typeof(SqliteMoneyStore).Assembly.Location;
-            string text = Encoding.UTF8.GetString(File.ReadAllBytes(path));
+            // A crude but honest string scan; the SQL in this assembly is all literal, so a
+            // literal scan is the right shape.
+            //
+            // The ENCODING is load-bearing, and getting it wrong makes this test vacuous rather
+            // than merely weak. A C# string literal lives in the assembly's #US heap as UTF-16,
+            // so a UTF-8 decode of the file cannot contain "DROP TABLE" no matter what the
+            // assembly says - every assertion below would pass unconditionally and the DELETE
+            // loop would iterate zero times. The #US heap is also not 2-byte aligned against the
+            // start of the file, so the UTF-16 decode has to be tried from BOTH byte offsets.
+            // UTF-8 is kept as well, for any ASCII embedded resource.
+            byte[] bytes = File.ReadAllBytes(typeof(SqliteMoneyStore).Assembly.Location);
+            int deleteStatementsExamined = 0;
 
-            foreach (string forbidden in new[] { "DROP TABLE", "DROP VIEW", "VACUUM", "TRUNCATE" })
+            foreach (string text in DecodedForms(bytes))
             {
-                Assert.That(text, Does.Not.Contain(forbidden),
-                    $"MyMoney.Data.Sqlite.dll contains the string '{forbidden}'. The destructive code "
-                    + "must not be in a release build's bits at all - that is the whole guarantee.");
+                foreach (string forbidden in new[] { "DROP TABLE", "DROP VIEW", "VACUUM", "TRUNCATE" })
+                {
+                    Assert.That(text, Does.Not.Contain(forbidden),
+                        $"MyMoney.Data.Sqlite.dll contains the string '{forbidden}'. The destructive code "
+                        + "must not be in a release build's bits at all - that is the whole guarantee.");
+                }
+
+                foreach (string deleteStatement in Occurrences(text, "DELETE FROM"))
+                {
+                    deleteStatementsExamined++;
+                    Assert.That(deleteStatement, Does.Contain("WHERE Id="),
+                        "A DELETE without a WHERE Id= clause in the store assembly: " + deleteStatement);
+                }
             }
 
-            foreach (string deleteStatement in Occurrences(text, "DELETE FROM"))
-            {
-                Assert.That(deleteStatement, Does.Contain("WHERE Id="),
-                    "A DELETE without a WHERE Id= clause in the store assembly: " + deleteStatement);
-            }
+            // Positive control. The store has exactly one DELETE literal, so finding none means
+            // the scan itself stopped working - which is precisely how this test was vacuous
+            // before. Without this line a broken scan reports a pass.
+            Assert.That(deleteStatementsExamined, Is.GreaterThan(0),
+                "The scan found no DELETE statement at all in MyMoney.Data.Sqlite.dll. The store's "
+                + "version-checked DELETE is still there, so the scan is broken, not the assembly.");
         }
 
         [Test]
@@ -208,6 +227,21 @@ namespace Walkabout.Tests.Architecture
                 Is.Empty,
                 $"{assembly.GetName().Name} referenced a WPF assembly.");
         }
+
+        /// <summary>
+        /// The assembly's bytes read as text, in every encoding a string literal can be hiding in:
+        /// UTF-8 (embedded ASCII resources) and UTF-16 from each of the two byte alignments (the
+        /// #US heap, where every C# string literal actually lives).
+        /// </summary>
+        private static IEnumerable<string> DecodedForms(byte[] bytes)
+        {
+            yield return Encoding.UTF8.GetString(bytes);
+            yield return DecodeUtf16(bytes, 0);
+            yield return DecodeUtf16(bytes, 1);
+        }
+
+        private static string DecodeUtf16(byte[] bytes, int offset) =>
+            Encoding.Unicode.GetString(bytes, offset, ((bytes.Length - offset) / 2) * 2);
 
         private static IEnumerable<string> Occurrences(string text, string needle)
         {

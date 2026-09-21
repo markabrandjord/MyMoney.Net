@@ -37,6 +37,28 @@ namespace Walkabout.Tests.Business.AppServices
         }
 
         [Test]
+        public void AddAccount_SurvivesOneConflictFewerThanMaxAttempts()
+        {
+            // The other half of the boundary. On its own, the exhaustion test below cannot tell
+            // MaxAttempts from any smaller number: it queues MaxAttempts conflicts and asserts an
+            // exception whose Attempts property is the constant MaxAttempts, so a loop that gave
+            // up after ONE attempt would satisfy it identically. This pins the loop really does
+            // keep going up to the last permitted attempt.
+            var faulty = new FaultInjectingStore(this.fixture.Store);
+            for (int i = 0; i < AddAccountService.MaxAttempts - 1; i++)
+            {
+                faulty.ThrowConflictFor(1);
+            }
+
+            var service = new AddAccountService(faulty, this.fixture.Query);
+
+            Account created = service.AddAccount("Checking", AccountType.Checking, "USD");
+
+            Assert.That(created.Id, Is.EqualTo(1));
+            Assert.That(this.fixture.Store.LoadAccounts(), Has.Count.EqualTo(1));
+        }
+
+        [Test]
         public void AddAccount_AfterTooManyConflicts_GivesUpWithAClearException()
         {
             var faulty = new FaultInjectingStore(this.fixture.Store);
