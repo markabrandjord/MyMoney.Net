@@ -7,7 +7,70 @@
         WindowStartupLocation="CenterScreen"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica">
-    <Grid AutomationProperties.AutomationId="ShellRoot">
-        <ui:TitleBar Title="MyMoney" VerticalAlignment="Top" />
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="MyMoney" />
+
+        <Grid Grid.Row="1" Margin="16,8,16,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ui:TextBox x:Name="SearchBox" AutomationProperties.AutomationId="SearchBox"
+                        Grid.Column="0" Width="320" HorizontalAlignment="Left"
+                        PlaceholderText="Search this view" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <ui:Button x:Name="ThemeLightButton" AutomationProperties.AutomationId="ThemeLightButton"
+                           Content="Light" Margin="0,0,4,0" Click="ThemeLightButton_Click"/>
+                <ui:Button x:Name="ThemeDarkButton" AutomationProperties.AutomationId="ThemeDarkButton"
+                           Content="Dark" Margin="0,0,4,0" Click="ThemeDarkButton_Click"/>
+                <ui:Button x:Name="ThemeSystemButton" AutomationProperties.AutomationId="ThemeSystemButton"
+                           Content="Follow system" Click="ThemeSystemButton_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel x:Name="NavPanel" AutomationProperties.AutomationId="NavPanel" Grid.Column="0" Margin="8">
+                <ui:Button x:Name="NavAccountsButton" AutomationProperties.AutomationId="NavAccountsButton"
+                           Content="Accounts" HorizontalContentAlignment="Left"
+                           HorizontalAlignment="Stretch" Appearance="Primary"
+                           Click="NavAccountsButton_Click"/>
+            </StackPanel>
+
+            <ContentControl x:Name="ContentHost" AutomationProperties.AutomationId="ContentHost"
+                             Grid.Column="1" Margin="8"/>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="16,4,16,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText"
+                       Grid.Column="0" Text="Ready" VerticalAlignment="Center" Opacity="0.7"/>
+            <ui:Button x:Name="ActivityButton" AutomationProperties.AutomationId="ActivityButton"
+                       Grid.Column="1" Content="Activity (0)" Click="ActivityButton_Click"/>
+        </Grid>
+
+        <Popup x:Name="ActivityPopup" AutomationProperties.AutomationId="ActivityPopup"
+               Placement="Top" PlacementTarget="{Binding ElementName=ActivityButton}"
+               StaysOpen="False" AllowsTransparency="True">
+            <Border Background="White" BorderBrush="Gray" BorderThickness="1" CornerRadius="6" Padding="8" MinWidth="260">
+                <StackPanel x:Name="ActivityListPanel"/>
+            </Border>
+        </Popup>
+
+        <ContentPresenter x:Name="DialogHost" Grid.Row="0" Grid.RowSpan="4"/>
     </Grid>
 </ui:FluentWindow>
