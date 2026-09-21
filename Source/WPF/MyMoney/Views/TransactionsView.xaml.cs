@@ -3745,7 +3745,6 @@ namespace Walkabout.Views
         public static readonly RoutedUICommand CommandGotoRelatedTransaction = new RoutedUICommand("GotoRelatedTransaction", "CommandGotoRelatedTransaction", typeof(TransactionsView));
         public static readonly RoutedUICommand CommandGotoStatement = new RoutedUICommand("GotoStatement", "CommandGotoStatement", typeof(TransactionsView));
         public static readonly RoutedUICommand CommandViewTransactionsByAccount = new RoutedUICommand("ViewTransactionsByAccount", "CommandViewTransactionsByAccount", typeof(TransactionsView));
-        public static readonly RoutedUICommand CommandViewSimilarTransactions = new RoutedUICommand("ViewSimilarTransactions", "CommandViewSimilarTransactions", typeof(TransactionsView));
         public static readonly RoutedUICommand CommandViewTransactionsByCategory = new RoutedUICommand("ViewTransactionsByCategory", "CommandViewTransactionsByCategory", typeof(TransactionsView));
         public static readonly RoutedUICommand CommandViewTransactionsByPayee = new RoutedUICommand("ViewTransactionsByPayee", "CommandViewTransactionsByPayee", typeof(TransactionsView));
         public static readonly RoutedUICommand CommandViewTransactionsBySecurity = new RoutedUICommand("ViewTransactionsBySecurity", "CommandViewTransactionsBySecurity", typeof(TransactionsView));
@@ -3879,11 +3878,6 @@ namespace Walkabout.Views
         private void CanExecute_ViewTransactionsByAccount(object sender, CanExecuteRoutedEventArgs e)
         {
             e.CanExecute = this.SelectedTransaction != null;
-            e.Handled = true;
-        }
-        private void CanExecute_ViewSimilarTransactions(object sender, CanExecuteRoutedEventArgs e)
-        {
-            e.CanExecute = true;
             e.Handled = true;
         }
         private void CanExecute_ViewTransactionsByCategory(object sender, CanExecuteRoutedEventArgs e)
@@ -4334,10 +4328,6 @@ namespace Walkabout.Views
             {
                 this.ViewTransactionsForSingleAccount(t.Account, TransactionSelection.Specific, t.Id);
             }
-        }
-
-        private void OnCommandViewSimilarTransactions(object sender, RoutedEventArgs e)
-        {
         }
 
         private void OnCommandViewTransactionsByCategory(object sender, RoutedEventArgs e)

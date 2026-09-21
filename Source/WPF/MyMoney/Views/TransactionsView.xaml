@@ -37,7 +37,6 @@
             <Separator/>
             <MenuItem Name="menuItemGotoRelated" Header="_Go to related transaction" Command="views:TransactionsView.CommandGotoRelatedTransaction" InputGestureText="F12"/>
             <MenuItem Name="menuItemGotoStatement" Header="Go to state_ment" Command="views:TransactionsView.CommandGotoStatement"/>
-            <!--<MenuItem Name="menuItemViewSimilar" Header="View _Similar Transactions" Command="views:TransactionsView.CommandViewSimilarTransactions"/>-->
             <Separator/>
             <MenuItem Name="menuItemByAccount" Header="V_iew Transactions by Account" Command="views:TransactionsView.CommandViewTransactionsByAccount" InputGestureText="F8"/>
             <MenuItem Name="menuItemByCategory" Header="View Transactions by _Category" Command="views:TransactionsView.CommandViewTransactionsByCategory" InputGestureText="F7"/>
@@ -66,7 +65,6 @@
         <CommandBinding Command="views:TransactionsView.CommandGotoRelatedTransaction" Executed="OnCommandGotoRelatedTransaction"  CanExecute="CanExecute_GotoRelatedTransaction"/>
         <CommandBinding Command="views:TransactionsView.CommandGotoStatement" Executed="OnCommandGotoStatement" CanExecute="CanExecute_GotoStatement" />
         <CommandBinding Command="views:TransactionsView.CommandViewTransactionsByAccount" Executed="OnCommandViewTransactionsByAccount" CanExecute="CanExecute_ViewTransactionsByAccount" />
-        <CommandBinding Command="views:TransactionsView.CommandViewSimilarTransactions" Executed="OnCommandViewSimilarTransactions" CanExecute="CanExecute_ViewSimilarTransactions" />
         <CommandBinding Command="views:TransactionsView.CommandViewTransactionsByCategory" Executed="OnCommandViewTransactionsByCategory" CanExecute="CanExecute_ViewTransactionsByCategory" />
         <CommandBinding Command="views:TransactionsView.CommandViewTransactionsByPayee" Executed="OnCommandViewTransactionsByPayee" CanExecute="CanExecute_ViewTransactionsByPayee" />
         <CommandBinding Command="views:TransactionsView.CommandViewTransactionsBySecurity" Executed="OnCommandViewTransactionsBySecurity" CanExecute="CanExecute_ViewTransactionsBySecurity" />
