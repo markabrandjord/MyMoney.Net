@@ -1,8 +1,13 @@
 // Source/WPF/MyMoney.Shell/Views/AccountsView.xaml.cs
 using System;
+using System.ComponentModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using MyMoney.Shell.Controls;
+using MyMoney.Shell.Resources;
+using MyMoney.Shell.Search;
 using MyMoney.Shell.Services;
 using MyMoney.Shell.ViewModels;
 using Walkabout.Business.AppServices;
@@ -10,7 +15,7 @@ using Walkabout.Data;
 
 namespace MyMoney.Shell.Views;
 
-public partial class AccountsView : UserControl
+public partial class AccountsView : UserControl, ISearchableView
 {
     private readonly AccountsListViewModel listViewModel;
     private readonly IDialogService dialogService;
@@ -44,6 +49,55 @@ public partial class AccountsView : UserControl
         this.DeleteAccountButton.IsEnabled = hasSelection;
     }
 
+    /// <summary>
+    /// ISearchableView per D-9: filters the grid to rows whose Name contains the query
+    /// (case-insensitive), then moves the selection per step. All rows in the filtered view
+    /// already match by construction, so Next/Previous is a plain wrapped cycle through them -
+    /// IncrementalSearch's Matches/FindNext/FindPrevious still do the work, just over the
+    /// already-filtered list rather than the full one.
+    /// </summary>
+    public bool ApplySearch(string query, SearchStep step)
+    {
+        ICollectionView view = CollectionViewSource.GetDefaultView(this.AccountsListView.ItemsSource);
+
+        if (string.IsNullOrEmpty(query))
+        {
+            view.Filter = null;
+            return true;
+        }
+
+        view.Filter = o => o is AccountRowViewModel row && IncrementalSearch.Matches(row.Name, query);
+
+        var visible = view.Cast<AccountRowViewModel>().ToList();
+        if (visible.Count == 0)
+        {
+            this.AccountsListView.SelectedItem = null;
+            return false;
+        }
+
+        int currentIndex = this.AccountsListView.SelectedItem is AccountRowViewModel current
+            ? visible.IndexOf(current)
+            : -1;
+        var names = visible.Select(a => a.Name).ToList();
+
+        int targetIndex = step switch
+        {
+            SearchStep.Next => IncrementalSearch.FindNext(names, currentIndex, query),
+            SearchStep.Previous => IncrementalSearch.FindPrevious(names, currentIndex, query),
+            _ => 0, // First: the filtered set is all matches, so its first row is always index 0.
+        };
+
+        if (targetIndex < 0)
+        {
+            targetIndex = 0;
+        }
+
+        var target = visible[targetIndex];
+        this.AccountsListView.SelectedItem = target;
+        this.AccountsListView.ScrollIntoView(target);
+        return true;
+    }
+
     private async void AddAccountButton_Click(object sender, RoutedEventArgs e)
     {
         // A fresh view model per BUTTON CLICK (not per dialog show), per Task 9's
@@ -66,7 +120,7 @@ public partial class AccountsView : UserControl
         while (true)
         {
             var content = new AddAccountView(addViewModel);
-            var outcome = await this.dialogService.ShowAsync(content, "Add Account", "Add");
+            var outcome = await this.dialogService.ShowAsync(content, Strings.AddAccountDialogTitle, Strings.AddAccountCommitLabel);
 
             if (outcome != DialogOutcome.Committed)
             {
@@ -84,8 +138,8 @@ public partial class AccountsView : UserControl
                 // the user did. Adding an account is the one completed, user-initiated action
                 // this slice has, so it is the one that reports. ShowStatus is the transient
                 // line; LogActivity is the durable entry behind the Activity button.
-                this.statusService.ShowStatus($"Account added: {addViewModel.Name}");
-                this.statusService.LogActivity($"Added account '{addViewModel.Name}'");
+                this.statusService.ShowStatus(string.Format(Strings.AccountAddedStatusFormat, addViewModel.Name));
+                this.statusService.LogActivity(string.Format(Strings.AccountAddedActivityFormat, addViewModel.Name));
                 return;
             }
 
@@ -108,7 +162,7 @@ public partial class AccountsView : UserControl
         while (true)
         {
             var content = new EditAccountView(editViewModel);
-            var outcome = await this.dialogService.ShowAsync(content, "Edit Account", "Save");
+            var outcome = await this.dialogService.ShowAsync(content, Strings.EditAccountDialogTitle, Strings.EditAccountCommitLabel);
 
             if (outcome != DialogOutcome.Committed)
             {
@@ -120,8 +174,8 @@ public partial class AccountsView : UserControl
             if (editViewModel.Succeeded)
             {
                 await this.listViewModel.LoadCommand.ExecuteAsync(null);
-                this.statusService.ShowStatus($"Account updated: {editViewModel.Name}");
-                this.statusService.LogActivity($"Updated account '{editViewModel.Name}'");
+                this.statusService.ShowStatus(string.Format(Strings.AccountUpdatedStatusFormat, editViewModel.Name));
+                this.statusService.LogActivity(string.Format(Strings.AccountUpdatedActivityFormat, editViewModel.Name));
                 return;
             }
 
@@ -144,7 +198,7 @@ public partial class AccountsView : UserControl
         while (true)
         {
             var content = new DeleteAccountView(deleteViewModel);
-            var outcome = await this.dialogService.ShowAsync(content, "Delete Account", "Delete");
+            var outcome = await this.dialogService.ShowAsync(content, Strings.DeleteAccountDialogTitle, Strings.DeleteAccountCommitLabel);
 
             if (outcome != DialogOutcome.Committed)
             {
@@ -156,8 +210,8 @@ public partial class AccountsView : UserControl
             if (deleteViewModel.Succeeded)
             {
                 await this.listViewModel.LoadCommand.ExecuteAsync(null);
-                this.statusService.ShowStatus($"Account deleted: {deleteViewModel.AccountName}");
-                this.statusService.LogActivity($"Deleted account '{deleteViewModel.AccountName}'");
+                this.statusService.ShowStatus(string.Format(Strings.AccountDeletedStatusFormat, deleteViewModel.AccountName));
+                this.statusService.LogActivity(string.Format(Strings.AccountDeletedActivityFormat, deleteViewModel.AccountName));
                 return;
             }
 

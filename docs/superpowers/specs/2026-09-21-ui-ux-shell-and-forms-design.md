@@ -70,6 +70,32 @@ and `panel-review-03-navigation-crosscutting.md` on `docs/scenario-capture`. Sum
   Dark / **Follow system**, live, no restart. Fix the two exception-swallowing bugs in the
   current theme-switch path. Keep a code-side color resolver for charts/print. Convention
   (not a mechanism) against literal colors outside the palette.
+  - **Standard, named explicitly (added 2026-09-21, after a live dark-mode gap was found on
+    the Accounts grid):** Microsoft's Fluent Design System theme-resource tokens — the WinUI 3
+    "XAML theme resources" set (`learn.microsoft.com/windows/apps/design/style/xaml-theme-resources`).
+    This isn't a new choice; it's the exact token set WPF-UI's `ThemesDictionary` ports into
+    WPF (`ApplicationBackgroundBrush`, `CardBackgroundFillColorDefaultBrush`,
+    `TextFillColorPrimaryBrush`/`...SecondaryBrush`, `ControlFillColorDefaultBrush`/
+    `...SecondaryBrush`, `ControlStrokeColorDefaultBrush`, `AccentFillColorDefaultBrush`, etc.).
+    Naming it gives every future screen a real reference instead of guessing brush names.
+  - **Rule (completes the "convention against literal colors" line above — it covers
+    commission, not omission):**
+    1. Every visual surface's `Background`/`Foreground`/`BorderBrush` resolves via
+       `DynamicResource` to one of those tokens. No literal `Color`/`Brush` values anywhere in
+       the Shell, in XAML or code-behind.
+    2. WPF-UI's `ControlsDictionary` only restyles its own `ui:` controls plus a curated set of
+       native ones (`Button`, `TextBox`, `ComboBox`, `CheckBox`, ...) — **not**
+       `ListView`/`GridView`/`DataGrid`/`TreeView`. Any native control outside that curated set
+       needs an explicit app-wide `Style` in `App.xaml`, binding to the same tokens as (1),
+       added at the moment that control type is first introduced into the Shell — not left
+       unstyled until someone notices the contrast problem. (This is the actual root cause of
+       the Accounts-grid gap: nothing used a literal color: `ListView`/`GridView` simply had no
+       style at all, so it rendered via WPF's default Aero2 theme, which knows nothing about
+       the app's Light/Dark setting.)
+  - **Deferred, not addressed now (2026-09-21):** persisting the Light/Dark/Follow-system
+    choice to an application JSON config file, with a settings dialog, instead of the current
+    in-window Light/Dark/Follow-system buttons. The buttons are fine for early development;
+    revisit once the app has a real settings surface.
 
 **Views & editing (D-8–D-12):**
 - **Navigation** (D-8): shell owns a real navigation contract. Route ids are stable,
@@ -81,6 +107,98 @@ and `panel-review-03-navigation-crosscutting.md` on `docs/scenario-capture`. Sum
 - **Search** (D-9): one shell-provided filter affordance, surfaces opt in via a predicate,
   header-hosted (not shell chrome), honest "nothing to search here" where unsupported.
   Global find, if ever built, is a visibly different control — not a substitute.
+  - **Made concrete (2026-09-21):** the original entry named the shape (filter affordance,
+    opt-in predicate, header-hosted, honest "nothing to search here") but not the exact match
+    rule or the multi-match navigation behavior. **The word "filter" stands as originally
+    written** — it is a real filter: non-matching rows are hidden from the grid, not merely
+    passed over. (An earlier draft of this addendum proposed changing this to a find-and-select
+    model, based on an inference from an informal description rather than a deliberate spec
+    change; that was wrong process and is reverted — the filter model is what's built.)
+    - **Match rule:** case-insensitive substring match against the view's designated primary
+      display field (Accounts: `Name`). Each searchable view supplies its own field via the
+      predicate D-9 already calls for — this is not hardcoded to Accounts.
+    - **Multi-match navigation:** once the grid is filtered down to matching rows, Next/Previous
+      (a visible control pair, plus Enter/Shift+Enter while focus is in the search box) simply
+      cycles selection among the rows still visible, wrapping at the ends — there is no separate
+      "skip past non-matches" step, because everything visible already matches by construction.
+      Clearing the query restores the full, unfiltered list.
+    - **No-match feedback:** an empty filtered grid plus the existing D-5 ephemeral status
+      channel (e.g. "No matches for 'xyz'"), not a new UI element.
+    - **Contract:** an `ISearchableView`-shaped capability each content view opts into (per
+      D-9's own "surfaces opt in via a predicate" line) — the shell calls into whichever view
+      is currently hosted to apply/clear the filter and advance/retreat the selection, and shows
+      D-9's "nothing to search here" state (search box disabled, not hidden — its presence is
+      itself the "this shell supports search" promise) when the active view doesn't implement
+      it. Built once, against Accounts, and reused unchanged by
+      Payees/Categories/Currencies/Securities as each is built — this is the reason to build the
+      real contract now rather than a single-screen-specific wiring.
+    - **Focus/lifetime rule:** the filter does **not** clear when focus leaves the search box
+      (a Tab, or clicking elsewhere — including clicking Edit/Delete on a row the search just
+      found). This matches the standard convention: neither a browser's Ctrl+F bar nor Windows
+      Explorer's search box clears on blur, and auto-clearing here would actively fight the
+      point of searching — the moment you click "Edit Account" on the row you just found, focus
+      leaves the search box, and an auto-clear would un-filter the grid out from under that
+      click. The filter persists until the query text is explicitly cleared: deleting the typed
+      text, or pressing **Escape** while focused in the search box (also standard — the same key
+      closes/clears a browser's find bar). Navigating to a *different* screen, by contrast, does
+      clear that screen's search query — per D-2/D-8, this ephemeral UI state belongs to the
+      screen it was typed against and isn't meaningful carried into another one.
+    - **Next/Previous availability:** both controls (and their Enter/Shift+Enter equivalents)
+      start disabled — a search hasn't been run yet, so there's nothing to advance through.
+      They enable the moment the query becomes non-empty, and disable again the moment it's
+      cleared (by any means: deleting the text, Escape, or navigating away). This also keeps
+      them out of the tab sequence while irrelevant — WPF skips disabled controls automatically
+      — which is a second, independent reason to gate them this way, on top of it just being
+      the correct affordance state.
+    - **This whole D-9 entry — match rule, filter semantics, Next/Previous, focus/lifetime
+      rule, the `ISearchableView` contract — is not Accounts-specific.** It is the standard for
+      every future screen with a search box: Payees, Categories, Currencies, Securities, and
+      whatever comes after. A screen opts in by implementing `ISearchableView`; nothing about
+      the shell's search chrome (the box, Previous/Next, Escape/Enter) is rebuilt per screen.
+- **Localization / string resources** (new cross-cutting concern, found and resolved
+  2026-09-21 — not part of the original panel's D-numbering, since it wasn't one of the
+  reviewed clusters; recorded here because the trigger was building D-9's search feature, whose
+  strings needed a home): every user-facing string in the Shell (button labels, dialog titles,
+  tooltips, status/activity messages, form field labels) must be read from a resource lookup,
+  never a literal in XAML or code-behind, so a translation can be added without touching either.
+  - **Standards adopted, named explicitly, not invented:**
+    - **.resx resource files** are the mechanism — `System.Resources.ResourceManager` reading
+      `Resources/Strings.resx`, per Microsoft's own "Resources in .resx files" /
+      "Packaging and deploying resources in desktop apps" guidance. This is the one localization
+      mechanism common to every .NET app type (WPF, console, ASP.NET, MAUI) — not a bespoke
+      scheme. WPF also has its own separate, native `x:Uid` + LocBaml satellite-BAML mechanism;
+      rejected here because LocBaml ships as a *sample tool's source code*, not a ready package,
+      and requires a real per-culture BAML recompilation step this small, CLI-built project has
+      no need to carry yet.
+    - **Neutral + per-culture file naming** (`Strings.resx` default, `Strings.<culture>.resx`
+      per culture, e.g. `Strings.fr.resx`, `Strings.zh-Hans.resx`) is .NET's own documented
+      convention, resolved automatically at runtime by `ResourceManager`'s culture-fallback
+      chain (specific culture → neutral culture → invariant default) — adding a translated
+      culture file is the entire integration step; no code changes.
+    - **Culture identifiers** (`fr`, `fr-FR`, `zh-Hans`, ...) follow **BCP 47** (IETF RFC 5646),
+      which is what `System.Globalization.CultureInfo` already implements — this governs the
+      `<culture>` part of the filename above, not a project-specific choice.
+    - **XLIFF** (OASIS/ISO 21720) is the standard interchange format for round-tripping strings
+      through a translator or CAT tool; not adopted now (no translator workflow exists yet), but
+      named because Microsoft's own Multilingual App Toolkit bridges `.resx` ↔ `.xlf` directly —
+      staying on plain `.resx` today keeps that path open for free later.
+  - **Key grouping:** Microsoft's guidance (not a formal spec) recommends splitting resources by
+    logical component once a single file gets large, to keep review/translation ownership
+    sane. One flat `Strings.resx` is kept for now (the Shell's whole string set is still small
+    and has real cross-screen sharing — e.g. the Name/Type/Currency field labels used by both
+    Add and Edit). **Trigger to split:** once the file passes roughly 75 keys, or spans more
+    than two or three unrelated screens, split into a shared `Shell.resx` (chrome: search,
+    theme, nav, status) plus one `.resx` per screen (`Accounts.resx`, `Payees.resx`, ...).
+  - **Access pattern:** a hand-written `MyMoney.Shell.Resources.Strings` static class exposes
+    one property per key (`Strings.SearchPlaceholder`, etc.), each a thin
+    `ResourceManager.GetString(name, CultureInfo.CurrentUICulture)` call — the same shape Visual
+    Studio's auto-generated `Strings.Designer.cs` would produce, hand-maintained instead because
+    this project builds via the `dotnet` CLI rather than VS's design-time resx tooling. XAML
+    reads a value via `{x:Static resources:Strings.SearchPlaceholder}`; code-behind reads the
+    property directly. **Explicitly out of scope for this pass:** `MyMoney.Business`'s exception
+    messages (e.g. `AddAccountService`'s validation text), which `EditAccountViewModel` etc.
+    currently surface verbatim as `ErrorMessage`. That's a shared assembly used by the legacy
+    app too, and a real, separate localization decision — not silently folded into this one.
 - **"Show me everything like this"** (D-10) — **owner decision, 2026-09-21**: delete the
   dead command now. Defer build/no-build on the real feature (seeded, editable payee-family
   search) until after the Quicken import — decide with the panel's own cheap test: count
@@ -192,6 +310,32 @@ into an implementation plan. Each needs a yes/no or a pick from you.
    have a real screen-reader/focus-trapping problem, that surfaces only after multiple
    dialogs are already built on it, and fixing it then means revisiting all of them, not
    one. No further action needed before `writing-plans`.
+   - **First fast-follow instance (2026-09-21): keyboard focus (tab) order.** Manual testing
+     on the running Accounts screen found the observed tab order was Search → Light → Dark →
+     Follow system → Accounts (nav) → the data grid → Add Account — the grid came *before*
+     the row of Add/Edit/Delete buttons despite those buttons being declared, and visually
+     positioned, above the grid. That's a real defect, not a style preference.
+   - **Standard, named explicitly:** WCAG 2.1 Success Criterion 2.4.3, *Focus Order*
+     (`w3.org/WAI/WCAG21/Understanding/focus-order.html`) — "if a page can be navigated
+     sequentially... components receive focus in an order that preserves meaning and
+     operability." WCAG is a web standard, but it's the standard Microsoft's own Windows
+     accessibility guidance for desktop apps points back to for exactly this requirement;
+     there's no separate WinUI/WPF-specific focus-order spec that supersedes it. It doesn't
+     mandate one specific order — only that the order must match the page's logical/visual
+     structure, which is the concrete rule below.
+   - **Rule:** tab order follows the same top-to-bottom, left-to-right reading order as the
+     visual layout, exactly. For this shell, that means: toolbar row (Search, then
+     Light/Dark/Follow system, left to right) → nav panel (Accounts, and whatever's added
+     below it later) → the hosted content's own controls in ITS visual top-to-bottom order
+     (for Accounts: Add/Edit/Delete buttons, then the grid) → the status bar's own controls
+     (Activity). Don't rely on WPF's ambient default ordering to produce this — set explicit
+     `TabIndex` wherever a screen has more than a couple of focusable elements, so the order
+     is asserted, not incidental. This applies to every future screen built on this shell,
+     not just Accounts.
+   - **Deferred, not addressed now (2026-09-21):** broader screen-reader verification (actual
+     narration content/labels, live-region announcements for the status model) stays
+     fast-follow per the resolution above — this entry only covers focus *order*, the
+     specific defect found.
 
 ## Non-goals
 

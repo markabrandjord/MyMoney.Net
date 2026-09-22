@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- Shell chrome (MainWindow) -->
+  <data name="SearchPlaceholder" xml:space="preserve"><value>Search this view</value></data>
+  <data name="SearchPreviousTooltip" xml:space="preserve"><value>Previous match</value></data>
+  <data name="SearchNextTooltip" xml:space="preserve"><value>Next match</value></data>
+  <data name="ThemeLight" xml:space="preserve"><value>Light</value></data>
+  <data name="ThemeDark" xml:space="preserve"><value>Dark</value></data>
+  <data name="ThemeFollowSystem" xml:space="preserve"><value>Follow system</value></data>
+  <data name="NavAccounts" xml:space="preserve"><value>Accounts</value></data>
+  <data name="StatusReady" xml:space="preserve"><value>Ready</value></data>
+  <data name="ActivityButtonFormat" xml:space="preserve"><value>Activity ({0})</value></data>
+  <data name="NoMatchesStatusFormat" xml:space="preserve"><value>No matches for '{0}'</value></data>
+
+  <!-- Accounts screen -->
+  <data name="AddAccountButtonLabel" xml:space="preserve"><value>+ Add Account</value></data>
+  <data name="EditAccountButtonLabel" xml:space="preserve"><value>Edit Account</value></data>
+  <data name="DeleteAccountButtonLabel" xml:space="preserve"><value>Delete Account</value></data>
+  <data name="AddAccountDialogTitle" xml:space="preserve"><value>Add Account</value></data>
+  <data name="AddAccountCommitLabel" xml:space="preserve"><value>Add</value></data>
+  <data name="EditAccountDialogTitle" xml:space="preserve"><value>Edit Account</value></data>
+  <data name="EditAccountCommitLabel" xml:space="preserve"><value>Save</value></data>
+  <data name="DeleteAccountDialogTitle" xml:space="preserve"><value>Delete Account</value></data>
+  <data name="DeleteAccountCommitLabel" xml:space="preserve"><value>Delete</value></data>
+  <data name="AccountAddedStatusFormat" xml:space="preserve"><value>Account added: {0}</value></data>
+  <data name="AccountAddedActivityFormat" xml:space="preserve"><value>Added account '{0}'</value></data>
+  <data name="AccountUpdatedStatusFormat" xml:space="preserve"><value>Account updated: {0}</value></data>
+  <data name="AccountUpdatedActivityFormat" xml:space="preserve"><value>Updated account '{0}'</value></data>
+  <data name="AccountDeletedStatusFormat" xml:space="preserve"><value>Account deleted: {0}</value></data>
+  <data name="AccountDeletedActivityFormat" xml:space="preserve"><value>Deleted account '{0}'</value></data>
+
+  <!-- Shared form field labels (Add/Edit Account today; every future simple-table form reuses these) -->
+  <data name="FieldLabelName" xml:space="preserve"><value>Name</value></data>
+  <data name="FieldLabelType" xml:space="preserve"><value>Type</value></data>
+  <data name="FieldLabelCurrency" xml:space="preserve"><value>Currency</value></data>
+  <data name="FieldLabelOpeningBalance" xml:space="preserve"><value>Opening Balance</value></data>
+
+  <!-- Delete confirmation -->
+  <data name="DeleteAccountConfirmPrefix" xml:space="preserve"><value>Delete account '</value></data>
+  <data name="DeleteAccountConfirmSuffix" xml:space="preserve"><value>'? This cannot be undone.</value></data>
+</root>

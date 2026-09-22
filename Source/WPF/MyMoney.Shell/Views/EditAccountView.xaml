@@ -3,17 +3,18 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:resources="clr-namespace:MyMoney.Shell.Resources"
              Width="320">
     <StackPanel>
-        <TextBlock Text="Name" Margin="0,0,0,4"/>
+        <TextBlock Text="{x:Static resources:Strings.FieldLabelName}" Margin="0,0,0,4"/>
         <ui:TextBox x:Name="NameTextBox" AutomationProperties.AutomationId="EditAccountNameTextBox"
                     Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12"/>
 
-        <TextBlock Text="Type" Margin="0,0,0,4"/>
+        <TextBlock Text="{x:Static resources:Strings.FieldLabelType}" Margin="0,0,0,4"/>
         <ComboBox x:Name="TypeComboBox" AutomationProperties.AutomationId="EditAccountTypeComboBox"
                   SelectedItem="{Binding Type}" Margin="0,0,0,12"/>
 
-        <TextBlock Text="Currency" Margin="0,0,0,4"/>
+        <TextBlock Text="{x:Static resources:Strings.FieldLabelCurrency}" Margin="0,0,0,4"/>
         <ui:TextBox x:Name="CurrencyTextBox" AutomationProperties.AutomationId="EditAccountCurrencyTextBox"
                     Text="{Binding Currency, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12"/>
 

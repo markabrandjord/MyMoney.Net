@@ -8,6 +8,25 @@
                 <ui:ThemesDictionary Theme="Light" />
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- WPF-UI's ControlsDictionary above restyles its own ui: controls plus a curated
+                 set of native ones (Button, TextBox, ComboBox, ...) - it does not cover
+                 ListView/GridView, so without this they render via WPF's default Aero2 theme
+                 (hardcoded white/black) regardless of the app's Light/Dark setting. Keyed to
+                 the same Fluent Design theme-resource tokens as everywhere else in the Shell
+                 (see the Theming rule in the design spec's D-7 section) so every future
+                 simple-table screen inherits correct dark-mode behavior automatically. -->
+            <Style TargetType="ListView">
+                <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+            </Style>
+            <Style TargetType="GridViewColumnHeader">
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}"/>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

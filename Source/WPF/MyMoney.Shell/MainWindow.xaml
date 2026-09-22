@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:resources="clr-namespace:MyMoney.Shell.Resources"
         Title="MyMoney"
         Height="640" Width="980"
         WindowStartupLocation="CenterScreen"
@@ -22,16 +23,36 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <ui:TextBox x:Name="SearchBox" AutomationProperties.AutomationId="SearchBox"
-                        Grid.Column="0" Width="320" HorizontalAlignment="Left"
-                        PlaceholderText="Search this view" />
+            <!-- Explicit TabIndex throughout this window (see the design spec's tab-order
+                 fast-follow entry, under D-6/D-7/D-15's accessibility resolution): WCAG 2.1 SC
+                 2.4.3 requires focus order to match the visual/logical reading order, and
+                 WPF's ambient default ordering does not reliably produce that on its own - it
+                 previously put the data grid before the Add Account button despite the button
+                 being declared and rendered above the grid. TabIndex values are assigned in
+                 reading order (toolbar row, then nav, then hosted content, then status bar) and
+                 left with gaps so a later screen's controls (AccountsView's, here 10-13) can be
+                 inserted without renumbering everything else. -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left">
+                <ui:TextBox x:Name="SearchBox" AutomationProperties.AutomationId="SearchBox"
+                            Width="320" PlaceholderText="{x:Static resources:Strings.SearchPlaceholder}" TabIndex="0"
+                            TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+                <!-- Next/Previous start disabled (see the design spec's D-9 "Next/Previous
+                     availability" entry): nothing to advance through until a search is active,
+                     and disabled controls are automatically skipped in tab order for free. -->
+                <ui:Button x:Name="SearchPreviousButton" AutomationProperties.AutomationId="SearchPreviousButton"
+                           Content="▲" ToolTip="{x:Static resources:Strings.SearchPreviousTooltip}" Margin="4,0,0,0"
+                           IsEnabled="False" Click="SearchPreviousButton_Click" TabIndex="1"/>
+                <ui:Button x:Name="SearchNextButton" AutomationProperties.AutomationId="SearchNextButton"
+                           Content="▼" ToolTip="{x:Static resources:Strings.SearchNextTooltip}" Margin="4,0,0,0"
+                           IsEnabled="False" Click="SearchNextButton_Click" TabIndex="2"/>
+            </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <ui:Button x:Name="ThemeLightButton" AutomationProperties.AutomationId="ThemeLightButton"
-                           Content="Light" Margin="0,0,4,0" Click="ThemeLightButton_Click"/>
+                           Content="{x:Static resources:Strings.ThemeLight}" Margin="0,0,4,0" Click="ThemeLightButton_Click" TabIndex="3"/>
                 <ui:Button x:Name="ThemeDarkButton" AutomationProperties.AutomationId="ThemeDarkButton"
-                           Content="Dark" Margin="0,0,4,0" Click="ThemeDarkButton_Click"/>
+                           Content="{x:Static resources:Strings.ThemeDark}" Margin="0,0,4,0" Click="ThemeDarkButton_Click" TabIndex="4"/>
                 <ui:Button x:Name="ThemeSystemButton" AutomationProperties.AutomationId="ThemeSystemButton"
-                           Content="Follow system" Click="ThemeSystemButton_Click"/>
+                           Content="{x:Static resources:Strings.ThemeFollowSystem}" Click="ThemeSystemButton_Click" TabIndex="5"/>
             </StackPanel>
         </Grid>
 
@@ -43,9 +64,9 @@
 
             <StackPanel x:Name="NavPanel" AutomationProperties.AutomationId="NavPanel" Grid.Column="0" Margin="8">
                 <ui:Button x:Name="NavAccountsButton" AutomationProperties.AutomationId="NavAccountsButton"
-                           Content="Accounts" HorizontalContentAlignment="Left"
+                           Content="{x:Static resources:Strings.NavAccounts}" HorizontalContentAlignment="Left"
                            HorizontalAlignment="Stretch" Appearance="Primary"
-                           Click="NavAccountsButton_Click"/>
+                           Click="NavAccountsButton_Click" TabIndex="6"/>
             </StackPanel>
 
             <ContentControl x:Name="ContentHost" AutomationProperties.AutomationId="ContentHost"
@@ -57,10 +78,14 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
+            <!-- Text/Content set by MainWindow's RefreshStatus() from StatusService, not
+                 hardcoded here - both are user-facing strings that live in Strings.resx (see
+                 StatusService.CurrentStatus's default and RefreshStatus's use of
+                 Strings.ActivityButtonFormat). -->
             <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText"
-                       Grid.Column="0" Text="Ready" VerticalAlignment="Center" Opacity="0.7"/>
+                       Grid.Column="0" VerticalAlignment="Center" Opacity="0.7"/>
             <ui:Button x:Name="ActivityButton" AutomationProperties.AutomationId="ActivityButton"
-                       Grid.Column="1" Content="Activity (0)" Click="ActivityButton_Click"/>
+                       Grid.Column="1" Click="ActivityButton_Click" TabIndex="100"/>
         </Grid>
 
         <Popup x:Name="ActivityPopup" AutomationProperties.AutomationId="ActivityPopup"

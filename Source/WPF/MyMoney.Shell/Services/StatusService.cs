@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using MyMoney.Shell.Resources;
 
 namespace MyMoney.Shell.Services;
 
@@ -7,7 +8,7 @@ public sealed class StatusService : IStatusService
 {
     private readonly List<ActivityEntry> activity = new();
 
-    public string CurrentStatus { get; private set; } = "Ready";
+    public string CurrentStatus { get; private set; } = Strings.StatusReady;
 
     public IReadOnlyList<ActivityEntry> Activity => this.activity;
 
