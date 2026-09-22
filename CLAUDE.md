@@ -16,6 +16,14 @@ a WPF personal-finance app (C#, .NET 10.0). Being evaluated as a Quicken
 Classic replacement by importing Quicken data into it; if it doesn't work out
 this checkout gets deleted, otherwise the migration becomes permanent.
 
+**As of 2026-09-22, this is the legacy app only.** The UI/UX redesign (`MyMoney.Shell`) and the
+`IMoneyStore`/`IMoneyQuery` data-layer foundation it ran on were split out to a new, separate,
+private repo — [markabrandjord/MyMoneyPlus](https://github.com/markabrandjord/MyMoneyPlus) — for
+complete isolation from this app: no shared build, no shared test run, no shared database file.
+`Money.cs` was copied (not moved) there, since this app still depends on it directly; treat the two
+copies as independent from here on, not kept in sync. New UI/UX-redesign or new-architecture work
+happens in that repo, not this one.
+
 ## Git remotes and workflow
 
 - `origin` → `markabrandjord/MyMoney.Net` (your fork) — fetch & push
@@ -61,15 +69,10 @@ scenario tests, project dependency diagram). Quick reference:
 - `Importers/` and `Ofx/` handle bringing in external data (OFX/QFX, CSV, QIF-style
   imports) — relevant to the Quicken-conversion evaluation this fork exists for.
 - `Reports/`, `Charts/`, `Taxes/` are feature areas built on top of the core model.
-- **There are now TWO WPF applications in `Source/WPF`**, both in the same solution and
-  both shipped: the legacy `MyMoney` project described above, and `MyMoney.Shell` — the
-  UI/UX redesign's vertical slice (WPF-UI/Fluent chrome + MVVM, `MyMoney.Shell` root
-  namespace, its own `MyMoney.Tests.Shell` unit tests and `UITests/Shell` FlaUI tests). It
-  runs *alongside* the legacy app rather than replacing it, has its own `MainWindow`, and
-  talks to `IMoneyStore`/`IMoneyQuery` (currently over a throwaway in-memory SQLite database
-  opened in its `App.OnStartup`) instead of `Database/Money.cs`'s object graph. A change to
-  one app is not automatically a change to the other, and "the app" in an older note or issue
-  almost always means the legacy one.
+- There is only one WPF application in `Source/WPF` now (the legacy `MyMoney` project
+  described above). A second one, `MyMoney.Shell` (the UI/UX redesign, `IMoneyStore`/
+  `IMoneyQuery`, and their own test projects), existed here through 2026-09-21 and was split
+  out to `markabrandjord/MyMoneyPlus` on 2026-09-22 — see the note at the top of this file.
 - Other source trees are separate/experimental UI ports, not part of the main
   app: `Source/Xamarin` (legacy mobile) and `Source/Uno` (in-progress Uno
   Platform port). Don't assume changes to `Source/WPF/MyMoney` need mirroring there.
