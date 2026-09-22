@@ -1,0 +1,1766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/scenario-capture/panel-review-03-navigation-crosscutting/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Panel Review 03 — navigation-ui and cross-cutting - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Panel Review 03 \u2014 navigation-ui and cross-cutting", url: "#_top", children: [
+              {title: "D-5 \u2014 What is the product\u0027s model for telling the user what it is doing?", url: "#d-5-what-is-the-products-model-for-telling-the-user-what-it-is-doing" },
+              {title: "D-6 \u2014 Is there a compact/density mode, and is it a user setting?", url: "#d-6-is-there-a-compactdensity-mode-and-is-it-a-user-setting" },
+              {title: "D-7 \u2014 How does theming work when a third theme exists?", url: "#d-7-how-does-theming-work-when-a-third-theme-exists" },
+              {title: "D-49 \u2014 Build undo, or remove the menu items?", url: "#d-49-build-undo-or-remove-the-menu-items" },
+              {title: "D-50 \u2014 Does the product back up the user\u0027s data?", url: "#d-50-does-the-product-back-up-the-users-data" },
+              {title: "D-51 \u2014 Does the product ship in-product help?", url: "#d-51-does-the-product-ship-in-product-help" },
+              {title: "D-52 \u2014 Is printing a capability of this product?", url: "#d-52-is-printing-a-capability-of-this-product" },
+              {title: "D-53 \u2014 How does the product ship, version and refresh its reference data?", url: "#d-53-how-does-the-product-ship-version-and-refresh-its-reference-data" },
+              {title: "Appendix \u2014 panel bookkeeping", url: "#appendix-panel-bookkeeping" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="panel-review-03-navigation-ui-and-cross-cutting">Panel Review 03 — <code>navigation-ui</code> and <code>cross-cutting</code><a class="headerlink" href="#panel-review-03-navigation-ui-and-cross-cutting" title="Permanent link">#</a></h1>
+<p>One expert-panel session over eight of the 53 entries in
+<code>redesign-decision-register.md</code>: the whole of the <code>navigation-ui</code> cluster
+(<strong>D-5</strong>, <strong>D-6</strong>, <strong>D-7</strong>) and the whole of the <code>cross-cutting</code> cluster
+(<strong>D-49</strong>, <strong>D-50</strong>, <strong>D-51</strong>, <strong>D-52</strong>, <strong>D-53</strong>).</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Decision</th>
+<th>Recommended</th>
+<th>Needs your decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D-5</td>
+<td>Model for telling the user what it is doing</td>
+<td>Two channels: priority/dwell status line + persistent activity log</td>
+<td>No</td>
+</tr>
+<tr>
+<td>D-6</td>
+<td>Compact/density mode</td>
+<td>Delete <code>Compact.xaml</code>; no app-wide density dimension</td>
+<td>No</td>
+</tr>
+<tr>
+<td>D-7</td>
+<td>Theming contract with a third theme</td>
+<td>Validated token contract + "follow the system" as the third mode</td>
+<td>No</td>
+</tr>
+<tr>
+<td>D-49</td>
+<td>Build undo, or remove the menu items</td>
+<td>Remove the dead menu items; operation-scoped checkpoint undo, not a journal</td>
+<td><strong>Partly</strong> (scope for v1)</td>
+</tr>
+<tr>
+<td>D-50</td>
+<td>Does the product back up the user's data</td>
+<td>Self-contained data folder + reachable complete backup <strong>and</strong> restore</td>
+<td><strong>Partly</strong> (scheduling)</td>
+</tr>
+<tr>
+<td>D-51</td>
+<td>In-product help</td>
+<td>Coverage as an enforced contract + a visible help affordance</td>
+<td>No</td>
+</tr>
+<tr>
+<td>D-52</td>
+<td>Is printing a capability</td>
+<td>One paginated-document path off the existing <code>FlowDocument</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>D-53</td>
+<td>Shipping/versioning reference data</td>
+<td>Embed everything, version it visibly, refresh via the app update channel</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Panel members.</strong> Architect · Developer (C#/.NET/WPF, WPF-UI/Fluent) · Test
+Engineer · Operations Engineer · UI/UX Expert · Data Engine Expert (SQLite /
+SQL Server) · Adversarial Expert.</p>
+<p><strong>Three corrections the panel made to the register's own framing before
+debating.</strong> Each is stated in the relevant section, but they are collected here
+because they changed a recommendation:</p>
+<ol>
+<li><strong>D-5</strong> — the register describes the status-suppression timers as a blunt
+   rate limiter against "far more <code>ShowMessage</code> calls than a user could read."
+   There are <strong>16 <code>ShowMessage</code> call sites in the entire product</strong>. The timers
+   are not a rate limiter; they are a <em>priority</em> mechanism implemented as a
+   wall clock, protecting two specific messages from being overwritten by the
+   background stock-quote downloader. That reframing produced a different
+   recommendation than "rate-limit the status line."</li>
+<li><strong>D-51</strong> — the register reads as "four windows have help." The product
+   actually has a <strong>complete 56-page user manual in <code>docs/</code> published to
+   <code>moneytools.github.io/MyMoney.Net</code></strong>, and F1 is wired at roughly seventeen
+   sites (main window, accounts panel with per-account-type keyword switching,
+   the quick-filter control, four dialogs, and nine report views set in code).
+   The decision is not "ship help or not"; it is "is coverage a contract."</li>
+<li><strong>D-52</strong> — the register calls printing "build-from-nothing." Reports are
+   already real WPF <code>FlowDocument</code>s, and a <code>FlowDocument</code> is an
+   <code>IDocumentPaginatorSource</code> — the <em>pipeline</em> is a handful of lines. What is
+   genuinely missing is print-shaped <strong>layout</strong> (<code>FlowDocumentReportWriter</code>
+   sets <code>doc.MinPageWidth = maxWidth + 100</code>, i.e. the document is deliberately
+   laid out to screen width, and it is themed, so a dark-mode report prints as
+   an ink disaster). Pipeline cheap, layout real.</li>
+</ol>
+<hr />
+<h2 id="d-5-what-is-the-products-model-for-telling-the-user-what-it-is-doing">D-5 — What is the product's model for telling the user what it is doing?<a class="headerlink" href="#d-5-what-is-the-products-model-for-telling-the-user-what-it-is-doing" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 2 OQ9 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<h3 id="eli10">ELI10<a class="headerlink" href="#eli10" title="Permanent link">#</a></h3>
+<p>At the bottom of the window there is a thin strip of text that tells you what
+just happened — "loaded your file in 400 milliseconds", "your accounts add up
+to £X", "couldn't get today's exchange rates". There is only ever room for one
+of these at a time, and a new one instantly wipes out the old one. Nobody keeps
+a list of the ones you missed.</p>
+<p>That causes a specific problem. When you open your file, the program wants to
+tell you two useful things at once — how long it took, and what you're worth.
+But at the same moment it also starts quietly fetching today's share prices in
+the background, and <em>that</em> chatters away: "getting history for MSFT…", "getting
+history for AAPL…", one line per company you own. Those background messages
+would instantly scribble over the useful ones.</p>
+<p>The fix somebody made years ago was a stopwatch: ignore <em>every</em> message for the
+first three seconds after the program starts, and again for five seconds after
+a file finishes loading. It works, in the sense that the important message
+survives. But it is a very blunt instrument — during those windows a genuine
+error message is thrown away too, and nobody is told.</p>
+<p>What's being decided: when the status strip gets redrawn in the new design,
+what replaces the stopwatch? If nobody decides, the new design will either copy
+the stopwatch without knowing why, or delete it and bring the chatter back.</p>
+<h3 id="what-the-code-actually-does">What the code actually does<a class="headerlink" href="#what-the-code-actually-does" title="Permanent link">#</a></h3>
+<ul>
+<li><code>IStatusService</code> has four members (<code>ShowMessage</code>, <code>ShowOutput</code>,
+  <code>ShowProgress</code>, <code>ClearStatus</code>). <code>ShowMessage</code> has <strong>16 call sites</strong> across
+  <code>MyMoney</code> and <code>MyMoney.Business</code>.</li>
+<li><code>MainWindow.ShowMessage</code> drops the message entirely if
+  <code>NativeMethods.TickCount &lt; this.loadTime + 3000</code>. <code>InternalShowMessage</code> drops
+  it if <code>DateTime.Now &lt; this.skipMessagesUntil</code>. <code>skipMessagesUntil</code> is set to
+  <code>now + 5s</code> at exactly one place: immediately after posting the "Loaded from
+  <em>file</em> in <em>N</em> milliseconds" message.</li>
+<li>The messages being suppressed come overwhelmingly from
+  <code>StockQuoteManager.ShowMainWindowStatus</code> — "Downloading history for
+  <em>SYMBOL</em>…", "History updated for <em>SYMBOL</em>", plus error text — fired once per
+  holding.</li>
+<li><code>ShowMessageUIThread</code> is a single assignment: <code>this.StatusMessage.Content =
+  text</code>. No severity, no lifetime, no queue, no history.</li>
+<li>A separate output pane exists (<code>ShowOutput</code> → <code>OutputView.AppendText</code>) and is
+  used by import flows. <code>AnimatedMessage</code> exists for a message that changes
+  after the fact. <code>MessageBoxEx</code> is the modal channel.</li>
+</ul>
+<p>So the product already has <em>three</em> channels (transient line, output pane, modal
+box) with no rule about which is which, and the transient one has no concept of
+a message mattering more than another.</p>
+<h3 id="alternatives">Alternatives<a class="headerlink" href="#alternatives" title="Permanent link">#</a></h3>
+<p><strong>A5-1 — Prioritised transient status line.</strong> Keep one status line; give every
+message a severity and a minimum dwell time. A lower-priority message cannot
+overwrite a higher-priority one that is still inside its dwell; equal-priority
+messages queue briefly rather than stomping. Both wall-clock guards are deleted.</p>
+<ul>
+<li><em>Pros.</em> Smallest possible change to the shape of the product. Fixes the real
+  defect (errors being silently discarded inside the suppression window) rather
+  than working around it. Testable with an injectable clock. The 16 call sites
+  are few enough to classify by hand in an afternoon.</li>
+<li><em>Cons.</em> Still lossy by design — a message you were away from the screen for
+  is gone forever. Does not help the user who wants to know <em>why</em> the quote
+  download failed for one holding out of forty.</li>
+<li><em>Unintended consequences.</em> Dwell times make the status line feel laggy if set
+  generously, because a chatty background job now <em>queues</em> rather than
+  overwriting; the queue can run long after the work finished, so the strip
+  reports stale news. Also, once messages have priority, every caller has to
+  pick one, and callers in <code>MyMoney.Business</code> (the quote manager) now need a
+  vocabulary from a UI concern — a small layering leak.</li>
+</ul>
+<p><strong>A5-2 — Two channels: ephemeral status + persistent activity log.</strong> Split
+explicitly. An ephemeral line (or a Fluent <code>Snackbar</code>) carries <em>foreground</em>
+results of things the user just did, and is allowed to be lossy. A persistent
+activity/notifications surface — a flyout with a badge — receives everything
+that is background, long-running, or a failure, and keeps it for the session.
+Nothing is ever silently discarded; the timers become unnecessary because
+chatter never competes with results.</p>
+<ul>
+<li><em>Pros.</em> Matches the platform convention users already know. The quote
+  downloader's forty lines become one collapsible "Updating prices (12 of 40)"
+  entry instead of forty overwrites. Errors become findable after the fact,
+  which is the single biggest gap today. Removes the layering leak: background
+  code reports <em>to the activity log</em>, not to "the status bar."</li>
+<li><em>Cons.</em> A new surface to design, build and test. Risk of becoming a place
+  errors go to be ignored, if nothing ever draws attention to the badge.</li>
+<li><em>Unintended consequences.</em> An activity log that keeps history is a place
+  account names, institution names and symbols accumulate — which quietly makes
+  it a screenshot-hazard and interacts with D-41's "what may a shareable
+  diagnostic contain." Also, once there is a durable list of failures, users
+  will reasonably expect a retry button on each entry, which is a bigger
+  commitment than the log itself.</li>
+</ul>
+<p><strong>A5-3 — No global status surface; feedback lives where the work lives.</strong>
+Delete the status strip. A long operation shows progress inline in the surface
+that owns it; a failure becomes a Fluent <code>InfoBar</code> docked in that same surface,
+dismissible and persistent until dismissed. The bottom bar carries only durable
+state (net worth, unsaved-changes indicator, current file).</p>
+<ul>
+<li><em>Pros.</em> The most modern answer and the most discoverable: feedback appears
+  where the user is looking, not in a strip at the far edge of a maximised
+  window that nobody reads. An <code>InfoBar</code> cannot be silently overwritten, which
+  structurally solves the original problem. No priority vocabulary needed.</li>
+<li><em>Cons.</em> Background work that belongs to no surface (quote downloads,
+  exchange-rate fetch, the attachment watcher) has nowhere to go — so this
+  alternative needs A5-2's activity log anyway, or it just loses those messages
+  differently. Retrofitting an <code>InfoBar</code> slot into every surface is more edits
+  than either alternative above.</li>
+<li><em>Unintended consequences.</em> Per-surface <code>InfoBar</code>s that persist until
+  dismissed will accumulate and eat vertical space in the register, the one
+  surface where vertical space is most contested (see D-6). And the
+  net-worth-on-open message (P2-STATUS-1) has no owning surface, so a genuinely
+  liked behaviour would need re-siting.</li>
+</ul>
+<h3 id="panel-discussion">Panel discussion<a class="headerlink" href="#panel-discussion" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> opened by killing the register's premise: sixteen call sites is
+not a storm. Reading <code>MainWindow.xaml.cs:2119-2121</code> makes the real intent
+obvious — the five-second window starts on the line <em>immediately after</em> the
+"Loaded from…" message is posted. It exists to protect that one message.</p>
+<p><strong>Test Engineer</strong> made the argument that carried most weight: a suppression
+window keyed to <code>DateTime.Now</code> and <code>NativeMethods.TickCount</code> is untestable in
+any honest way. Any test of "does an error appear in the status bar" is either
+flaky or has to sleep. Priority-plus-dwell with an injected clock is
+deterministic. "Whatever else we pick, the wall clock has to go" was agreed by
+everyone.</p>
+<p><strong>UI/UX Expert</strong> argued for A5-3 in principle and A5-2 in practice: the bottom
+status strip of a maximised financial app is the least-read pixel on the
+screen, and the product currently puts <em>errors</em> there. But the quote downloader
+and the exchange-rate service genuinely have no owning surface, so a pure A5-3
+loses them.</p>
+<p><strong>Architect</strong> flagged that A5-1 pushes a UI vocabulary (severity) down into
+<code>MyMoney.Business</code>, while A5-2 does the opposite — business code reports facts
+("started downloading history for MSFT", "failed: rate limited") and the shell
+decides presentation. That asymmetry decided it for him.</p>
+<p><strong>Operations Engineer</strong> noted that all three <code>ShowMessage</code> paths already marshal
+through <code>UiDispatcher.BeginInvoke</code>, so none of these alternatives introduces a
+threading problem — but Phase 8's OQ3 finding (<code>MessageBoxEx.Show</code> returns
+<code>None</code> immediately off the UI thread) means the <em>modal</em> channel is currently
+unreliable from background code, so any design that says "and errors go to a
+message box" is building on sand. That is a bug (#52 family), but it constrains
+the design: background failures must not require a modal answer.</p>
+<p><strong>Data Engine Expert</strong> weighed in narrowly: save and load timings are the only
+user-visible feedback the persistence layer produces, and a SQL Server load can
+be genuinely slow. Whatever replaces this must keep a progress affordance for
+load/save, not just a completion message.</p>
+<p><strong>Adversarial Expert</strong> pushed back on A5-2: "an activity centre in a
+single-user desktop budgeting app" is the kind of thing that gets built and
+then gets a badge that is permanently at zero. He proposed the simplest
+possible answer nobody had said out loud: <strong>the only messages that must not be
+lost are failures.</strong> Successes are pleasant and disposable. So the minimum
+viable design is one ephemeral line plus one persistent place failures go — and
+that place already exists, because <code>Logger</code> writes
+<code>%TEMP%\MyMoney\Logs\</code> and P2-HELP-5 already offers "open my logs."</p>
+<p>That landed. The panel's conclusion absorbed it: A5-2, but the persistent half
+is justified <em>by failures</em>, not by a general desire to keep history, and it
+should be the user-facing front end of the log the product already writes
+(which would also fix Phase 8's OQ23 — three background failure paths currently
+swallowed into empty <code>catch</code> blocks).</p>
+<h3 id="recommendation">Recommendation<a class="headerlink" href="#recommendation" title="Permanent link">#</a></h3>
+<p><strong>A5-2, scoped by the adversarial framing.</strong> Two channels:</p>
+<ol>
+<li><strong>Ephemeral status</strong> — one line (or Fluent <code>Snackbar</code>), lossy by design,
+   carrying foreground results only. No wall-clock suppression; instead a
+   minimum dwell so a result is not instantly overwritten, and background
+   chatter simply does not use this channel at all.</li>
+<li><strong>Persistent activity/problems surface</strong> — everything background,
+   long-running, or failed. Presented as a flyout with a count, backed by the
+   log the product already writes. Background code reports facts; the shell
+   decides presentation.</li>
+</ol>
+<p>Delete <code>loadTime + 3000</code> and <code>skipMessagesUntil</code> outright — they become
+unnecessary once chatter and results are on different channels. Keep an inline
+progress affordance for load/save per the Data Engine Expert's point. Route
+Phase 8 OQ23's three swallowed-exception sites into the new problems surface;
+that is three lines each and converts three invisible failures into visible
+ones.</p>
+<p>No unresolved disagreement. The UI/UX Expert's preference for A5-3's per-surface
+<code>InfoBar</code>s is recorded as a compatible later addition, not a competing answer.</p>
+<h3 id="needs-your-decision">Needs your decision<a class="headerlink" href="#needs-your-decision" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Panel is confident. One sub-question the owner may want to answer
+cheaply: whether the existing <code>OutputView</code> pane (used by import flows) survives
+as a third channel or is folded into the activity surface. The panel leans
+"fold it in" but did not treat that as load-bearing.</p>
+<hr />
+<h2 id="d-6-is-there-a-compactdensity-mode-and-is-it-a-user-setting">D-6 — Is there a compact/density mode, and is it a user setting?<a class="headerlink" href="#d-6-is-there-a-compactdensity-mode-and-is-it-a-user-setting" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 8 OQ18 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<h3 id="eli10_1">ELI10<a class="headerlink" href="#eli10_1" title="Permanent link">#</a></h3>
+<p>Every button, box and list row in the program has a size. You can make them all
+a bit smaller so more fits on the screen, or leave them roomy so they're easier
+to hit and read. Some programs give you a switch for this ("comfortable" /
+"compact").</p>
+<p>Sitting in this program's folder is a file that would make everything smaller.
+It was copied in from a <em>different</em> program years ago and then forgotten — no
+switch turns it on, no code even opens it. It has been dead weight ever since.</p>
+<p>Separately, the transaction list <em>does</em> have its own switch, but it does a
+different thing: it shows each transaction as one line or as three stacked
+lines. That's about how much <em>information</em> per row, not how <em>tall</em> a button is.
+Easy to confuse the two.</p>
+<p>What's being decided: does the new design promise a whole-program "make
+everything smaller" switch — which means every single screen ever built has to
+be checked at both sizes, forever — or is the forgotten file just junk to throw
+away?</p>
+<h3 id="what-the-code-actually-does_1">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_1" title="Permanent link">#</a></h3>
+<ul>
+<li><code>Themes/Compact.xaml</code> is 30 resource entries, headed with the literal comment
+  <code>&lt;!-- from: D:\git\ModernWpf\ModernWpf\DensityStyles\Compact.xaml --&gt;</code>. Every
+  key in it is a <strong>ModernWpf</strong> key: <code>ControlContentThemeFontSize</code>,
+  <code>TextControlThemeMinHeight</code>, <code>ListViewItemMinHeight</code>,
+  <code>ComboBoxMinHeight</code>, <code>DataGridRowMinHeight</code>, the <code>DatePickerFlyoutPresenter*</code>
+  family, and so on.</li>
+<li>Nothing merges it. <code>AppTheme.SetTheme</code> is only ever called with
+  <code>"Themes/Dark.xaml"</code> or <code>"Themes/Light.xaml"</code>, hard-coded in
+  <code>MainWindow.OnThemeChanged</code>. No setting names it.</li>
+<li>The two <code>IsCompact="True"</code> hits elsewhere in the codebase are in
+  <code>AttachmentDialog.xaml</code> and refer to a ModernWpf control property, unrelated
+  to this dictionary.</li>
+<li>The register's cross-reference is <code>P3-REG-3</code> ("Choose between a compact and a
+  detailed row"), driven by <code>OneLineView</code> / Ctrl+T. That is <em>content</em> density —
+  one line vs. three stacked lines showing category and memo. It is orthogonal
+  to control metrics.</li>
+</ul>
+<p>The decisive fact: <strong>the app is migrating off ModernWpf to WPF-UI.</strong> Every key
+in <code>Compact.xaml</code> is a ModernWpf resource key. After the migration those keys
+resolve to nothing. The file is not "a density mode waiting to be switched on";
+it is a vendored fragment of a library being removed.</p>
+<h3 id="alternatives_1">Alternatives<a class="headerlink" href="#alternatives_1" title="Permanent link">#</a></h3>
+<p><strong>A6-1 — Ship a product-wide density setting.</strong> Own a canonical token set
+(spacing, control heights, font sizes, row heights) with Comfortable and
+Compact values, expose it in settings, and make it a dimension every surface
+must honour.</p>
+<ul>
+<li><em>Pros.</em> Power users with thousands of transactions genuinely want more rows
+  per screen. Consistency: one switch, whole app. If it is going to exist at
+  all, deciding now is far cheaper than retrofitting.</li>
+<li><em>Cons.</em> WPF-UI does not ship a density dictionary the way ModernWpf/WinUI do,
+  so this is a token set the project <strong>owns and maintains forever</strong>, including
+  for every third-party control it hosts. Every new surface, forever, must be
+  designed and reviewed at two densities.</li>
+<li><em>Unintended consequences.</em> It doubles the visual-regression surface — which
+  is not hypothetical here, because this branch already has <code>VisualGuard</code>
+  visual-invariant tests. Every screenshot baseline becomes two baselines. It
+  also interacts badly with Windows' own display scaling and text-size
+  accessibility setting: a user at 150% scale who also picks Compact gets a
+  combination nobody tested. And a "make everything smaller" control with no
+  corresponding "make everything bigger" is an accessibility trap: the only
+  direction offered is the one that hurts low-vision users.</li>
+</ul>
+<p><strong>A6-2 — No app-wide density; per-surface content density only.</strong> Delete
+<code>Compact.xaml</code>. Keep <code>OneLineView</code> in the register. Where another surface has a
+genuine density need (the holdings list, say), give that surface its own
+affordance in its own terms. Chrome metrics come from the WPF-UI defaults,
+unmodified.</p>
+<ul>
+<li><em>Pros.</em> Free today, and forecloses nothing, because the deleted file's keys
+  are worthless post-migration. Keeps the visual-regression surface
+  single-valued. Honours the actual observed user need — "show me more
+  transactions" — with the control that already exists and is already bound to
+  Ctrl+T.</li>
+<li><em>Cons.</em> Slightly inconsistent by construction: one surface has a density
+  toggle and others don't. A user who wants everything tighter has no answer.</li>
+<li><em>Unintended consequences.</em> Accepting WPF-UI's default metrics unmodified
+  means the product's information density is now set by an upstream library's
+  taste and moves when that library updates — a real, if minor, loss of
+  control. Worth pinning the library version deliberately rather than
+  floating it.</li>
+</ul>
+<p><strong>A6-3 — Defer to the platform.</strong> No in-app density control at all; honour
+Windows display scaling and the system text-size setting properly, and
+otherwise leave metrics alone. Treat "I want more on screen" as an OS-level
+concern the user already has a control for.</p>
+<ul>
+<li><em>Pros.</em> Philosophically the cleanest, and the only one that helps low-vision
+  users as well as density-seekers, because the platform control goes both
+  ways. Zero maintenance.</li>
+<li><em>Cons.</em> Windows' text-scaling support in WPF is uneven, and a data grid that
+  scales its font without reflowing its columns looks broken. "Honour it
+  properly" is not free — it is its own testing commitment.</li>
+<li><em>Unintended consequences.</em> Scales <em>everything</em>, including the register's
+  column widths, so a user who scales up to read the amounts loses columns off
+  the right edge — which the product currently handles by column virtualisation
+  and horizontal scroll that few users find.</li>
+</ul>
+<h3 id="panel-discussion_1">Panel discussion<a class="headerlink" href="#panel-discussion_1" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> settled the factual question in one line: those are ModernWpf
+keys, ModernWpf is going away, the file is dead in the new world regardless of
+what we decide. Anyone arguing for A6-1 is arguing to <em>write a new</em> density
+token set, not to switch on an existing one.</p>
+<p><strong>Test Engineer</strong> gave the strongest cost argument. VisualGuard tests landed on
+this branch two commits ago. A density dimension multiplies every visual
+baseline by two, permanently, and the failure mode of an untested density is
+exactly the kind of thing screenshots catch and nothing else does. The cost is
+not the tokens; it is the doubled verification surface for the life of the
+product.</p>
+<p><strong>UI/UX Expert</strong> conceded the point but was careful to preserve the real user
+need underneath it. A personal-finance register is a dense data surface; users
+with ten years of history genuinely do want more rows visible. But when he
+enumerated what actually consumes vertical space in the register, the answer
+was three-line rows, not control padding — and <code>OneLineView</code> already fixes
+that, with a keyboard shortcut, and it is already remembered across sessions.
+A6-1 would be solving a solved problem with a much larger hammer.</p>
+<p><strong>Architect</strong> added that A6-1's real cost is a <em>contract</em>: "every surface
+honours density" is only true if enforced, and an unenforced density dimension
+decays exactly the way <code>IView.SerializeViewState</code> decayed (D-8: two of eight
+surfaces implement it properly). Introducing a second contract with the same
+decay profile, in the same redesign that is trying to fix the first one, is a
+bad trade.</p>
+<p><strong>Adversarial Expert</strong> asked who requested this. Nobody. The register's own
+wording is "before a redesign invents one" — and the honest answer to "should
+we invent this" is usually no. He then argued the <em>other</em> side to test the
+consensus: if the redesign is going to be Fluent, and Fluent's default metrics
+are noticeably roomier than the current ModernWpf ones, the migration may make
+the register <em>less</em> dense than it is today, and users will notice a regression
+they never asked for. That is a real risk and it is not addressed by deleting a
+file.</p>
+<p>The panel accepted that as a caveat rather than a reason to build A6-1: the
+right response to "Fluent's defaults are too roomy for a data grid" is to set
+the grid's row metrics deliberately in one place, not to ship a user-facing
+density switch. Recorded as a build-time obligation below.</p>
+<p><strong>Operations Engineer</strong> and <strong>Data Engine Expert</strong> both opted out. ("Nothing to
+add — this touches no deployment or storage concern.")</p>
+<h3 id="recommendation_1">Recommendation<a class="headerlink" href="#recommendation_1" title="Permanent link">#</a></h3>
+<p><strong>A6-2.</strong> Delete <code>Themes/Compact.xaml</code>. No app-wide density setting, no density
+token dimension, no second cross-cutting contract for every surface to honour
+and decay against. Keep and extend per-surface content density
+(<code>OneLineView</code>/Ctrl+T) where a surface genuinely earns it.</p>
+<p>With one build-time obligation attached, from the Adversarial Expert's
+challenge: <strong>during the WPF-UI migration, set the register's row metrics
+explicitly and compare rows-visible-per-screen against the current build.</strong>
+Fluent defaults are roomier than ModernWpf's; if the register loses rows, fix
+it at the grid, deliberately, in one place. Do not let that regression become
+the argument for retrofitting a density mode later.</p>
+<p>No disagreement among the seven on the outcome.</p>
+<h3 id="needs-your-decision_1">Needs your decision<a class="headerlink" href="#needs-your-decision_1" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Confident, and cheap to revisit — deleting the file forecloses nothing,
+because its contents are worthless once ModernWpf is gone.</p>
+<p><strong>Panel flags: would benefit from accessibility expertise.</strong> None of the seven
+roles covers low-vision or motor-accessibility requirements properly. The
+observation that a one-directional "make it smaller" control is an
+accessibility hazard, and the question of how the redesign should honour Windows
+text scaling and High Contrast, both deserve someone who does this for a living.
+This flag is shared with D-7.</p>
+<hr />
+<h2 id="d-7-how-does-theming-work-when-a-third-theme-exists">D-7 — How does theming work when a third theme exists?<a class="headerlink" href="#d-7-how-does-theming-work-when-a-third-theme-exists" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 8 OQ19 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<h3 id="eli10_2">ELI10<a class="headerlink" href="#eli10_2" title="Permanent link">#</a></h3>
+<p>The program comes in a light look and a dark look, and you can switch between
+them without restarting. Most of the colours switch correctly because they're
+looked up by name each time they're needed.</p>
+<p>But some things are drawn by hand in code — charts, the report pages, a few
+custom bits. Those grab a colour once and keep it. To make <em>those</em> follow the
+switch, someone wrote a helper that hands out a special kind of colour that can
+be changed later, and keeps a list of every one it handed out so it can go
+round updating them when the theme changes.</p>
+<p>The trouble is that the helper is opt-in. If a piece of code forgets to ask it
+and just grabs a colour directly, that thing stays the wrong colour until you
+restart the program — and nothing tells you. There are known places that
+deliberately do this. Nobody has a list of the accidental ones.</p>
+<p>Worse, and the panel found this while reading the code: if the new look is
+missing even <em>one</em> colour the helper was asked to track, the update crashes
+partway through — and the crash is caught and thrown away. The result is that
+the program ends up half in one theme and half in the other, with no error, no
+warning, and (in a shipped build) no log entry either.</p>
+<p>What's being decided: what the rule is. Should every colour go through the
+name-lookup system so this whole class of problem can't happen? Should there be
+a checked list of colour names that fails loudly if a theme is missing one?
+Or should the program admit it can't fully switch and ask you to restart?</p>
+<h3 id="what-the-code-actually-does_2">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_2" title="Permanent link">#</a></h3>
+<p><code>Source/WPF/MyMoney/Utilities/AppTheme.cs</code> is 110 lines and is the whole
+mechanism.</p>
+<ul>
+<li><code>GetThemedBrush(name)</code> looks up a resource, <strong>clones</strong> it into an unfrozen
+  <code>SolidColorBrush</code>, caches the clone by name and returns it. If the resource
+  is missing it throws; if it is not a <code>SolidColorBrush</code> it throws.</li>
+<li><code>SetTheme(name)</code> merges the new dictionary, removes the old one, then calls
+  <code>UpdateDynamicBrushes()</code>, then raises <code>ThemeChanged</code>. The entire body is
+  wrapped in <code>try { … } catch { }</code> with the comment <em>"Survive not find the theme
+  set by the user."</em></li>
+<li><code>UpdateDynamicBrushes()</code> iterates the cache:</li>
+</ul>
+<p><code>csharp
+  var newBrush = Application.Current.TryFindResource(name) as Brush;
+  if (newBrush == null) { Debug.WriteLine($"Dynamic brush '{name}' not found after theme change!"); }
+  if (newBrush is SolidColorBrush solid) { brush.Color = solid.Color; }
+  else { throw new Exception("Can only theme SolidColorBrush"); }</code></p>
+<p><strong>Panel finding, not previously recorded.</strong> The register says
+<code>UpdateDynamicBrushes</code> "only writes a debug line when a brush named in code is
+missing from the incoming theme." It does write that line — and then falls
+straight through into the <code>else</code> and <strong>throws</strong>, because <code>null</code> is not a
+<code>SolidColorBrush</code>. That exception is swallowed by <code>SetTheme</code>'s bare <code>catch</code>.
+The consequences, in order:</p>
+<ol>
+<li>The dictionary swap has already happened, and <code>_theme</code>/<code>_name</code> are already
+   updated, so the app believes the theme changed.</li>
+<li>The brush cache is left <strong>partially</strong> updated — clones iterated before the
+   throw have the new colour; the rest keep the old one.</li>
+<li><code>ThemeChanged</code> <strong>never fires</strong>, so every subscriber that redraws on theme
+   change (charts, report views) is never told.</li>
+<li><code>Debug.WriteLine</code> is compiled out of a Release build, so there is no
+   diagnostic at all.</li>
+</ol>
+<p>Net effect: one missing colour name in a theme dictionary silently produces a
+half-themed application in a shipped build. That is precisely the failure a
+third theme would trigger, and it is worse than the register's description.
+Recommend appending this to #52 as a distinct defect; the panel did not find it
+in the B-list.</p>
+<p>Scale: <code>GetThemedBrush</code> has 28 call sites across 11 files — <code>AreaChart</code>,
+<code>WpfConverters</code>, <code>FlowDocumentReportWriter</code>, <code>RetirementPlan</code>,
+<code>ChangeInfoReport</code>, <code>InternetExplorer</code>, <code>MessageBoxEx</code>, <code>AccountsControl</code>,
+<code>BalanceControl</code>, <code>ChangeTracker</code>, <code>TransactionsView</code>. Several of those are
+genuinely code-drawing surfaces (charts, flow-document report content) where
+eliminating code-side colour entirely is not realistic.</p>
+<h3 id="alternatives_2">Alternatives<a class="headerlink" href="#alternatives_2" title="Permanent link">#</a></h3>
+<p><strong>A7-1 — Pure dynamic resources; no code-side brushes at all.</strong> Every colour
+resolved via <code>{DynamicResource}</code> in XAML. <code>GetThemedBrush</code> deleted. Code that
+must draw (charts, report documents) subscribes to a theme-changed signal and
+re-renders from scratch rather than mutating cached brushes.</p>
+<ul>
+<li><em>Pros.</em> Structurally eliminates the whole problem class — there is no cache
+  to go stale and no opt-in to forget. WPF's dynamic-resource machinery does
+  the work and is well understood.</li>
+<li><em>Cons.</em> "Re-render the chart on theme change" is more work than "change a
+  brush's colour," and charts are the most expensive things to re-render. The
+  <code>FlowDocumentReportWriter</code> case is worse: it builds a document once; making it
+  theme-reactive means regenerating the report, which for the portfolio or tax
+  report means recomputing it.</li>
+<li><em>Unintended consequences.</em> Forcing re-render on theme change means a theme
+  switch can take visible seconds on a large report — and if the app follows the
+  system theme automatically (see below), that re-render happens at whatever
+  moment Windows decides to switch at sunset. It also quietly forecloses
+  "print always uses light colours" (D-52), because if the document is
+  theme-reactive there is no longer a stable non-themed rendering to print.</li>
+</ul>
+<p><strong>A7-2 — A validated token contract.</strong> Define one canonical list of colour
+tokens. Every theme dictionary must define all of them; every code-side lookup
+must name one of them. Enforce with a test that loads each theme dictionary and
+asserts every token resolves to a <code>SolidColorBrush</code>, plus a test that every
+name passed to the themed-brush resolver is in the list. <code>UpdateDynamicBrushes</code>
+changes from throw-on-surprise to log-and-continue. Keep the resolver, but make
+forgetting it detectable.</p>
+<ul>
+<li><em>Pros.</em> Turns "a redesign introducing a third theme would find these one at a
+  time" into "a redesign introducing a third theme finds them all at once, at
+  test time, before a user ever sees it." Cheap — this is one or two unit tests
+  and a list, not infrastructure. Compatible with WPF-UI's own token set, which
+  the migration should adopt wholesale rather than hand-maintaining Light/Dark.
+  Keeps charts fast (mutate the brush, don't re-render).</li>
+<li><em>Cons.</em> The canonical list is another artefact to keep current; adding a
+  colour means touching the list and every theme. That friction is the point,
+  but it is friction.</li>
+<li><em>Unintended consequences.</em> A strict "every theme defines every token" rule
+  makes a <em>partial</em> theme impossible — which sounds fine until someone wants an
+  accent-only variant that inherits everything else. Worth designing the list as
+  base + overlay from the start rather than discovering it later. Also, the
+  test needs to run against the real merged dictionary, which means it is a
+  WPF-hosting test (STA thread, <code>Application.Current</code>), not a plain unit test —
+  slightly more awkward than it sounds.</li>
+</ul>
+<p><strong>A7-3 — Keep best-effort; make restart-on-theme-change explicit.</strong> Accept that
+some code-drawn colour will not follow a live switch. Tell the user: changing
+theme takes effect on restart.</p>
+<ul>
+<li><em>Pros.</em> Zero work. Honest, in the narrow sense that the product stops
+  promising something it doesn't deliver.</li>
+<li><em>Cons.</em> Windows switches light/dark on a schedule by default. An app that
+  needs a restart to follow it is visibly behind the platform, and the user
+  can't even make it follow — they'd have to restart the app at sunset.</li>
+<li><em>Unintended consequences.</em> "Restart to change theme" means the theme is read
+  at startup, which means the <em>settings</em> surface where you change it now shows
+  a value that doesn't match what you're looking at — a small but constant
+  wrongness. And it does nothing about the half-themed-on-missing-token failure,
+  which happens at startup too.</li>
+</ul>
+<h3 id="panel-discussion_2">Panel discussion<a class="headerlink" href="#panel-discussion_2" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> made the migration argument. WPF-UI ships its own theme resource
+set and an <code>ApplicationThemeManager</code>; the migration is the moment to adopt those
+tokens rather than continue hand-maintaining <code>Light.xaml</code> and <code>Dark.xaml</code>. Doing
+that makes a "third theme" almost free in the sense that matters — and clarified
+what the third theme should actually <em>be</em>.</p>
+<p><strong>UI/UX Expert</strong> answered that directly and changed the shape of the decision:
+the third mode users want is not a third palette. It is <strong>"follow the system"</strong> —
+auto light/dark. Windows has offered this since 2018 and every modern app
+honours it. A hand-authored third colour scheme is a hobby; system-follow is
+table stakes. Separately, High Contrast is a <em>fourth</em> concern and a real
+accessibility requirement, and it is not a palette you author — it is a mode you
+get out of the way for.</p>
+<p>That reframing is what made A7-3 indefensible: system-follow means the theme can
+change while the app is running, at a moment the user didn't choose. Restart is
+not an option.</p>
+<p><strong>Test Engineer</strong> costed A7-2 and found it unusually cheap for its value: a
+token-coverage test over the theme dictionaries is maybe forty lines, and it
+catches exactly the failure the panel just discovered by reading. He also noted
+VisualGuard can screenshot each theme, which catches the <em>half</em>-themed state
+that a token test alone would not. Two cheap tests cover the class.</p>
+<p><strong>Architect</strong> argued against A7-1 on a second-order ground the others hadn't
+raised: making every drawn surface theme-reactive couples the chart and report
+layers to the theming system permanently, and the report layer has a separate
+requirement coming (print, D-52) that wants a <em>stable, non-themed</em> rendering.
+Those two requirements fight. A7-2 keeps them independent — the document is
+built with resolved brushes, and print builds it with the print palette.</p>
+<p><strong>Adversarial Expert</strong> asked whether a validated token contract is gold-plating
+for a single-maintainer fork. The Test Engineer's forty-line answer defused it.
+He then pressed a better point: A7-2 fixes <em>detection</em>, not the underlying
+opt-in nature of the resolver. A developer who writes <code>new SolidColorBrush(
+Colors.Red)</code> in a chart is still invisible to the token test, because they never
+named a token. True, and worth stating honestly — A7-2 catches missing and
+misnamed tokens, not colour invented from nowhere. The mitigation is a lint or
+review convention against literal colour construction outside the palette, not
+another mechanism.</p>
+<p><strong>Operations Engineer</strong> noted the deployment angle is nil but the <em>diagnostic</em>
+angle is not: <code>Debug.WriteLine</code> in a Release build is nothing. Any theme
+failure should go to <code>Logger</code>, which the product already has and already
+surfaces via P2-HELP-5.</p>
+<p><strong>Data Engine Expert</strong> opted out. ("No persistence dimension here.")</p>
+<h3 id="recommendation_2">Recommendation<a class="headerlink" href="#recommendation_2" title="Permanent link">#</a></h3>
+<p><strong>A7-2, with system-follow as the third mode.</strong> Specifically:</p>
+<ol>
+<li>Adopt WPF-UI's theme token set as the base during migration rather than
+   maintaining bespoke Light/Dark dictionaries.</li>
+<li>Define the canonical token list; enforce with (a) a dictionary-coverage test
+   per theme and (b) a test that every code-side token name is in the list.
+   Add VisualGuard baselines per theme to catch the half-themed state.</li>
+<li>Fix <code>UpdateDynamicBrushes</code> to log-and-continue via <code>Logger</code> instead of
+   throwing, and stop <code>SetTheme</code> swallowing exceptions silently. <strong>File the
+   half-themed finding above as a distinct defect against #52.</strong></li>
+<li>The third mode is <strong>Light / Dark / Follow system</strong>, not a third hand-authored
+   palette, and it must work live — no restart.</li>
+<li>Keep a resolver for code-drawn colour (charts, report documents) so those
+   stay fast and so the report layer keeps a stable rendering for print (D-52).</li>
+<li>Convention, not mechanism, against constructing literal colours outside the
+   palette — the panel was explicit that A7-2 does not detect this.</li>
+</ol>
+<p>No unresolved disagreement.</p>
+<h3 id="needs-your-decision_2">Needs your decision<a class="headerlink" href="#needs-your-decision_2" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Panel is confident.</p>
+<p><strong>Panel flags: would benefit from accessibility expertise.</strong> High Contrast mode
+is a distinct requirement from light/dark and none of the seven roles can say
+authoritatively what the product must do to honour it, nor whether the chosen
+palettes meet WCAG contrast ratios — which matters more than usual in an app
+whose primary signal is red-vs-black numbers. Shared flag with D-6.</p>
+<hr />
+<h2 id="d-49-build-undo-or-remove-the-menu-items">D-49 — Build undo, or remove the menu items?<a class="headerlink" href="#d-49-build-undo-or-remove-the-menu-items" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 2 OQ1 · <strong>Cluster:</strong> <code>cross-cutting</code> · <em>Defect instances: #52</em></p>
+<h3 id="eli10_3">ELI10<a class="headerlink" href="#eli10_3" title="Permanent link">#</a></h3>
+<p>Almost every program has Undo — you do something, you regret it, you press
+Ctrl+Z and it's as if you never did. This program has Undo and Redo sitting in
+its Edit menu, greyed out, always. They have never worked. Nothing behind them
+was ever built.</p>
+<p>There <em>are</em> two safety nets, though, and they're at opposite extremes. If
+you're in the middle of typing into a box, Escape puts the box back how it was.
+And because the program only writes to your file when you tell it to save, you
+can always close without saving and throw away everything since you opened it.</p>
+<p>The gap is the middle. If you just deleted a transaction, or told it to
+recategorise four hundred transactions at once, or merged two payees together,
+there is nothing between "the tiny thing Escape covers" and "throw away your
+whole session."</p>
+<p>What's being decided: do you build a real Undo — which means the program has to
+remember, for every single change, exactly what the thing looked like before,
+across a very large and very old piece of machinery — or do you take the greyed-
+out menu items away and instead make the few genuinely scary operations
+individually reversible?</p>
+<h3 id="what-the-code-actually-does_3">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_3" title="Permanent link">#</a></h3>
+<ul>
+<li><code>MainWindow.OnCommandCanUndo</code> and <code>OnCommandCanRedo</code> both read, in full:
+  <code>// not implemented yet</code> / <code>e.CanExecute = false;</code> / <code>e.Handled = true;</code>. The
+  execute handlers are empty bodies.</li>
+<li><code>Utilities/UndoManager.cs</code> is a working generic command stack (<code>CanUndo</code>,
+  <code>CanRedo</code>, <code>Undo()</code>, <code>Redo()</code>, bounded history). It is used by the separate
+  <code>navigator</code> instance that drives back/forward <em>navigation</em>. The <code>UndoManager
+  manager</code> field created in <code>MainWindow</code>'s constructor for editing undo is never
+  touched.</li>
+<li><strong>The decisive technical fact.</strong> The domain's change notification is
+  <code>PersistentObject.OnChanged(string name)</code> → <code>FireChangeEvent(this, name,
+  ChangeType.Changed)</code> → <code>ChangeEventArgs(object item, string name, ChangeType
+  type)</code>. There is <strong>no old value</strong> anywhere in that chain. A change journal
+  built on the existing event stream physically cannot reverse a property
+  change. Adding old values means changing the signature of the hottest path in
+  a ~15k-line domain file and every <code>OnChanged</code> override.</li>
+<li><code>ChangeTracker</code> already listens to that stream and maintains a per-type list
+  of what changed since load, with navigation links to each change — i.e. the
+  product already has <em>review</em> of pending changes, just not reversal.</li>
+<li>Save is explicit and dirty-state driven, so "close without saving" is a real
+  coarse undo. WPF's grid editing gives per-cell/per-row Escape revert.</li>
+</ul>
+<h3 id="alternatives_3">Alternatives<a class="headerlink" href="#alternatives_3" title="Permanent link">#</a></h3>
+<p><strong>A49-1 — Full command-journal undo.</strong> Every mutation routes through a command
+object with <code>Do</code>/<code>Undo</code>. Ctrl+Z works everywhere, unbounded within a session.</p>
+<ul>
+<li><em>Pros.</em> The honest, complete answer. Once it exists, it answers D-13
+  (live-edit-with-undo becomes a legitimate dialog convention) and reduces the
+  need for confirmation dialogs generally, which is the thing D-14 is worried
+  about.</li>
+<li><em>Cons.</em> Enormous. Mutations today happen through plain property setters that
+  WPF two-way bindings write to directly; intercepting means either routing
+  every setter through a command (touching the entire domain file) or capturing
+  old values at the property level — which is the same edit. The missing old
+  value in <code>ChangeEventArgs</code> is not a detail; it is the reason this is a rewrite
+  of the model's change plumbing rather than a feature on top of it.</li>
+<li><em>Unintended consequences.</em> The journal must be <strong>invalidated</strong> by anything
+  that isn't a user edit: a file load, an OFX download, a CSV import, the
+  attachment watcher, and — per D-20 — <code>CategoryChart.Tally</code> writing category
+  colours as a side effect of <em>drawing a pie chart</em>. Miss one and Ctrl+Z offers
+  to undo something the user never did, which is worse than no undo. It also
+  interacts with persistence: undoing after a save is a compensating write, so
+  either the journal truncates at every save (making it much less useful, since
+  this app saves often) or undo becomes a persistence operation with all of
+  D-34's concurrency questions attached.</li>
+</ul>
+<p><strong>A49-2 — No general undo; remove the menu items; harden destructive
+operations.</strong> Delete Edit▸Undo/Redo. Instead: confirm or make individually
+reversible the small set of operations that actually hurt — bulk recategorise,
+payee rename/merge, category merge/delete, transaction delete (especially with
+an attachment, per D-45), and file merge/import.</p>
+<ul>
+<li><em>Pros.</em> Free, immediate and honest. Removes a permanently greyed menu item
+  that currently advertises a capability that does not exist. Targets effort
+  exactly where the damage is.</li>
+<li><em>Cons.</em> The register is an editing surface and people make mistakes in it
+  constantly. "Close without saving" as the only recovery from a mis-edit is a
+  terrible answer — it discards an hour of correct work to fix one wrong cell.</li>
+<li><em>Unintended consequences.</em> Pushes the entire burden onto confirmation
+  dialogs, which is precisely the modal-fatigue pattern D-14 identifies as
+  dangerous (users learn to dismiss confirmations reflexively, at which point
+  the confirmation protects nothing). Also explicitly forecloses
+  live-edit-with-undo as an answer to D-13, narrowing that panel's options to
+  edit-on-copy or honest no-Cancel.</li>
+</ul>
+<p><strong>A49-3 — Operation-scoped checkpoint undo.</strong> No per-field journal. Before any
+<em>bulk or destructive</em> operation, take a checkpoint; offer "Undo
+&lt;operation&gt;" for that operation specifically (a snackbar action, and an
+enabled Edit▸Undo when a checkpoint is available). Single-field edits stay
+covered by Escape; the session stays covered by close-without-saving.</p>
+<ul>
+<li><em>Pros.</em> Covers the operations that actually cause the "oh no" moment, at a
+  fraction of A49-1's cost. Requires no change to the domain's change plumbing —
+  the checkpoint is taken at the operation boundary, where the code already
+  knows it is about to do something big. Naturally bounded: one checkpoint (or a
+  few), not an unbounded journal.</li>
+<li><em>Cons.</em> Doesn't help the mis-typed cell after focus has left it. "Undo" that
+  is sometimes available and sometimes not is a slightly confusing affordance if
+  presented as a general Ctrl+Z.</li>
+<li><em>Unintended consequences.</em> <strong>This is the important one.</strong> Restoring a snapshot
+  replaces object identity — every open view's selection, every binding, every
+  <code>ChangeTracker</code> entry points at objects that no longer exist. So a checkpoint
+  restore is really a <em>reload</em>, and a reload that doesn't put the user back
+  where they were is its own bad experience. That makes A49-3 quietly dependent
+  on D-8 ("is put-me-back-where-I-was a product guarantee"), which is a
+  different panel's decision. Naming this dependency was the panel's main
+  contribution here.</li>
+</ul>
+<h3 id="panel-discussion_3">Panel discussion<a class="headerlink" href="#panel-discussion_3" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> put the missing old value on the table first and it reframed
+everything. A49-1 is not "add an undo stack"; it is "change how the domain model
+reports change," on the hot path, in the file CLAUDE.md describes as a single
+~15k-line object graph. Nobody argued with the cost after that.</p>
+<p><strong>Architect</strong> called A49-1 the single largest architectural commitment in the
+entire register and said that if it is in scope it <em>gates</em> the redesign — you
+cannot build it after the fact, because every mutation site has to be built
+through it. So this decision must be made before implementation starts, which
+is exactly why it is in the register.</p>
+<p><strong>Adversarial Expert</strong> asked the question that shaped the answer: what does a
+user actually press Ctrl+Z <em>for</em> in a personal-finance app? Two things. "I just
+typed in the wrong cell" — Escape covers that during edit, and re-typing covers
+it after. And "I just did something bulk and it went everywhere" — which is
+catastrophic, unrecoverable, and nothing covers it. Building an unbounded
+journal to serve a use case dominated by one of two cases, where the other is
+already handled, is building for a user who doesn't exist.</p>
+<p><strong>Operations Engineer</strong> found the cross-link that made A49-3 attractive: a
+pre-operation checkpoint is <em>also</em> a crash safety net and <em>also</em> the mechanism
+D-50 needs for backup. One piece of machinery, three jobs. A checkpoint written
+to the backup location before a bulk import is exactly what you want to exist
+when the import goes wrong, whether or not the user presses undo.</p>
+<p><strong>Data Engine Expert</strong> then cooled that down with the engine-specific reality.
+On SQLite a checkpoint is cheap and the code already exists —
+<code>SqliteDatabase.Backup</code> does a <code>PRAGMA wal_checkpoint(TRUNCATE)</code> before copying,
+precisely so the copy isn't missing recent transactions. (<code>VACUUM INTO</code> would be
+the better primitive still, and avoids the delete-first race in B-108.) On SQL
+Server there is no local file to copy; a checkpoint would be a server-side
+snapshot with its own permissions, and <code>SqlDatabase.Backup</code> already does
+something alarming there (flips the recovery model, <code>WITH INIT</code>). So A49-3's
+cost is <em>engine-dependent</em>, and the SQL Server story is weak — which loops
+straight into D-37 ("is SQL Server a shipped configuration"). If SQL Server is
+developer-only, A49-3 is clean. If it is shipped, A49-3 needs a second design
+for it or has to degrade to "no undo on server databases," which is an ugly
+thing to explain.</p>
+<p><strong>Test Engineer</strong> was blunt about A49-1: undo is famously the feature that
+passes every test you write and corrupts state in the case you didn't think of,
+because the test matrix is every property times every operation order. A49-3's
+test surface is one round trip per checkpointed operation — do the operation,
+restore, assert the model matches the pre-operation state — which is a finite,
+writable set.</p>
+<p><strong>UI/UX Expert</strong> preferred A49-3 presented as a per-operation affordance ("412
+transactions recategorised — <strong>Undo</strong>", in the status/snackbar channel from D-5)
+rather than as a general Ctrl+Z, precisely because a sometimes-available Ctrl+Z
+is worse than an obviously-scoped button. He also noted that this is a common,
+well-understood modern pattern — users recognise it from mail clients.</p>
+<p><strong>Genuine disagreement, recorded.</strong> The <strong>Architect</strong> would prefer <strong>A49-2</strong>.
+His argument: A49-3 looks cheap but smuggles in a reload-and-restore-view-state
+requirement that belongs to D-8 and has not been decided, and the panel is
+choosing a design whose cost depends on another panel's answer. He would rather
+remove the menu items, harden the destructive operations with confirmations and
+a review step, and revisit undo once D-8 and D-37 have answers. The other six
+took the view that the D-8 dependency is real but is a dependency the product
+should want anyway (restore-where-you-were is valuable independently), and that
+"confirmations only" repeats the D-14 failure mode. This did not fully resolve.</p>
+<h3 id="recommendation_3">Recommendation<a class="headerlink" href="#recommendation_3" title="Permanent link">#</a></h3>
+<p><strong>A49-3, in two parts, with the Architect dissenting on part two.</strong></p>
+<p><em>Part one (unanimous, do now):</em> <strong>remove Edit▸Undo and Edit▸Redo.</strong> They have
+never worked, they are permanently greyed, and they advertise a capability the
+product does not have. Delete the unused <code>UndoManager manager</code> field with them.
+This is the plain-bug half and needs no further debate.</p>
+<p><em>Part two (six of seven):</em> build <strong>operation-scoped checkpoint undo</strong> for the
+genuinely destructive set — bulk recategorise, payee and category merge/rename,
+transaction delete with attachments (D-45), and file import/merge. Present it as
+a scoped "Undo &lt;operation&gt;" affordance in the D-5 status channel, not as a
+general Ctrl+Z. Reuse the checkpoint as the pre-operation safety copy the
+Operations Engineer wants and D-50 needs — one mechanism, three jobs. Use
+<code>VACUUM INTO</code> on SQLite rather than delete-then-<code>File.Copy</code>.</p>
+<p><strong>Do not build a full command journal.</strong> It requires rewriting the domain's
+change plumbing to carry old values, it must be invalidated by every non-user
+mutation path (including the chart that writes category colours while drawing),
+and it collides with the save boundary and D-34's concurrency model.</p>
+<p>Two dependencies are explicit and should be honoured rather than worked around:
+checkpoint restore is a reload, so it needs <strong>D-8</strong>'s view-state answer; and its
+cost on SQL Server needs <strong>D-37</strong>'s answer.</p>
+<h3 id="needs-your-decision_3">Needs your decision<a class="headerlink" href="#needs-your-decision_3" title="Permanent link">#</a></h3>
+<p><strong>Partly.</strong> Part one is not a decision, it is a cleanup, and the panel is
+unanimous.</p>
+<p>Part two is <strong>Needs your decision</strong> on <em>scope and timing</em>: whether
+operation-scoped undo is in the first release or deferred, and which operations
+are in the set. That is product taste about how much safety the product owes a
+user who is importing a decade of Quicken history — and given this fork's stated
+purpose, the owner may weight it much higher than a generic panel would. The
+panel is confident about the <em>shape</em> (checkpoints, not a journal) and is
+genuinely split on whether to commit to it before D-8 and D-37 are answered.</p>
+<hr />
+<h2 id="d-50-does-the-product-back-up-the-users-data">D-50 — Does the product back up the user's data?<a class="headerlink" href="#d-50-does-the-product-back-up-the-users-data" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 2 OQ5 + Phase 8 OQ16 · <strong>Cluster:</strong> <code>cross-cutting</code> ·
+<em>Defect instances: #52</em></p>
+<h3 id="eli10_4">ELI10<a class="headerlink" href="#eli10_4" title="Permanent link">#</a></h3>
+<p>Everything you've ever entered — every transaction, every account — lives in one
+file on your computer. Next to that file are two folders holding your scanned
+receipts and your downloaded bank statements. Those receipts are the only copies
+you have.</p>
+<p>The program contains a complete, working "make a backup" feature. There is code
+for it, and a setting that remembers where your backups should go, and the
+setting is saved and loaded like every other setting. But there is <strong>no menu
+item, no button and no keyboard shortcut</strong> anywhere that runs it. The feature
+cannot be reached. The program faithfully remembers where to put backups you can
+never make.</p>
+<p>There's a second problem hiding behind the first. Even if you could reach it,
+what it copies is <em>only the one file</em> — not the receipts, not the statements. So
+the thing it would save is the part you could mostly reconstruct from your bank,
+and the thing it would leave behind is the part you can't replace at all.</p>
+<p>And there is no Restore. The code for that was declared and never written.</p>
+<p>What's being decided: does the program take responsibility for protecting your
+data — and if so, does that mean everything including the receipts, and does it
+happen on its own or only when you ask? Or does it say honestly "that's your
+computer's job, here's the folder, back it up yourself" and delete the dead
+feature and the setting?</p>
+<h3 id="what-the-code-actually-does_4">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_4" title="Permanent link">#</a></h3>
+<ul>
+<li><code>AppCommands.CommandFileBackup</code> is declared, has a <code>CommandBinding</code> in
+  <code>MainWindow.xaml</code> (line 44), and a full implementation in <code>OnCommandBackup</code>
+  with per-flavour file filters (<code>.dat</code> / <code>.sdf</code> / <code>.mmdb</code> / <code>.xml</code> / <code>.bxml</code>).
+  Nothing invokes it. <code>CommandFileRestore</code> and <code>CommandReportBudget</code> are
+  declared in <code>Commands.cs</code> and never bound at all.</li>
+<li><code>OnCommandBackup</code>'s own comment: <code>// todo: threading, progress feedback, &amp;
+  confirmation of success.</code> It calls <code>TempFilesManager.DeleteFile(fd.FileName)</code>
+  first — because the engines' <code>Backup</code> uses <code>File.Copy</code> without overwrite —
+  then <code>this.database.Backup(...)</code>. That delete-first workaround <strong>leaves a
+  window in which the previous backup is gone and the new one does not exist
+  yet</strong> (B-108).</li>
+<li>Per engine: <code>SqliteDatabase.Backup</code> does <code>PRAGMA wal_checkpoint(TRUNCATE)</code>
+  then <code>File.Copy</code> — the checkpoint is correct and deliberate, with a good
+  explanatory comment. <code>SqlDatabase.Backup</code> (SQL Server) does server-side backup
+  and, per B-108, flips the recovery model and uses <code>WITH INIT</code>.
+  <code>CsvStore.Backup</code> shows <em>"XML Backup is not implemented."</em></li>
+<li><code>Settings.BackupPath</code> is a live preference — read, written and migrated like
+  any other (Phase 8 OQ16).</li>
+<li>Attachments and statements live in sibling folders beside the data file
+  (P8-ATT-2, P8-STMT-3) and are <strong>not</strong> part of any <code>Backup</code> implementation.</li>
+</ul>
+<p>So: unreachable, incomplete in what it copies, dangerous in its overwrite
+handling, and with no restore.</p>
+<h3 id="alternatives_4">Alternatives<a class="headerlink" href="#alternatives_4" title="Permanent link">#</a></h3>
+<p><strong>A50-1 — Full backup/restore as a product capability.</strong> One archive containing
+the data file + attachments + statements + settings. Manual and scheduled (on
+close, or daily). Retention of N versions. A real Restore that reopens from an
+archive.</p>
+<ul>
+<li><em>Pros.</em> The complete answer, and the only one that protects the irreplaceable
+  half. Scheduled backup protects the user who would never remember. Versioned
+  retention protects against "I corrupted it three weeks ago and only noticed
+  today," which file-level copying does not.</li>
+<li><em>Cons.</em> Substantial: archive format, progress, scheduling, retention policy,
+  restore semantics, and a UI for all of it. Backup of a SQL Server database is
+  a fundamentally different operation and does not fit the same model.</li>
+<li><em>Unintended consequences.</em> An archive of an entire financial history <em>plus
+  scanned receipts</em> is a new, highly sensitive artefact sitting wherever the
+  user pointed <code>BackupPath</code> — possibly a synced cloud folder — with <strong>no
+  encryption story</strong>, and the product's existing encryption is the one D-43
+  describes as essentially no protection at all. Retention silently consumes
+  disk proportional to file size times N, on a file that grows forever.
+  Scheduled backup on close makes closing the app slow, which trains users to
+  kill it instead.</li>
+</ul>
+<p><strong>A50-2 — Manual, reachable, complete, with restore.</strong> Wire the existing command
+to a menu item. Extend it to copy the document folders as well as the data file.
+Implement Restore. Use safe primitives (<code>VACUUM INTO</code> on SQLite rather than
+delete-then-copy). No scheduling, no retention, no archive format — a dated
+folder copy.</p>
+<ul>
+<li><em>Pros.</em> Closest to the work already done, and fixes all four current defects
+  (unreachable, incomplete, unsafe overwrite, no restore) without inventing a
+  subsystem. A dated folder the user can open in Explorer is inspectable and
+  needs no tooling to recover from — genuinely valuable for a single-user app.</li>
+<li><em>Cons.</em> Only protects users who remember. No point-in-time versioning beyond
+  what the user happens to have made.</li>
+<li><em>Unintended consequences.</em> Restore has to deal with more than files: the
+  registry of recent databases, and the attachment/statement path settings,
+  which may point somewhere else after a restore into a new location. A restore
+  that silently leaves the app pointing at the <em>old</em> attachments folder would be
+  a quiet data-loss trap of exactly the kind this decision exists to close.</li>
+</ul>
+<p><strong>A50-3 — Hand it to the operating system; make the data self-contained.</strong>
+Delete the backup command and <code>BackupPath</code>. Instead guarantee that everything —
+data file, attachments, statements, settings — lives under <strong>one</strong> folder, tell
+the user where it is (P2-FILE-10 already opens it), and document backing that
+folder up with File History, OneDrive, or any real backup tool.</p>
+<ul>
+<li><em>Pros.</em> Real backup tools do versioning, offsite copies, scheduling and
+  verification enormously better than an app ever will, and the user probably
+  already has one. Zero ongoing maintenance. The current layout is <em>nearly</em> this
+  already — the change is mostly folder discipline plus documentation.</li>
+<li><em>Cons.</em> "My finance app has no backup" reads badly however true the reasoning
+  is. Users who have no backup tool now have nothing. There is still no restore
+  <em>path</em> — the user has to know to copy files back.</li>
+<li><em>Unintended consequences.</em> Actively wrong advice for SQL Server users: "back
+  up this folder" does not back up a server database, and a user who follows it
+  believes they are protected when they are not. Also, "just put it in OneDrive"
+  is a <em>terrible</em> idea for a live SQLite file — cloud sync clients corrupt
+  open database files, and a product that recommends it will get data-loss
+  reports it caused.</li>
+</ul>
+<h3 id="panel-discussion_4">Panel discussion<a class="headerlink" href="#panel-discussion_4" title="Permanent link">#</a></h3>
+<p><strong>Operations Engineer</strong> led and made the framing point: the current state is the
+worst of all worlds, because the persistent <code>BackupPath</code> preference means the
+product is <em>behaving</em> as though backups happen. Anything is better than that.</p>
+<p><strong>Data Engine Expert</strong> contributed the most concrete correction. Backup is a
+per-engine operation with genuinely different correct answers:</p>
+<ul>
+<li>SQLite: the existing WAL checkpoint is right and the comment explaining it is
+  good, but <code>File.Copy</code> of a live database is still the wrong primitive.
+  <code>VACUUM INTO</code> is the online-backup primitive, is atomic, produces a compacted
+  file, and removes the need for the delete-first workaround (and B-108's
+  window) entirely.</li>
+<li>SQL Server: backup is a server-side operation with its own permissions, its
+  own destination (a path on the <em>server</em>, not the client), and its own
+  retention. Flipping the recovery model on someone's server — which the current
+  code does — is a genuinely dangerous thing for a desktop app to do, because it
+  changes the transaction-log behaviour of a database that may have other
+  policies attached.</li>
+<li>XML / CSV: <code>Backup</code> is either a plain file copy or unimplemented.</li>
+</ul>
+<p>His conclusion: shipping a backup <em>capability</em> only makes sense for the
+file-based engines. Server users should be told to use their server's backup.
+That is a clean line and it loops into D-35's capability floor and D-37's "is
+SQL Server shipped at all."</p>
+<p><strong>Adversarial Expert</strong> made the decisive argument. The risk is not "the user has
+no backup." It is "<strong>the user thinks they have one.</strong>" A backup that copies the
+data file and silently omits the receipts is <em>worse than nothing</em>, because it
+manufactures confidence about the exact artefact that can't be recovered. So
+whatever is chosen, the completeness of what gets copied is not a nice-to-have —
+it is the whole point. He also challenged A50-1's scheduling directly: an app
+that backs up on close, to a location the user set once and forgot, is an app
+that will eventually fill a disk or quietly write a decade of financial history
+into a synced cloud folder.</p>
+<p><strong>UI/UX Expert</strong> proposed the framing that the panel converged on: <em>your data is
+a folder</em>. One location, visible, openable, containing everything. "Back up now"
+makes a dated complete copy of it. That model is understandable without
+explanation, needs no archive format, and makes A50-3's external-tool story work
+as a <em>bonus</em> rather than as the only answer.</p>
+<p><strong>Architect</strong> liked that because it is A50-2 and A50-3 converging rather than
+competing: making the data self-contained is valuable regardless of which backup
+answer wins, and it is a precondition for either. Do the folder work first; the
+backup command becomes almost trivial afterwards.</p>
+<p><strong>Test Engineer</strong> noted that backup-and-restore is one of the most testable
+things in the whole register — round trip, compare the object graph, compare the
+document folders — but only if restore exists. A backup with no restore is
+untestable in the way that matters, because nothing ever proves the backup was
+usable. He would make "restore is implemented" a hard requirement rather than a
+phase two.</p>
+<p><strong>Developer</strong> costed it: with a self-contained folder and <code>VACUUM INTO</code>, backup
+and restore together are small. The genuinely fiddly part is restore's
+settings/path fixup, per A50-2's unintended consequence.</p>
+<h3 id="recommendation_4">Recommendation<a class="headerlink" href="#recommendation_4" title="Permanent link">#</a></h3>
+<p><strong>A50-2, built on A50-3's principle.</strong> In order:</p>
+<ol>
+<li><strong>Make the data location self-contained</strong> — data file, attachments,
+   statements and per-file settings under one folder. This is worth doing on its
+   own merits and is a precondition for everything else. P2-FILE-10 already
+   opens it.</li>
+<li><strong>Wire the existing command to a reachable menu item</strong> and make it copy the
+   <em>whole</em> folder, not just the data file. The Adversarial Expert's point is
+   binding: a partial backup is worse than none.</li>
+<li><strong>Implement Restore.</strong> Non-negotiable, per the Test Engineer — a backup
+   nothing can restore is unverifiable. Restore must fix up the recent-files
+   registry and the attachment/statement paths, or it creates a new silent trap.</li>
+<li><strong>Use the engine's safe primitive</strong> — <code>VACUUM INTO</code> on SQLite; drop the
+   delete-then-copy workaround and close B-108's window.</li>
+<li><strong>Scope backup to file-based engines.</strong> Server-database users get a clear
+   "use your server's backup" message, not a half-working local copy. Stop
+   flipping the recovery model.</li>
+<li><strong>Keep <code>Settings.BackupPath</code></strong>, now that it means something, and warn if the
+   chosen location is inside a known cloud-sync folder.</li>
+</ol>
+<p>Do not build archive formats, retention policies or scheduling in the first
+pass.</p>
+<p>No unresolved disagreement on this shape.</p>
+<h3 id="needs-your-decision_4">Needs your decision<a class="headerlink" href="#needs-your-decision_4" title="Permanent link">#</a></h3>
+<p><strong>Partly.</strong> The shape above is panel-confident. <strong>Needs your decision:</strong> whether
+<strong>automatic/scheduled backup</strong> is in scope. That is a genuine product-taste call
+— it is the difference between a tool that assumes a competent user and one that
+assumes a user who will never click Backup, and the panel found honest arguments
+both ways. The Adversarial and Operations Engineers are wary of it (disk
+consumption, cloud-folder hazard, slow shutdown); the UI/UX Expert thinks a
+finance app that loses a year of receipts because nobody clicked a button has
+failed regardless of whose fault it technically was.</p>
+<p><strong>Panel flags: would benefit from security expertise.</strong> A complete backup is an
+unencrypted archive of a full financial history plus scanned identity-bearing
+documents, placed wherever the user points it. D-43 covers file encryption but a
+different panel owns it, and none of these seven roles is equipped to threat-
+model the backup artefact at rest — particularly the cloud-sync interaction.</p>
+<hr />
+<h2 id="d-51-does-the-product-ship-in-product-help">D-51 — Does the product ship in-product help?<a class="headerlink" href="#d-51-does-the-product-ship-in-product-help" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 4 OQ19 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<h3 id="eli10_5">ELI10<a class="headerlink" href="#eli10_5" title="Permanent link">#</a></h3>
+<p>When you're stuck on a screen, pressing F1 is supposed to open the instructions
+for <em>that screen</em> — not the front page of the manual, the actual page about what
+you're looking at.</p>
+<p>This program does have a real manual: fifty-six pages covering accounts,
+categories, importing, statements, reports, all of it, published as a website.
+And F1 does work in a good number of places — the main window, the accounts
+panel (which even picks a different page depending on what kind of account
+you've selected), the search box, nine report screens and four pop-up windows.</p>
+<p>But twenty-five other pop-up windows have nothing attached, so F1 in them lands
+on the manual's front page — including the windows for loans, categories and
+renaming payees, which are among the ones most likely to confuse someone. And
+one screen has the <em>wrong</em> page attached: the reports options panel opens the
+page about balancing your accounts, because the setting was copied from another
+screen and nobody changed it.</p>
+<p>There's a subtler problem too: F1 is a key nobody presses any more. There's no
+visible "?" anywhere inviting you to look.</p>
+<p>What's being decided: is "every screen tells you where its instructions are" a
+promise the program keeps and checks — or is it a nice-to-have that will keep
+drifting? And if it's a promise, who notices when someone adds a screen and
+forgets?</p>
+<h3 id="what-the-code-actually-does_5">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_5" title="Permanent link">#</a></h3>
+<p>The register's "four windows carry a <code>HelpKeyword</code>" understates it considerably.</p>
+<ul>
+<li><code>HelpService</code> is an attached property plus an F1 key router that walks up to
+  find the nearest keyword. Missing keyword → falls back to <code>"#_top"</code>.
+  <code>OpenHelpPage</code> launches a browser at
+  <code>https://moneytools.github.io/MyMoney.Net/#&lt;keyword&gt;</code>.</li>
+<li>Keyword sites found: <code>MainWindow.xaml</code> (<code>#_top</code>), <code>AccountsControl.xaml</code>
+  (<code>Accounts/BankAccounts/</code>) <strong>plus <code>SetHelpKeywordForSelectedItem</code> switching it
+  per account type</strong>, <code>QuickFilterControl.xaml</code> (<code>Basics/QuickSearch/</code>), four
+  dialogs (<code>AccountDialog</code>, <code>OnlineAccountDialog</code>, <code>AttachmentDialog</code>,
+  <code>SampleDatabaseOptions</code>), and <strong>nine report views</strong> set in code from
+  <code>MainWindow.xaml.cs</code> (<code>Reports/NetworthReport/</code>, <code>Reports/TaxReport/</code>,
+  <code>Reports/InvestmentPortfolio/</code>, and so on), plus <code>Basics/Updates/</code>.</li>
+<li>The manual is <strong>in this repository</strong>: <code>mkdocs.yml</code> at the root, 56 markdown
+  pages under <code>docs/</code> (<code>docs/Basics/</code> — 21 pages including <code>Aliases</code>,
+  <code>Categories</code>, <code>Splits</code>, <code>Queries</code>, <code>Merging</code>, <code>Keyboard</code>; <code>docs/Accounts/</code> —
+  17 pages including <code>Loans</code>, <code>SetupAccounts</code>, <code>Statements</code>, <code>CsvImport</code>;
+  plus <code>docs/Reports/</code> and <code>docs/Charts/</code>).</li>
+<li>Critically: <strong>topics already exist for most of the uncovered dialogs.</strong>
+  <code>LoanDialog</code> has no keyword; <code>docs/Accounts/Loans.md</code> exists. <code>CategoryDialog</code>
+  has no keyword; <code>docs/Basics/Categories.md</code> exists. <code>RenamePayeeDialog</code> has no
+  keyword; <code>docs/Basics/Payees.md</code> and <code>Aliases.md</code> exist.
+  <code>OnlineServiceDialog</code> has no keyword; <code>docs/Accounts/OnlineService.md</code> exists.</li>
+<li>B-48: <code>ReportsControl</code>'s keyword is the reconciliation topic, copy-pasted from
+  <code>BalanceControl</code>.</li>
+</ul>
+<p>So the expensive part — writing a manual — is <strong>done</strong>. Closing the coverage gap
+is mostly attaching pointers to pages that already exist, not authoring content.</p>
+<h3 id="alternatives_5">Alternatives<a class="headerlink" href="#alternatives_5" title="Permanent link">#</a></h3>
+<p><strong>A51-1 — Contextual help as an enforced contract.</strong> Every dialog and view
+declares a help topic. A test asserts (a) every registered surface has a
+non-empty keyword and (b) every keyword resolves to a page that exists in
+<code>docs/</code>. Topics may be shared — twenty-five dialogs do not need twenty-five new
+pages, they need pointers to the twenty that exist. Help becomes a requirement
+of the shared dialog base from D-15.</p>
+<ul>
+<li><em>Pros.</em> Cheap, because the content exists and the enforcement is a test. The
+  existence check catches the whole class of copy-paste-and-forget that produced
+  B-48 (it won't catch a <em>wrong but real</em> topic, but it catches typos, renames
+  and deletions). Turns a decaying convention into a checked one — the same
+  decay D-8 documents for view state and D-15 for dialog conventions.</li>
+<li><em>Cons.</em> Couples the app's test suite to the <code>docs/</code> tree being present, which
+  is fine today (same repo) and awkward if docs ever move out. Someone owns
+  keeping keywords current when pages are renamed — though that is exactly what
+  the test enforces.</li>
+<li><em>Unintended consequences.</em> An enforced contract creates pressure to attach
+  <em>some</em> topic to every surface, and the path of least resistance is attaching a
+  vaguely related one. That is how B-48 happened in the first place. The check
+  therefore needs to be "the page exists," plus review discipline — the
+  mechanism alone does not guarantee relevance.</li>
+</ul>
+<p><strong>A51-2 — Keep best-effort; fix the fallback.</strong> No coverage guarantee. Fix B-48.
+Make the F1 fallback smarter: instead of the site's front page, land on the
+<em>section</em> index for the area the user is in (accounts, reports, importing).</p>
+<ul>
+<li><em>Pros.</em> Cheapest possible improvement, and a smarter fallback genuinely helps
+  more than a coverage rule in the surfaces nobody would have written a topic
+  for anyway.</li>
+<li><em>Cons.</em> The coverage gap stays and keeps growing with every new surface —
+  which is precisely the decay pattern this register exists to stop. "Sometimes
+  the right page, sometimes a section index" still trains users not to press F1.</li>
+<li><em>Unintended consequences.</em> A per-area fallback needs a mapping from surface to
+  area, which is most of the work of A51-1's keyword coverage without A51-1's
+  precision — so it is less of a saving than it appears.</li>
+</ul>
+<p><strong>A51-3 — Drop contextual help; rely on self-explanatory UI.</strong> One
+"Documentation" menu item to the site. Delete <code>HelpService</code>, <code>HelpKeyword</code> and
+the F1 router. Invest instead in inline explanation — Fluent <code>InfoBar</code>s,
+hint text, <code>HyperlinkButton</code>s in the surfaces that genuinely need explaining.</p>
+<ul>
+<li><em>Pros.</em> The modern position, and not wrong: help that has to be looked up is a
+  symptom of a UI that didn't explain itself. Deletes a whole mechanism.</li>
+<li><em>Cons.</em> Throws away a genuinely good 56-page manual that someone wrote and
+  that is still accurate. Some subjects — cost basis, tax lines, OFX
+  troubleshooting, reconciliation — cannot be made self-explanatory inline; they
+  need prose. Those are exactly the pages that exist.</li>
+<li><em>Unintended consequences.</em> Without a per-surface keyword, the manual becomes
+  something the user must navigate from the top, and a manual nobody can enter
+  at the right page is only slightly better than no manual. It also removes the
+  only structural pressure keeping the docs in sync with the UI at all.</li>
+</ul>
+<h3 id="panel-discussion_5">Panel discussion<a class="headerlink" href="#panel-discussion_5" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> corrected the register's premise on first reading — this is
+seventeen-ish keyword sites and a complete manual, not four dialogs and a hope.
+That changed the question from "build or delete" to "guarantee or not," and made
+A51-3 look like discarding an asset.</p>
+<p><strong>UI/UX Expert</strong> raised the point that reframed the decision: <strong>F1 is not
+discoverable.</strong> Whatever the coverage, a hidden keystroke is not "the product
+ships help." Modern Fluent dialogs carry a visible <code>?</code> affordance in the title
+bar or footer; that is what makes help real. He argued the coverage decision is
+secondary to giving help a visible entry point — and that the two together are
+cheap because they land in the same place: the shared dialog base from D-15.</p>
+<p><strong>Test Engineer</strong> costed A51-1's enforcement as trivially cheap: enumerate the
+dialog/view types, assert a keyword, and check the corresponding <code>.md</code> exists
+under <code>docs/</code>. Since the docs live in the same repository, that is a file-
+existence assertion, not a network call. He was careful to state the limit: it
+catches missing and dangling topics, not <em>wrong</em> ones. B-48's keyword points at
+a page that genuinely exists — it's just the wrong page. No mechanism catches
+that; review does.</p>
+<p><strong>Operations Engineer</strong> added the operational failure mode nobody had mentioned:
+help points at an external site. If that site moves, is renamed, or the Pages
+build breaks, <strong>every help link in the product 404s silently</strong> and nothing in
+the app knows. A link check in CI is a few lines and closes it. He also noted
+this is a network call from a finance app — the URL fragment reveals which
+dialog the user is in, which is a trivial privacy leak but a non-zero one, and
+the offline user gets nothing at all.</p>
+<p><strong>Adversarial Expert</strong> pressed hardest on that last point: is online-only help
+acceptable for a desktop finance app? His own answer was yes — anyone running a
+Quicken replacement in 2026 has internet — but he insisted the panel say so
+deliberately rather than inherit it, because the alternative (shipping the
+markdown and rendering it in-app) is real work that mkdocs-in-repo makes almost
+tempting. He also asked the honest question: does <em>anyone</em> read this manual? No
+one could answer, and nothing measures it. Noted as an unknown rather than
+resolved.</p>
+<p><strong>Architect</strong> framed it as the cheap half of D-15: once a shared dialog base
+exists and carries owner/centring/taskbar/theme/keyboard, adding "and a help
+topic" is one more property with one more coverage test. Deciding D-51 "yes"
+costs almost nothing <em>if</em> D-15 lands; deciding it "no" saves almost nothing.
+That asymmetry settled it.</p>
+<p><strong>Data Engine Expert</strong> opted out. ("No storage dimension.")</p>
+<h3 id="recommendation_5">Recommendation<a class="headerlink" href="#recommendation_5" title="Permanent link">#</a></h3>
+<p><strong>A51-1, plus a visible affordance.</strong> Specifically:</p>
+<ol>
+<li><strong>Coverage as a contract</strong> — every dialog and view declares a help topic,
+   enforced by a test that asserts presence and that the target page exists in
+   <code>docs/</code>. Sharing topics is explicitly fine; this is attaching pointers, not
+   writing 25 new pages.</li>
+<li><strong>A visible help affordance</strong> in the shared dialog base (D-15) — a <code>?</code> in the
+   dialog footer or title bar. F1 stays as the accelerator, but stops being the
+   only way in.</li>
+<li><strong>Fix B-48</strong> and add a CI link check against the published docs site so a
+   moved or renamed page fails a build rather than failing a user.</li>
+<li><strong>Keep help online-hosted</strong> — deliberately, not by inheritance. The manual
+   lives in the repo and publishes via mkdocs; that is a good arrangement and
+   in-app rendering is not worth the work.</li>
+<li>Note that item 1 is an explicit input to <strong>D-15</strong> — "is a help topic on the
+   shared base's required list" is asked there and answered <strong>yes</strong> here.</li>
+</ol>
+<p>No unresolved disagreement.</p>
+<h3 id="needs-your-decision_5">Needs your decision<a class="headerlink" href="#needs-your-decision_5" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Panel is confident. One honest unknown recorded rather than resolved:
+nobody knows whether the manual is read, and nothing measures it. If the owner
+has a view that documentation is not worth maintaining, that view would change
+this answer to A51-3 — but it would be a decision about the docs, not about the
+help wiring.</p>
+<hr />
+<h2 id="d-52-is-printing-a-capability-of-this-product">D-52 — Is printing a capability of this product?<a class="headerlink" href="#d-52-is-printing-a-capability-of-this-product" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 5 OQ6 + Phase 8 OQ20 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<h3 id="eli10_6">ELI10<a class="headerlink" href="#eli10_6" title="Permanent link">#</a></h3>
+<p>You can look at your reports on screen — net worth, tax summary, what you own,
+cash flow. What you can't do is print one, or save one as a proper document to
+email to your accountant. There is no Print anywhere in the program except in
+the window that shows a scanned receipt.</p>
+<p>There <em>is</em> an "export to a web page" option for two of the nine reports, but
+what it produces is broken: the styling is fetched from the internet so the file
+looks plain when opened offline, every chart is simply missing, and the indented
+detail rows come out shifted into the wrong columns. Nobody has used it
+successfully in a long time, if ever.</p>
+<p>Here's the thing the panel found that changes the shape of this: the reports are
+<em>already</em> built as proper documents internally — the same kind of document
+Windows knows how to split into pages and send to a printer. So making printing
+work is much less effort than it first appears. What's genuinely missing is that
+the document is laid out to fit your <em>screen</em>, not a sheet of paper, and it's
+coloured for whichever theme you're using — so printing it today would produce a
+wide, dark, ink-soaked mess.</p>
+<p>What's being decided: does the program learn to produce a proper paged document
+— which covers both printing and "save me a PDF" — or is printing declared out
+of scope and effort put somewhere else?</p>
+<h3 id="what-the-code-actually-does_6">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_6" title="Permanent link">#</a></h3>
+<ul>
+<li>The only <code>PrintDialog</code> in the product is <code>AttachmentDialog.xaml.cs:819</code>.</li>
+<li><strong>Reports are real <code>FlowDocument</code>s.</strong> <code>FlowDocumentReportWriter</code> takes a
+  <code>FlowDocument</code> and builds paragraphs, tables and hyperlinks into it;
+  <code>FlowDocumentView</code> hosts it in a <code>HandyFlowDocumentScrollViewer</code> (a
+  <code>FlowDocumentScrollViewer</code> subclass that only customises mouse-wheel scroll
+  speed). All nine reports go through this path.</li>
+<li>A <code>FlowDocument</code> is an <code>IDocumentPaginatorSource</code>. <code>PrintDialog.PrintDocument(
+  ((IDocumentPaginatorSource)doc).DocumentPaginator, "…")</code> is the whole
+  pipeline. <code>FlowDocumentScrollViewer</code> also carries a built-in print command, so
+  Ctrl+P with focus in the document probably already does <em>something</em> today —
+  untested and unadvertised, and almost certainly producing the bad output
+  described below.</li>
+<li><strong>The layout is screen-shaped, deliberately.</strong> <code>FlowDocumentReportWriter</code>
+  sets <code>this.doc.MinPageWidth = this.maxWidth + 100</code>, with a comment explaining
+  that this stops the viewer squeezing columns — and <code>// 'Auto' sized columns in
+  FlowDocument tables suck.</code> So the document is explicitly as wide as its widest
+  content, which is exactly wrong for a printed page.</li>
+<li><strong>The content is themed.</strong> <code>FlowDocumentReportWriter</code> calls
+  <code>AppTheme.Instance.GetThemedBrush("HyperlinkForeground")</code>, and the report
+  content generally resolves themed colours. A dark-theme report printed as-is
+  is an ink disaster.</li>
+<li>The competing output path, <code>HtmlDocumentReportWriter</code>, is the one D-17
+  describes: CDN-linked Bootstrap, <code>WriteElement</code> a no-op so every chart is
+  absent, <code>WriteHyperlink</code> emitting a bare <code>span</code>, expandable groups no-ops so
+  detail rows shift a column left. It has rotted.</li>
+</ul>
+<h3 id="alternatives_6">Alternatives<a class="headerlink" href="#alternatives_6" title="Permanent link">#</a></h3>
+<p><strong>A52-1 — A full print pipeline.</strong> Page setup (size, orientation, margins),
+print preview, a print-specific rendering with headers/footers carrying report
+title, date and page numbers, and proper pagination.</p>
+<ul>
+<li><em>Pros.</em> The complete answer, and the one that makes a tax packet genuinely
+  presentable. Print preview is what users expect before committing ink.</li>
+<li><em>Cons.</em> Page setup and preview are a real amount of UI surface to design,
+  build and test, and every report added afterwards must be print-tested
+  forever.</li>
+<li><em>Unintended consequences.</em> Forces the report-authoring layer to stop assuming
+  screen width — the <code>MinPageWidth</code> hack and the hand-managed column widths both
+  have to go, which means touching column-width logic in every report. That is a
+  larger blast radius than "add printing" implies. It also creates a second
+  layout mode that every future report must satisfy, which is a new cross-
+  cutting contract of exactly the kind D-8 and D-15 show this codebase decaying
+  against.</li>
+</ul>
+<p><strong>A52-2 — PDF-first; skip printing.</strong> Add "Export to PDF." Let the OS handle
+printing from there. This also answers D-17's "what is a shareable report."</p>
+<ul>
+<li><em>Pros.</em> A PDF is what the user actually wants to hand to an accountant.
+  One artefact, self-contained, no CDN, portable.</li>
+<li><em>Cons.</em> WPF has no built-in PDF writer. Two routes, both bad: drive the
+  "Microsoft Print to PDF" queue (which needs the paginator anyway — so it <em>is</em>
+  A52-1 wearing a hat), or take a third-party PDF dependency (QuestPDF, PdfSharp)
+  and write a <strong>second rendering path</strong>.</li>
+<li><em>Unintended consequences.</em> <strong>This is the strongest argument against it.</strong> The
+  product already has two report writers and the second one bit-rotted into
+  uselessness precisely because it was a parallel path nobody exercised —
+  <code>WriteElement</code> silently a no-op, groups silently no-ops, output silently
+  wrong. Adding a third rendering path repeats that mistake exactly. A PDF
+  library also pulls a licensing question into a project that currently has
+  none of consequence.</li>
+</ul>
+<p><strong>A52-3 — Minimal honest printing off the existing document.</strong> Wire Print to the
+existing <code>FlowDocument</code> paginator. Force a light "print palette" during
+pagination so output is ink-sane. Set a fixed page width and let the existing
+table code reflow to it. No page setup, no preview, no headers/footers in pass
+one.</p>
+<ul>
+<li><em>Pros.</em> Genuinely small — the pipeline is a handful of lines because the
+  document already exists. Immediately gives the product a capability it
+  conspicuously lacks. No new rendering path, no dependency, no second layout
+  contract.</li>
+<li><em>Cons.</em> Output is serviceable, not polished: no page numbers, no report title
+  on page 2, no control over orientation. Wide reports (portfolio, cash flow)
+  will want landscape and won't get it.</li>
+<li><em>Unintended consequences.</em> "Print produces something mediocre" sets an
+  expectation that is then hard to walk back; users will immediately ask for
+  page setup, and the honest answer is that pass one deliberately omitted it.
+  Also, forcing a print palette means the report content must be renderable in
+  two palettes, which pushes back on D-7 — it is a reason to keep a <em>resolver</em>
+  for code-drawn colour rather than making the document itself theme-reactive.</li>
+</ul>
+<h3 id="panel-discussion_6">Panel discussion<a class="headerlink" href="#panel-discussion_6" title="Permanent link">#</a></h3>
+<p><strong>Developer</strong> opened with the correction: the register calls this
+build-from-nothing, but reports are already <code>FlowDocument</code>s and a <code>FlowDocument</code>
+paginates itself. The pipeline is nearly free. What is not free is that the
+document is deliberately laid out to screen width — and he pointed at the
+<code>MinPageWidth = maxWidth + 100</code> line and its neighbouring comment about auto-
+sized columns as evidence that report column widths are a known sore spot
+already.</p>
+<p><strong>Architect</strong> made the argument that dominated the session. This product has a
+<strong>report-writer divergence problem</strong>, empirically: <code>IReportWriter</code> has two
+implementations, the second one silently does nothing for charts, hyperlinks and
+groups, and nobody noticed until a nine-phase audit read it. Any alternative
+that adds a <em>third</em> implementation is repeating a mistake the codebase has
+already demonstrated it cannot maintain. That argument eliminated A52-2's
+library route outright.</p>
+<p><strong>UI/UX Expert</strong> argued that the real deliverable is a <strong>file</strong>, not paper —
+what an accountant wants is a PDF attachment. But he accepted the Developer's
+observation that "Microsoft Print to PDF" is a printer on essentially every
+Windows machine, so a print pipeline <em>produces</em> PDFs for free through the
+standard print dialog. The user experience is one extra dropdown selection, not
+a missing feature.</p>
+<p><strong>Test Engineer</strong> contributed the most useful non-obvious point: <strong>printing is
+testable without a printer.</strong> Paginate the document to an in-memory
+<code>XpsDocument</code> and assert page count, that no content is clipped, and that the
+palette used is the print palette. That runs on a build agent with no printer
+installed. This removed the "printing can't be tested so it will rot" objection
+that had been the main reason to avoid it.</p>
+<p><strong>Operations Engineer</strong> confirmed no deployment dimension — printing is a
+per-machine concern — and endorsed the XPS-paginate approach for CI. He added
+one caution: a print path that forces a palette must not mutate the <em>live</em>
+document, or the on-screen report will flash or stay wrong after printing. Build
+a second document for print, or push/pop the palette.</p>
+<p><strong>Adversarial Expert</strong> asked whether anyone prints in 2026. His own answer, on
+reflection, was that it doesn't matter — the correct framing is "<strong>produce a
+paginated document</strong>," and printing is one destination for it, saving is
+another. That reframing is what unified the three alternatives: they are not
+print-vs-PDF, they are one paginated-document capability with two outputs. He
+then pressed on scope creep: page setup, preview, headers and footers are each
+individually reasonable and collectively a project. Pass one should be
+deliberately small.</p>
+<p><strong>Data Engine Expert</strong> opted out. ("Nothing to add — no persistence dimension.")</p>
+<p>The panel did note honestly that a <strong>one-click</strong> "Save as PDF" — no print dialog
+— is <em>not</em> available without either a library or a print-queue trick, and did
+not pretend otherwise. That is a separate, later call, and it should be made
+together with D-17 rather than separately.</p>
+<h3 id="recommendation_6">Recommendation<a class="headerlink" href="#recommendation_6" title="Permanent link">#</a></h3>
+<p><strong>A52-3, designed so it can grow into A52-1, explicitly not A52-2.</strong></p>
+<ol>
+<li><strong>One paginated-document path</strong>, off the existing <code>FlowDocument</code>. Expose it
+   as Print (standard <code>PrintDialog</code>), from which "Microsoft Print to PDF" gives
+   users a PDF today with no new dependency.</li>
+<li><strong>A print palette</strong> — force light, ink-sane colours during pagination, on a
+   document built for print rather than by mutating the live one. This is an
+   input to D-7: keep a colour <em>resolver</em> so the report layer can render in two
+   palettes.</li>
+<li><strong>Fix the layout assumption</strong> — stop setting <code>MinPageWidth</code> to content width
+   in the print rendering; let tables reflow to the page.</li>
+<li><strong>Add the XPS-pagination test</strong> from the start, so this capability is
+   verified on a printerless build agent and does not rot the way
+   <code>HtmlDocumentReportWriter</code> did.</li>
+<li><strong>Do not add a third report writer</strong> and do not take a PDF library
+   dependency. Coordinate with <strong>D-17</strong>: the panel's view is that the right
+   resolution of "what is a shareable report" is <em>this</em> document path, and that
+   <code>HtmlDocumentReportWriter</code> should be retired rather than repaired — but D-17
+   belongs to another panel and this is input, not a ruling.</li>
+<li>Defer page setup, preview and page headers/footers to a second pass, driven
+   by actual requests.</li>
+</ol>
+<p>No unresolved disagreement on the recommendation. The UI/UX Expert's preference
+for a one-click PDF export is recorded as a <em>later</em> item contingent on D-17, not
+as dissent.</p>
+<h3 id="needs-your-decision_6">Needs your decision<a class="headerlink" href="#needs-your-decision_6" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Panel is confident on the mechanism. Flagged for the owner's awareness
+rather than decision: if one-click "Save as PDF" (no print dialog) is a
+requirement rather than a nice-to-have, that changes the calculus and should be
+decided jointly with D-17, because it means accepting either a PDF library or a
+print-queue automation.</p>
+<hr />
+<h2 id="d-53-how-does-the-product-ship-version-and-refresh-its-reference-data">D-53 — How does the product ship, version and refresh its reference data?<a class="headerlink" href="#d-53-how-does-the-product-ship-version-and-refresh-its-reference-data" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 7 OQ18 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<h3 id="eli10_7">ELI10<a class="headerlink" href="#eli10_7" title="Permanent link">#</a></h3>
+<p>Some of what the program knows isn't yours — it's built-in background knowledge.
+The tax brackets for each state. The list of tax-form line numbers. The
+directory of which bank lives at which internet address for downloading
+statements. None of that is your data; all of it goes out of date.</p>
+<p>Right now these things arrive in two different ways, and the difference is an
+accident rather than a decision. Most of them are <strong>baked inside the program</strong>,
+so they can never go missing. But the two tax files are <strong>loose files sitting
+next to the program</strong>, loaded with no check that they're actually there — so if
+anything goes wrong with the install, the program looks for them, doesn't find
+them, and falls over rather than saying "my tax data is missing."</p>
+<p>None of them say how old they are, either. Nothing on screen tells you the tax
+brackets are from a particular year, so you can't tell whether to trust the
+estimate.</p>
+<p>What's being decided: one way of delivering this background knowledge instead of
+two — and whether it can be refreshed without installing a new version of the
+program, which means someone has to run a service that hands out updates, and
+you have to trust whatever it hands you.</p>
+<h3 id="what-the-code-actually-does_7">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_7" title="Permanent link">#</a></h3>
+<p>The csproj already votes, six to two, for embedding.</p>
+<p><code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>:</p>
+<ul>
+<li><code>EmbeddedResource</code>: <code>Taxes\TxfSpec.txt</code>, <code>Ofx\ofx160.dtd</code>, <code>Ofx\ofx201.dtd</code>,
+  <code>Ofx\MfaPhrases.xml</code>, <code>Ofx\OfxProviderList.xml</code>, <code>Ofx\OfxErrorTemplate.htm</code>.</li>
+<li><code>Content</code> + <code>CopyToOutputDirectory=Always</code>: <code>Taxes\FederalTaxes.json</code>,
+  <code>Taxes\StateTaxes.json</code> — and <em>only</em> those two.</li>
+</ul>
+<p><code>FederalTaxes.Load()</code> and <code>StateTaxes.Load()</code> both do:</p>
+<pre><code class="language-csharp">var location = typeof(FederalTaxes).Assembly.Location;
+var path = Path.GetDirectoryName(location);
+var fileName = Path.Combine(path, &quot;Taxes&quot;, &quot;FederalTaxes.json&quot;);
+var json = File.ReadAllText(fileName);
+</code></pre>
+<p>No existence check, no try/catch. Under single-file publishing <code>Assembly.Location</code>
+is the empty string, and <code>Path.GetDirectoryName("")</code> throws <code>ArgumentException</code>
+— a latent packaging landmine. The product currently ships ClickOnce/MSIX/winget
+(see <code>Source/WPF/publish.cmd</code>), so it is latent rather than live, but it fires
+the day anyone tries single-file.</p>
+<p><strong>And the codebase already contains the full sophisticated pattern</strong>, in
+<code>OfxInstitutionInfo</code>:</p>
+<ul>
+<li>Embedded seed: <code>GetCachedBankList()</code> reads
+  <code>Walkabout.Ofx.OfxProviderList.xml</code> from the assembly's manifest resources
+  when no cache exists.</li>
+<li>Local cache: <code>%LOCALAPPDATA%\MyMoney\ofx-index.xml</code>, created on demand.</li>
+<li>Network refresh: <code>http://www.ofxhome.com/api.php?all=yes</code>, merged into the
+  cache and saved — and this is the plain-HTTP, credential-endpoint-supplying
+  path that D-42 is about.</li>
+<li>User-editable, per the class comment.</li>
+</ul>
+<p>So "embedded baseline → local cache → optional refresh" is not a design to
+invent. It exists, in this codebase, and it is the one dataset that genuinely
+needs refreshing between releases.</p>
+<p>Finally, the app has a <strong>working update channel</strong>: <code>CheckLastVersion</code> /
+<code>ChangeListRequest</code> / <code>ChangeInfoReport</code> (P2-STATUS-7) plus winget and ClickOnce.
+Shipping data with the build is not a dead end here.</p>
+<h3 id="alternatives_7">Alternatives<a class="headerlink" href="#alternatives_7" title="Permanent link">#</a></h3>
+<p><strong>A53-1 — Everything embedded, versioned with the build.</strong> All reference data as
+<code>EmbeddedResource</code> with an explicit version and as-of date inside each payload.
+Refresh means updating the app.</p>
+<ul>
+<li><em>Pros.</em> One mechanism. Nothing can go missing, nothing can be tampered with in
+  transit, and the single-file landmine disappears because there is no file path
+  to resolve. Trivially testable — assert every dataset loads and parses at
+  startup. Matches what the csproj already mostly does.</li>
+<li><em>Cons.</em> A tax-table correction, or a bank changing its OFX endpoint, requires
+  a release. Tax data changes annually — which is fine, since a January release
+  is natural — but an institution endpoint changing is <em>not</em> annual and
+  genuinely does strand users.</li>
+<li><em>Unintended consequences.</em> Users on an old version silently compute with old
+  tax brackets and never know, because nothing surfaces the vintage. Embedding
+  alone does not fix the staleness problem; it only fixes delivery. Also,
+  embedding the institution directory makes it read-only, which contradicts the
+  existing "user can edit it" behaviour.</li>
+</ul>
+<p><strong>A53-2 — Embedded baseline + refreshable cache with visible vintage.</strong>
+Generalise the <code>OfxInstitutionInfo</code> pattern to every dataset: embedded fallback
+that always works offline, a cache under <code>LocalApplicationData</code>, a declared
+version and as-of date surfaced in the UI, and an HTTPS refresh.</p>
+<ul>
+<li><em>Pros.</em> Current data without a release. Offline-safe. The vintage is visible,
+  which is the thing the user actually needs to judge whether to trust a tax
+  estimate.</li>
+<li><em>Cons.</em> Someone must run and maintain an update endpoint <strong>forever</strong>. For a
+  single-maintainer fork that is the component most likely to rot into a 404 —
+  the same risk the Operations Engineer raised for the docs site in D-51.</li>
+<li><em>Unintended consequences.</em> A refresh channel is a <strong>supply chain into a
+  finance app</strong>, and this codebase's one existing example is the cautionary tale:
+  D-42 documents that the institution directory is fetched over plain HTTP and
+  supplies the URL the product subsequently posts banking credentials to. Doing
+  this for <em>more</em> datasets without first fixing the trust story multiplies that
+  exposure. Downloadable tax brackets are a particularly attractive tampering
+  target for anyone who can MITM a user.</li>
+</ul>
+<p><strong>A53-3 — Embedded, with explicit staleness disclosure and no refresh service.</strong>
+A53-1 plus: every dataset declares its vintage, the UI states it where the data
+is used ("Tax rules: 2026 edition"), and past a threshold the product warns and
+points at the existing app-update mechanism.</p>
+<ul>
+<li><em>Pros.</em> All of A53-1's simplicity, plus the thing that actually protects the
+  user — knowing how old the numbers are. No service to run, no new trust
+  boundary. Uses an update channel that already exists and is already
+  maintained.</li>
+<li><em>Cons.</em> Still cannot fix a bank endpoint without a release.</li>
+<li><em>Unintended consequences.</em> A staleness warning is only honest if releases
+  actually happen on the expected cadence; if the fork goes quiet, the product
+  spends its life displaying a warning it cannot act on, which trains users to
+  ignore it. That is a commitment, not just a feature.</li>
+</ul>
+<h3 id="panel-discussion_7">Panel discussion<a class="headerlink" href="#panel-discussion_7" title="Permanent link">#</a></h3>
+<p><strong>Architect</strong> started from the csproj: the project has already effectively
+decided, six embedded to two loose, and the two loose ones are the outliers with
+no fallback and a latent packaging bug. Converging on embedded is ratifying the
+dominant convention, not imposing a new one.</p>
+<p><strong>Developer</strong> costed it at two csproj lines and a reader change, and made the
+extra point that embedding removes the <code>Assembly.Location</code> landmine <em>entirely</em>
+rather than guarding it — there is no path to resolve, so single-file publishing
+becomes a non-issue rather than a handled case.</p>
+<p><strong>Operations Engineer</strong> argued the decisive point against A53-2: <strong>the update
+channel already exists and is already maintained.</strong> The app ships via winget,
+ClickOnce and MSIX, checks for new versions, and shows a changelog. Standing up
+a <em>second</em> distribution channel, specifically for reference data, to serve a
+project that already has a working one, is adding an operational commitment for
+marginal benefit. The dataset whose update cadence genuinely doesn't fit a
+release cycle is the institution directory — and that one already has its own
+refresh, so it needs fixing (D-42), not generalising.</p>
+<p><strong>Data Engine Expert</strong> made a distinction the register blurs, and it improved
+the recommendation. Phase 7's OQ25 lumps "the stock-quote and split caches" in
+with reference data. They are not the same thing. Quote history and split caches
+are <strong>derived user data</strong> — per-user, per-portfolio, grown over time, and
+genuinely valuable to keep. They belong with the user's data folder (and
+therefore inside D-50's backup scope), not in the "shipped reference data"
+bucket. Treating them as reference data would mean they get wiped on an app
+update, which would silently destroy years of accumulated price history. That is
+a real trap and he was firm about it.</p>
+<p><strong>Test Engineer</strong> compared verification cost. An embedded dataset is verified by
+one startup test: it loads, it parses, its declared version is present. A
+downloadable one needs network mocking, cache-invalidation tests, a staleness
+clock, and a corrupt-download path. Five times the test surface for a project
+whose current tax-data test already ratifies a known defect (D-31).</p>
+<p><strong>Adversarial Expert</strong> aimed at the question underneath. Delivery is the <em>easy</em>
+half. The hard question is <strong>what the tax data claims</strong>, which is D-29's and
+D-30's territory — and if the honest answer there is "estimate only, not tax
+advice," then annual embedded refresh is more than sufficient and building an
+update service would be solving the wrong problem expensively. Conversely, if
+the product claims accuracy, no delivery mechanism rescues it, because the
+brackets are only one of several things D-30 shows are wrong (married-filing-
+separately mapped to Single brackets, head-of-household mapped to Single at
+state level). Delivery should be the cheap option and the <em>claim</em> should be
+lowered. He also noted that the one thing all three alternatives agree on —
+<strong>make the vintage visible</strong> — is the highest-value, lowest-cost item in the
+whole decision, and it is independent of delivery.</p>
+<p><strong>UI/UX Expert</strong> agreed and added where it belongs: not buried in an About box.
+The vintage should sit next to the number it qualifies — on the tax summary and
+estimate surfaces themselves, as a quiet caption.</p>
+<h3 id="recommendation_7">Recommendation<a class="headerlink" href="#recommendation_7" title="Permanent link">#</a></h3>
+<p><strong>A53-3.</strong> Specifically:</p>
+<ol>
+<li><strong>Embed all reference data.</strong> Convert <code>FederalTaxes.json</code> and
+   <code>StateTaxes.json</code> to <code>EmbeddedResource</code> alongside <code>TxfSpec.txt</code> and the OFX
+   resources; read them from manifest resources. Removes two loose files, two
+   unguarded <code>File.ReadAllText</code> calls and the single-file <code>Assembly.Location</code>
+   landmine in one change.</li>
+<li><strong>Every dataset declares a version and an as-of date</strong> inside its payload.
+   <code>StateTaxes.json</code> already does this ("2026 effective rates", version
+   2026.05.25); <code>FederalTaxes.json</code> does not, and <code>TxfSpec.txt</code> is version 041
+   dated 6/16/06.</li>
+<li><strong>Surface the vintage where the data is used</strong> — a caption on the tax
+   estimate and summary surfaces, not in About. Highest value per unit of effort
+   in this decision, and independent of everything else here.</li>
+<li><strong>The app update channel is the refresh channel.</strong> It exists, it is
+   maintained, and it already reports what changed. Do not stand up a second
+   distribution channel.</li>
+<li><strong>One exception, narrowly scoped: the institution directory.</strong> It genuinely
+   changes between releases and already has a cache-and-refresh design. Keep it,
+   but fix it per <strong>D-42</strong> — HTTPS, and explicit user confirmation before a
+   changed endpoint is used to post credentials. Do not generalise this pattern
+   to other datasets until that trust story exists.</li>
+<li><strong>Do not classify the stock-quote history and split caches as reference
+   data.</strong> They are derived user data; they belong in the user's data folder and
+   inside <strong>D-50</strong>'s backup scope. Misclassifying them risks wiping years of
+   accumulated price history on an app update.</li>
+</ol>
+<p><strong>Dependency, stated rather than resolved:</strong> <strong>D-29</strong> decides what the tax data
+<em>claims</em>. This recommendation does not change based on that answer — embedding
+and a visible vintage are right either way — but if D-29 lands on "tax-year-
+versioned with an update path," item 4 would need revisiting, and the panel's
+view is that the app update channel <em>is</em> that path.</p>
+<p>No unresolved disagreement.</p>
+<h3 id="needs-your-decision_7">Needs your decision<a class="headerlink" href="#needs-your-decision_7" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> Panel is confident on delivery. The genuinely owner-level question in
+this area — what the tax data claims and whether it should ship at all — is
+<strong>D-29</strong>'s and <strong>D-30</strong>'s, not this one.</p>
+<p><strong>Panel flags: would benefit from tax/regulatory expertise</strong> — but that flag
+belongs to D-29, where the question is what the product may claim, not here,
+where the question is only how bytes reach the user.</p>
+<hr />
+<h2 id="appendix-panel-bookkeeping">Appendix — panel bookkeeping<a class="headerlink" href="#appendix-panel-bookkeeping" title="Permanent link">#</a></h2>
+<h3 id="expert-opt-outs">Expert opt-outs<a class="headerlink" href="#expert-opt-outs" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Opted out</th>
+<th>Stated reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D-6</td>
+<td>Operations Engineer, Data Engine Expert</td>
+<td>No deployment or storage dimension</td>
+</tr>
+<tr>
+<td>D-7</td>
+<td>Data Engine Expert</td>
+<td>No persistence dimension</td>
+</tr>
+<tr>
+<td>D-51</td>
+<td>Data Engine Expert</td>
+<td>No storage dimension</td>
+</tr>
+<tr>
+<td>D-52</td>
+<td>Data Engine Expert</td>
+<td>No persistence dimension</td>
+</tr>
+</tbody>
+</table>
+<p>The Data Engine Expert weighed in substantively on <strong>D-49</strong> (checkpoint cost is
+engine-dependent; SQL Server has no local snapshot), <strong>D-50</strong> (<code>VACUUM INTO</code> vs.
+<code>File.Copy</code>; server-side backup is a different operation; the recovery-model
+flip is dangerous), <strong>D-53</strong> (quote and split caches are user data, not
+reference data), and lightly on <strong>D-5</strong> (load/save progress must survive the
+redesign).</p>
+<h3 id="would-benefit-from-additional-expertise-flags">"Would benefit from additional expertise" flags<a class="headerlink" href="#would-benefit-from-additional-expertise-flags" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>Accessibility expertise</strong> — <strong>D-6</strong> and <strong>D-7</strong>. One-directional density
+  controls, Windows text-scaling support, High Contrast mode, and WCAG contrast
+  ratios in an app whose primary signal is coloured numbers. None of the seven
+  roles can answer authoritatively.</li>
+<li><strong>Security expertise</strong> — <strong>D-50</strong>. A complete backup is an unencrypted archive
+  of a full financial history plus scanned identity documents, written wherever
+  the user points it, possibly into a cloud-sync folder. D-43 covers file
+  encryption but is another panel's; nobody here can threat-model the artefact
+  at rest.</li>
+<li><strong>Tax/regulatory expertise</strong> — noted in passing on <strong>D-53</strong>, but the flag
+  properly belongs to <strong>D-29</strong>/<strong>D-30</strong>.</li>
+</ul>
+<h3 id="defects-surfaced-by-this-panel-that-do-not-appear-to-be-in-5258">Defects surfaced by this panel that do not appear to be in #52–#58<a class="headerlink" href="#defects-surfaced-by-this-panel-that-do-not-appear-to-be-in-5258" title="Permanent link">#</a></h3>
+<ol>
+<li><strong><code>AppTheme.UpdateDynamicBrushes</code> throws on a missing themed brush, and the
+   throw is silently swallowed, leaving a half-themed application.</strong> A <code>null</code>
+   from <code>TryFindResource</code> writes a <code>Debug.WriteLine</code> (compiled out in Release)
+   and then falls through to <code>else { throw … }</code>, which <code>SetTheme</code>'s bare
+   <code>catch {}</code> absorbs — after the dictionary swap has already committed, with
+   the brush cache partially updated and <code>ThemeChanged</code> never fired. See D-7.
+   Recommend appending to #52.</li>
+<li><strong><code>OnCommandBackup</code>'s delete-then-copy workaround leaves a window with no
+   backup at all</strong> — related to but distinct from B-108's "<code>File.Copy</code> with no
+   overwrite" framing: the <em>caller's</em> workaround, not the engine's method, is
+   what creates the gap. See D-50.</li>
+</ol>
+<h3 id="cross-panel-dependencies-raised">Cross-panel dependencies raised<a class="headerlink" href="#cross-panel-dependencies-raised" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>This decision</th>
+<th>Depends on / feeds</th>
+<th>Nature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D-5</td>
+<td>D-41</td>
+<td>An activity log that keeps history accumulates account and institution names</td>
+</tr>
+<tr>
+<td>D-7</td>
+<td>D-52</td>
+<td>Keeping a colour <em>resolver</em> (not a theme-reactive document) is what lets reports render in a print palette</td>
+</tr>
+<tr>
+<td>D-49</td>
+<td>D-8, D-13, D-14, D-37, D-50</td>
+<td>Checkpoint restore is a reload (D-8); undo's absence narrows D-13; confirmation-only invites D-14's fatigue; SQL Server cost depends on D-37; the checkpoint doubles as D-50's pre-operation copy</td>
+</tr>
+<tr>
+<td>D-50</td>
+<td>D-35, D-37, D-43, D-45</td>
+<td>Backup is engine-dependent (D-35/D-37); the archive is unencrypted (D-43); deleted attachments are part of what's at risk (D-45)</td>
+</tr>
+<tr>
+<td>D-51</td>
+<td>D-15</td>
+<td>"Has a help topic" is answered <strong>yes</strong> here as an input to D-15's shared-base contract</td>
+</tr>
+<tr>
+<td>D-52</td>
+<td>D-17, D-7</td>
+<td>The panel's view is that this document path <em>is</em> the shareable-report answer and <code>HtmlDocumentReportWriter</code> should be retired — input to D-17, not a ruling</td>
+</tr>
+<tr>
+<td>D-53</td>
+<td>D-29, D-42, D-50</td>
+<td>D-29 decides the claim; D-42 must be fixed before generalising any refresh channel; quote/split caches belong in D-50's backup scope</td>
+</tr>
+</tbody>
+</table>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

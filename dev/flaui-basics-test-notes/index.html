@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/dev/flaui-basics-test-notes/">
+    <link rel="shortcut icon" href="../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>FlaUI test-authoring notes: Basics area - MyMoney.Net</title>
+    <link href="../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "FlaUI test-authoring notes: Basics area", url: "#_top", children: [
+              {title: "Shared FlaUI app-session lifecycle", url: "#shared-flaui-app-session-lifecycle" },
+              {title: "Finding elements", url: "#finding-elements" },
+              {title: "Input mechanics", url: "#input-mechanics" },
+              {title: "Fixture-specific notes (BasicsFixtureBuilder)", url: "#fixture-specific-notes-basicsfixturebuilder" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="flaui-test-authoring-notes-basics-area">FlaUI test-authoring notes: Basics area<a class="headerlink" href="#flaui-test-authoring-notes-basics-area" title="Permanent link">#</a></h1>
+<p>Narrow, UI-automation-specific findings from writing the <code>Source/WPF/UITests/Basics/*</code>
+FlaUI test suite (the 2026-09-18 Basics test implementation plan). These are mechanics
+that only matter when writing or maintaining FlaUI tests against this part of the app -
+durable domain/business-layer knowledge from the same effort lives in <code>CLAUDE.md</code>
+instead. Moved here in Task 17 to keep <code>CLAUDE.md</code> (loaded into every session
+regardless of task) from carrying test-authoring-only detail permanently.</p>
+<p>See also the user-level <code>flaui-wpf-testing</code> skill for FlaUI mechanics that aren't
+specific to this repo (the input-vs-pattern-operations distinction, native-dialog
+enumeration gaps, etc.) - this file is the repo-specific companion to that skill.</p>
+<h2 id="shared-flaui-app-session-lifecycle">Shared FlaUI app-session lifecycle<a class="headerlink" href="#shared-flaui-app-session-lifecycle" title="Permanent link">#</a></h2>
+<p><code>BasicsAppSession</code> launches the app once per <code>[SetUpFixture]</code> (the whole
+<code>Walkabout.UITests.Basics</code> namespace shares one process), so state and leftover UI
+carries between tests in ways it wouldn't if each test launched its own app instance.</p>
+<ul>
+<li>
+<p><strong>Opening a database does not select or display any account's register.</strong> The
+  Accounts panel (<code>MainWindow.xaml.cs</code>'s <code>toolBox.Add("ACCOUNTS", "AccountsSelector",
+  ...)</code>) starts collapsed - its account <code>ListItem</code>s (<code>AutomationId</code> = the account's
+  name) aren't even in the UIA tree until the section is expanded - and even once
+  visible, no account is auto-selected, so the transaction <code>DataGrid</code>
+  (<code>AutomationId="TheGrid_BankTransactionDetails"</code>) renders zero <code>DataItem</code> rows (just
+  column headers) until one is explicitly selected via
+  <code>SelectionItem.Pattern.Select()</code>. <code>OpenFixtureDatabase.SelectAccount</code>/
+  <code>ExpandCategoriesPanel</code>/<code>EnsureToolboxSectionExpanded</code> do this (idempotently, since a
+  section an earlier test expanded stays expanded for the rest of the session). Also:
+  the <code>DataGrid</code> always renders one extra <code>{NewItemPlaceholder}</code> <code>DataItem</code> for its
+  add-new-row affordance regardless of filtering - real transaction rows are the ones
+  whose <code>Name</code> starts with <code>"Transaction:"</code>.</p>
+</li>
+<li>
+<p><strong>Each left-hand toolbox section (Accounts/Categories/Payees/Securities) is a real
+  WPF <code>Expander</code></strong> (<code>Controls/Accordion.xaml.cs</code>'s <code>Add()</code> builds one per section),
+  whose automation peer is exposed as <code>ControlType.Group</code> and natively supports the
+  <code>ExpandCollapse</code> pattern - call <code>section.Patterns.ExpandCollapse.Pattern.Expand()</code> on
+  the section itself. The nested <code>AutomationId="HeaderSite"</code> element is just the
+  Expander's default-template toggle button; clicking it directly (<code>Click()</code>) proved
+  unreliable in practice (worked for Accounts, silently did nothing for Categories in
+  the same run) - prefer the pattern call on the section, not a click on its child.</p>
+</li>
+<li>
+<p><strong>Opening a second database in the same app session can pop a "Save Changes"
+  <code>YesNoCancel</code> prompt</strong> (<code>MainWindow.SaveIfDirty</code>, title <code>"Save Changes"</code>, button
+  <code>AutomationId="ButtonNo"</code>) before the real "Open Database" dialog - observed even
+  when no test explicitly edited anything (e.g. just showing/expanding the Categories
+  panel for the first time in a session was enough to flip <code>MainWindow.dirty</code>). Since
+  every test in a multi-test fixture calls <code>OpenFixtureDatabase.Open</code> again, any
+  fixture with 2+ FlaUI tests can hit this. <code>OpenFixtureDatabase.Open</code> detects a
+  <code>"Save Changes"</code> modal and clicks <code>ButtonNo</code> (discard) before continuing to the real
+  dialog.</p>
+</li>
+<li>
+<p><strong>A dismissed-looking <code>MessageBoxEx</code> modal can silently keep blocking the whole
+  shared session if a test never clicks its button.</strong> A test that correctly triggers a
+  real error/confirmation dialog but never dismisses it leaves it sitting open for the
+  rest of the session - and <code>AutomationElement.FindFirstDescendant</code>/
+  <code>FindAllDescendants</code> keep working and returning correct-looking results even while a
+  modal is up (they just read the automation tree; they don't check for blocking
+  dialogs), so the <em>triggering</em> test's own assertions can still pass. A <em>later,
+  unrelated</em> test can then start failing for no apparent reason of its own -
+  root-causable only by taking a screenshot
+  (<code>FlaUI.Core.Capturing.Capture.Screen().ToFile(...)</code>) at the point of failure and
+  seeing the leftover dialog. <strong>Lesson: any test that deliberately triggers a modal
+  must assert it appeared AND dismiss it before returning</strong> - a passing assertion is
+  not proof the UI is back in a clean state for the next test in the same session; when
+  a later, unrelated test fails mysteriously, screenshot the live state before assuming
+  it's that test's own bug. (This is the same class of problem <code>AppCrashGuard.cs</code> - see
+  <code>CLAUDE.md</code> - now catches automatically for real app crashes specifically.)</p>
+</li>
+</ul>
+<h2 id="finding-elements">Finding elements<a class="headerlink" href="#finding-elements" title="Permanent link">#</a></h2>
+<ul>
+<li>
+<p><strong>A <code>DataGridCell</code>'s automation element goes stale across its own edit-mode template
+  swap.</strong> Several grids in this app (<code>CurrenciesView</code>'s Symbol column, the Splits
+  sub-grid's Payment column, the Attachment column) swap a read-only display template
+  for an editable one on <code>BeginEdit</code>, and an <code>AutomationElement</code> handle captured
+  <em>before</em> entering edit mode cannot reliably find the new edit control via
+  <code>.FindFirstDescendant(...)</code> on itself afterward, even though the control is genuinely
+  there and visible (confirmed via screenshot while the search returned null) - the
+  cell's visual subtree gets replaced, not mutated in place. Fix: after triggering edit
+  mode, re-search for the edit control from a stable ancestor (the grid or the row, not
+  the old cell handle).</p>
+</li>
+<li>
+<p><strong><code>CurrenciesView</code>'s Symbol cell (<code>myTemplateSymbolEdit</code>, a <code>local:FilteringComboBox</code>,
+  <code>IsEditable="True"</code>) does not select an item just from typing.</strong> Typing sets the edit
+  box's <code>Text</code> but leaves <code>SelectedItem</code> (and therefore the two-way-bound
+  <code>Currency.Symbol</code>) untouched unless the dropdown is actually open - confirmed via a
+  tree dump showing zero <code>ListItem</code>s after typing alone. The working sequence: click
+  the cell, double-click (or Enter, when the grid itself reliably has focus) to
+  <code>BeginEdit</code>, <code>F4</code> to open the dropdown, type the code (also live-narrows the list via
+  <code>FilteringComboBox</code>'s own <code>FilterChanged</code>), click the first filtered match (its
+  <code>SelectionItem</code> pattern isn't supported - use <code>.Click()</code>, not
+  <code>Patterns.SelectionItem.Pattern.Select()</code>), then exactly one <code>Enter</code> to commit the
+  row - a second <code>Enter</code> re-opens edit on the <em>next</em> placeholder row instead of just
+  committing.</p>
+</li>
+<li>
+<p><strong>Right-click context-menu invocation, confirmed working</strong>:
+  <code>AutomationElement.RightClick()</code> on a <code>DataGrid</code> row opens <code>TransactionsView</code>'s real
+  <code>ContextMenu</code>, and its items (e.g. <code>menuItemRenamePayee</code>) are then findable/invokable
+  the same as any menu bar item - no special handling needed, worked first try. Click
+  the row first (select it, satisfying a command's <code>CanExecute</code>) before right-clicking.</p>
+</li>
+<li>
+<p><strong>Rename edit boxes place the caret at the end of the existing text, not select-all</strong></p>
+</li>
+<li>
+<p>both <code>CategoriesControl.xaml.cs</code>'s <code>OnTextEditorForRenaming_Loaded</code> (Categories
+  panel F2 rename) and <code>RenamePayeeDialog</code>'s "To" field (pre-filled with the same payee
+  name being renamed) do this. Typing immediately after opening the edit box appends to
+  the existing text instead of replacing it (confirmed: doing this literally produced a
+  real category named <code>"MoviesVideos"</code>, not a rename attempt at all). A real rename
+  test needs <code>Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A)</code>
+  before typing the new name.</p>
+</li>
+<li>
+<p><strong>A <code>TreeItem</code> bound to a <code>Category</code> gets its automation <code>Name</code> from
+  <code>Category.ToString()</code></strong> (returns the full colon-separated <code>Name</code>, e.g.
+  <code>"Fun:Movies"</code>) when no explicit <code>AutomationProperties.Name</code> is set - not the <code>Label</code>
+  ("Movies") its <code>TextBlock</code> visibly displays (that leaf text only shows up as a
+  separate nested <code>Text</code> element's own <code>Name</code>). Search <code>TreeItem</code>s by the full dotted
+  name, not the visible label. (See <code>CLAUDE.md</code> for the underlying
+  <code>Category.Name</code>-vs-<code>Label</code> domain fact this follows from.)</p>
+</li>
+<li>
+<p><strong>The duplicate-connector's "Merge" button has no <code>AutomationId</code></strong> -
+  <code>TransactionConnectorAdorner</code> (<code>TransactionsView.xaml.cs</code>) creates it in code as a
+  plain <code>RoundedButton</code> with <code>Content = "Merge"</code> and never sets
+  <code>AutomationProperties.AutomationId</code>; find it via
+  <code>ByControlType(Button).And(ByName("Merge"))</code> instead (a WPF <code>Button</code>'s automation
+  <code>Name</code> defaults to its <code>Content</code> when it's a plain string). It renders inside a WPF
+  <code>Adorner</code> (<code>AdornerLayer</code> overlay), not the normal element tree, but is still
+  discoverable via a normal <code>FindFirstDescendant</code> walk from the main window - adorners
+  are still part of the same visual tree UIA walks. It auto-appears (no explicit
+  "select the row" step needed) via a <code>DispatcherTimer</code>-delayed <code>ShowPotentialDuplicates</code>,
+  once whatever transaction is currently selected has a nearby
+  <code>Transactions.FindPotentialDuplicate</code> match - confirmed in this repo's Basics
+  fixture, where the grid's default selection already lands on one of the two seeded
+  <code>TARGET T-1234</code> duplicates as soon as the account opens.</p>
+</li>
+<li>
+<p><strong>A non-modal, owned <code>Window.Show()</code> (e.g. <code>AttachmentDialog</code>) can be completely
+  invisible to UIA desktop-enumeration</strong>, even scoped by <code>ByProcessId</code>, while a
+  screenshot proves it's genuinely rendered on screen.
+  <code>automation.GetDesktop().FindAllChildren(...)</code> and
+  <code>Application.GetAllTopLevelWindows(...)</code> are the same underlying UIA mechanism
+  (confirmed from FlaUI's own source), so neither is an independent check against the
+  other - this is a documented, known-flaky UIA path (FlaUI#57/#239), not something
+  specific to native common dialogs despite the <code>flaui-wpf-testing</code> skill's reference
+  file being framed around those. The fix: raw Win32 <code>EnumWindows</code> via P/Invoke,
+  bypassing UIA's desktop-children enumeration entirely
+  (<code>Source/WPF/UITests/Basics/Win32WindowFallback.cs</code>, lifted from the skill's
+  <code>references/native-dialogs.md</code>) - finds the window by HWND reliably, then everything
+  else (patterns, <code>FindFirstDescendant</code>, etc.) works completely normally on the wrapped
+  element.</p>
+</li>
+<li>
+<p><strong><code>Transaction.HasAttachment</code> (the grid's paperclip icon) did not visibly flip
+  within 10 seconds in this environment</strong> (it's driven by <code>AttachmentWatcher</code>'s
+  background scan, dispatched at <code>DispatcherPriority.Background</code>) - don't gate a FlaUI
+  test on this icon appearing. It doesn't matter for testing "does the app see this
+  attachment" anyway: open the <code>AttachmentDialog</code> directly (via the Attachment column's
+  edit-mode button) and it finds a pre-seeded file regardless of whether the icon ever
+  appeared - see <code>CLAUDE.md</code> for why.</p>
+</li>
+</ul>
+<h2 id="input-mechanics">Input mechanics<a class="headerlink" href="#input-mechanics" title="Permanent link">#</a></h2>
+<ul>
+<li>
+<p><strong><code>QuickFilterControl</code>'s Quick Search box only applies its filter on a literal Enter
+  keypress</strong> (<code>OnTextBox_KeyUp</code> checks <code>e.Key == Key.Enter</code>) - <code>TextChanged</code> alone
+  (fired on every keystroke) only toggles the clear-filter (X) button's visibility, it
+  does not touch the actual filter. FlaUI's <code>AsTextBox().Enter(text)</code> (despite the
+  name) only types the text via simulated keyboard input; it does not itself send an
+  Enter keypress. Fix: follow it with
+  <code>FlaUI.Core.Input.Keyboard.Type(FlaUI.Core.WindowsAPI.VirtualKeyShort.ENTER)</code>.</p>
+</li>
+<li>
+<p><strong>A physical <code>Click()</code> on a transaction grid row can silently fail to move selection
+  when the fixture also seeds a near-duplicate pair</strong> (e.g. <code>BasicsFixtureBuilder</code>'s
+  two <code>TARGET T-1234</code> rows). The app's own duplicate-detection feature
+  auto-selects/expands a "Merge" connector UI for that pair, and a screenshot taken
+  immediately after <code>Click()</code>-ing a different row showed selection still sitting on the
+  duplicate pair - the click never took. Fix:
+  <code>AutomationElement.Patterns.SelectionItem.Pattern.Select()</code> (a real UIA selection
+  call) instead of a mouse-coordinate <code>Click()</code> for selecting a specific transaction
+  row in a fixture that also has duplicates in it.</p>
+</li>
+<li>The split-details sub-grid (<code>TheGridForAmountSplit</code>) is reached the same way as the
+    main-grid "Rename Payee" flow: right-click the transaction row -&gt; <code>menuItemSplit</code>
+    (<code>Command="CommandSplits"</code>). Its columns are Payee(0)/Category(1)/Payment(2)/
+    Deposit(3)/Memo(4), and it has the same <code>{NewItemPlaceholder}</code> row and
+    stale-cell-handle-after-edit-mode-swap behavior as every other <code>MoneyDataGrid</code>.</li>
+<li>F6's handler (<code>OnDataGrid_KeyDown</code>, <code>TransactionsView.xaml.cs</code>) only works when the
+    target cell is genuinely in edit mode: it looks for an editable control inside
+    <code>dataGrid.CurrentCell.Column.GetCellContent(...)</code>, and the read-only cell template
+    is a plain <code>TextBlock</code> with nothing editable in it.</li>
+</ul>
+<h2 id="fixture-specific-notes-basicsfixturebuilder">Fixture-specific notes (<code>BasicsFixtureBuilder</code>)<a class="headerlink" href="#fixture-specific-notes-basicsfixturebuilder" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>The pre-seeded "AMC THEATRES 1234" alias means renaming that same payee with
+  Auto-Rename checked exercises <code>RenamePayeeDialog.OnOkButton_Click</code>'s <em>re-point an
+  existing alias</em> branch, not its <em>create a new alias</em> branch</strong> (<code>Aliases.FindAlias
+  (pattern)</code> finds the existing one, so <code>AddAlias</code> is never called for it) - a test
+  asserting a new alias was <em>created</em> here would be testing the wrong branch.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

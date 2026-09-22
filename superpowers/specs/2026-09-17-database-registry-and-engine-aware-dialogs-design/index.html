@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-17-database-registry-and-engine-aware-dialogs-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>File|New / File|Open: Database Registry &amp; Engine-Aware Dialogs — Design Spec - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "File|New / File|Open: Database Registry \u0026amp; Engine-Aware Dialogs \u2014 Design Spec", url: "#_top", children: [
+              {title: "Status", url: "#status" },
+              {title: "Context", url: "#context" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-Goals (this WI)", url: "#non-goals-this-wi" },
+              {title: "Architecture Overview", url: "#architecture-overview" },
+              {title: "Config File Schema", url: "#config-file-schema" },
+              {title: "DatabaseRole", url: "#databaserole" },
+              {title: "File Menu UX", url: "#file-menu-ux" },
+              {title: "SQL Server Bootstrap Mechanism (replaces MyMoneyAdmin.exe)", url: "#sql-server-bootstrap-mechanism-replaces-mymoneyadminexe" },
+              {title: "Test Harness Changes", url: "#test-harness-changes" },
+              {title: "Handoff to #41", url: "#handoff-to-41" },
+              {title: "Future Work (explicitly out of scope for this WI)", url: "#future-work-explicitly-out-of-scope-for-this-wi" },
+              {title: "Verification", url: "#verification" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="filenew-fileopen-database-registry-engine-aware-dialogs-design-spec">File|New / File|Open: Database Registry &amp; Engine-Aware Dialogs — Design Spec<a class="headerlink" href="#filenew-fileopen-database-registry-engine-aware-dialogs-design-spec" title="Permanent link">#</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">#</a></h2>
+<p>Design phase, implements issue #32. Written through an extended interactive
+brainstorming conversation (2026-09-17 evening) — the shape below reflects
+several real corrections the user made mid-conversation (notably: eliminating
+<code>MyMoneyAdmin.exe</code> entirely in favor of in-process bootstrap via permanent,
+parameterized stored procedures, and scoping the SQLite-side role-enforcement
+facade out to issue #41). Treat this document, not the original issue #32
+text, as authoritative for anything the two disagree on.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p>Two pieces of existing infrastructure this spec builds on and replaces parts
+of:</p>
+<ul>
+<li><strong>The tiered <code>sa</code>→<code>MyMoneyAdmin</code>→<code>MyMoneyUser</code>/<code>MyMoneyTest</code> SQL Server
+  bootstrap already exists and works</strong> (<code>docs/superpowers/specs/
+  2026-09-14-sql-server-dual-engine-design.md</code>), but is entirely automatic
+  and invisible: <code>DataEngineStartup.TryAutoLoad</code> reads one
+  <code>dataengine.config.json</code> on app startup and, if it says <code>engine:
+  "SqlServer"</code>, shells out to a separate <code>MyMoneyAdmin.exe</code> process
+  (<code>Source/WPF/MyMoneyAdmin</code>) to bootstrap if needed. The database name is
+  hardcoded to the literal string <code>"MyMoney"</code> throughout (<code>DataEngineStartup
+  .RequiredDatabaseName</code>, and every <code>USE MyMoney;</code> at the top of every
+  <code>Database/SqlScripts/{Bootstrap,Schema,Access,Test}/*.sql</code> file). There is
+  no UI for any of this — no File|New, no File|Open, no way to have more than
+  one configured database.</li>
+<li><strong><code>DataEngineConfig</code></strong> (non-secret: engine/server/database, one object) and
+  <strong><code>DataEngineCredentialStore</code></strong> (secret: UID/PW per SQL Server login, in
+  <code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code>, outside the
+  repo) are two separate files, deliberately split by sensitivity. The SQL
+  Server test harness (<code>SqlServerStoredProcDatabaseTests</code>,
+  <code>SqlServerDatabaseContractTests</code>, via <code>MyMoney.TestSupport
+  \SqlServerTestDatabase.WipeAllTables</code>) additionally depends on three
+  environment variables (<code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>,
+  <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>,
+  <code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE</code>) that duplicate/bypass both files.</li>
+<li><strong><code>RecentFilesMenu</code></strong> (<code>Source/WPF/MyMoney/Utilities/RecentFilesMenu.cs</code>)
+  assumes every entry is a filesystem path (<code>File.Exists()</code> prunes stale
+  entries) and keeps its own separate list, unrelated to either JSON file
+  above.</li>
+<li><strong><code>CreateDatabaseDialog</code></strong> is the current File|New/Save-As/Restore dialog.
+  It is entirely SQLite/XML/BinaryXML-file-path-oriented; it has no concept
+  of a database engine choice at all.</li>
+</ul>
+<p>This spec replaces all of the above with one JSON registry file, a pair of
+engine-aware New-database dialogs, a registry-backed Open dialog, and an
+in-process (no separate <code>.exe</code>) SQL Server bootstrap mechanism.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<ul>
+<li>One JSON file is the only thing the running app reads to know what
+  databases exist and how to connect to them — no environment variables
+  anywhere in the startup/connection path.</li>
+<li><code>File | New</code> gets <strong>SQL Server...</strong> and <strong>SQLite...</strong> submenu items,
+  replacing today's engine-blind dialog. Each creates a real, immediately
+  usable database and registers it.</li>
+<li><code>File | Open</code> shows every registered database by name (not a file
+  browser) and connects directly.</li>
+<li>A database can be flagged as a <strong>test database</strong>: physically separate
+  from any production database (its own SQLite file, or its own SQL Server
+  catalog), free to be wiped/reset without any risk, and invisible in
+  Release builds.</li>
+<li>SQL Server bootstrap runs <strong>in-process</strong>, driven by permanent, parameterized
+  stored procedures — no separate <code>MyMoneyAdmin.exe</code> process, no
+  <code>Process.Start</code>, no hardcoded <code>"MyMoney"</code> database name anywhere.</li>
+<li>The existing SQL Server test harness resolves its target database and
+  credentials from the same one JSON file, with no env vars.</li>
+<li><code>RecentFilesMenu</code> becomes a thin, registry-backed view instead of its own
+  separate storage.</li>
+</ul>
+<h2 id="non-goals-this-wi">Non-Goals (this WI)<a class="headerlink" href="#non-goals-this-wi" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>SQL Server as a Release-available engine.</strong> Stays DEBUG-only for now
+  (<code>#if DEBUG</code>), same restriction as today, even though the underlying
+  mechanism (permanent parameterized stored procs, no exe) is engineered so
+  that lifting this restriction later is straightforward. Noted under
+  Future Work.</li>
+<li><strong>Enforcing the <code>DatabaseRole</code> contract on <code>SqliteDatabase</code>.</strong> This spec
+  introduces the <code>DatabaseRole</code> enum and uses it for SQL Server credential
+  selection (where the SQL Server engine itself enforces the boundary via
+  real login permissions). It does <strong>not</strong> implement the parallel
+  <code>RoleGuardedSqliteDatabase</code> facade needed to make the same contract
+  software-enforced for SQLite — see "Handoff to #41" below. Until #41
+  lands, the "Test processes only touch test-tier operations" guarantee
+  holds for SQL Server by real permission, and for SQLite only by
+  convention (which assembly happens to call in), exactly as it does today.</li>
+<li><strong>Moving test-only operations (<code>ClearAllTables</code> etc.) into a dedicated,
+  cleanly-typed test-tier business-layer API</strong>, and the remaining 5
+  <code>_Test_Reset</code> stored procs needed to fully retire
+  <code>SqlServerTestDatabase.WipeAllTables</code>'s admin-connection <code>DELETE</code>
+  fallback. See "Handoff to #41."</li>
+<li><strong>Migration tooling</strong> for the current two-file dev setup. Not needed —
+  there is no real data in any database in this environment right now;
+  the old files are simply replaced by hand once this lands.</li>
+<li><strong>A secrets-merge mechanism for an ops-provisioned deployment.</strong> Bootstrap
+  in this spec is entirely in-process and self-generates its own
+  passwords, writing them directly into the one config file — there is no
+  separate secret source to merge from, and nothing a human or "operations"
+  process needs to hand-enter. This only becomes relevant once SQL Server
+  is Release-available and a real, externally-provisioned production
+  database enters the picture (see Future Work).</li>
+<li><strong>A database-upgrade rehearsal pipeline</strong> (backup → schema/proc
+  migration → app binary update → test run) for real, non-test databases.
+  Not needed while every database in this environment is <code>TestDatabase: true</code>.
+  See Future Work.</li>
+</ul>
+<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">#</a></h2>
+<pre><code> WPF App
+ ───────
+ reads ONE file: dataengine.config.json  (DatabaseRegistry)
+   │
+   ├─ File | New | SQLite...      ──► create file, register entry (engine=Sqlite)
+   ├─ File | New | SQL Server...  ──► in-process bootstrap (see below), register entry
+   ├─ File | Open                 ──► pick a registered entry, connect
+   └─ RecentFilesMenu             ──► thin view over the registry, sorted by lastUsedUtc
+
+ In-process SQL Server bootstrap (replaces MyMoneyAdmin.exe entirely)
+ ─────────────────────────────────────────────────────────────────────
+ server has no entry in registry's &quot;servers&quot; block?
+   └─ prompt for sa ONCE ──► call master.dbo.MyMoney_BootstrapServer
+                              (creates MyMoneyAdmin/MyMoneyUser/MyMoneyTest
+                               logins + grants MyMoneyAdmin dbcreator)
+                              ──► write the 3 generated credentials into
+                                  registry's servers[server] block
+
+ creating any new catalog (production or test) on a known server:
+   connect as MyMoneyAdmin (from registry) ──► call
+   master.dbo.MyMoney_CreateCatalog @CatalogName ──► reconnect with
+   InitialCatalog=&lt;new catalog&gt; ──► run every Schema/Access/Test .sql file's
+   CREATE OR ALTER statements directly over that connection ──► register
+   the new databases[] entry (engine=SqlServer, server, catalog, TestDatabase)
+</code></pre>
+<h2 id="config-file-schema">Config File Schema<a class="headerlink" href="#config-file-schema" title="Permanent link">#</a></h2>
+<p><strong>One file</strong>, <code>%LocalAppData%\MyMoney\dataengine.config.json</code> (same
+directory the old <code>dataengine.config.json</code> already used), is the only thing
+the app reads at runtime. A checked-in template,
+<code>Source/WPF/MyMoney/dataengine.config.template.json</code>, documents the shape
+with placeholder values — it is never read by the app itself, purely a
+reference/starting point. The real file lives outside the repo (same as
+today), is never committed, and — unlike today — contains real secrets
+directly (see Goals: no separate credentials file, no merge step needed for
+this WI's in-process, self-generating bootstrap flow).</p>
+<pre><code class="language-json">{
+  &quot;servers&quot;: {
+    &quot;Redmond&quot;: {
+      &quot;comment&quot;: &quot;Home NAS, always-on, SQL Server 2022 Developer edition&quot;,
+      &quot;myMoneyAdmin&quot;: { &quot;userId&quot;: &quot;MyMoneyAdmin&quot;, &quot;password&quot;: &quot;...&quot; },
+      &quot;myMoneyUser&quot;:  { &quot;userId&quot;: &quot;MyMoneyUser&quot;,  &quot;password&quot;: &quot;...&quot; },
+      &quot;myMoneyTest&quot;:  { &quot;userId&quot;: &quot;MyMoneyTest&quot;,  &quot;password&quot;: &quot;...&quot; }
+    }
+  },
+  &quot;databases&quot;: {
+    &quot;My Real Money&quot;: {
+      &quot;engine&quot;: &quot;SqlServer&quot;, &quot;server&quot;: &quot;Redmond&quot;, &quot;catalog&quot;: &quot;MyMoney&quot;,
+      &quot;TestDatabase&quot;: false, &quot;lastUsedUtc&quot;: &quot;2026-09-17T20:00:00Z&quot;,
+      &quot;comment&quot;: &quot;The real one — don't wipe&quot;
+    },
+    &quot;SQL Server Test&quot;: {
+      &quot;engine&quot;: &quot;SqlServer&quot;, &quot;server&quot;: &quot;Redmond&quot;, &quot;catalog&quot;: &quot;MyMoneyTest&quot;,
+      &quot;TestDatabase&quot;: true, &quot;lastUsedUtc&quot;: null,
+      &quot;comment&quot;: &quot;Wiped freely by SqlServerStoredProcDatabaseTests&quot;
+    },
+    &quot;Personal.mmdb&quot;: {
+      &quot;engine&quot;: &quot;Sqlite&quot;, &quot;path&quot;: &quot;C:\\Users\\...\\MyMoney\\personal.mmdb&quot;,
+      &quot;TestDatabase&quot;: false, &quot;lastUsedUtc&quot;: &quot;2026-09-17T19:30:00Z&quot;,
+      &quot;comment&quot;: null
+    }
+  }
+}
+</code></pre>
+<ul>
+<li><code>servers</code> holds one credential set (three roles) per SQL Server host,
+  shared by every <code>databases</code> entry pointing at that host. <code>sa</code> is <strong>never</strong>
+  stored here — it is prompted for interactively the one time per server it
+  is needed (unchanged from the existing accepted behavior).</li>
+<li><code>databases</code> keys are the unique display names shown in <code>File | Open</code> /
+  <code>RecentFilesMenu</code>. Each entry is either SQL Server (<code>server</code> + <code>catalog</code>)
+  or SQLite (<code>path</code>). <code>TestDatabase</code> and <code>lastUsedUtc</code> apply uniformly to both
+  engines.</li>
+<li><strong><code>comment</code></strong> is an optional, free-text string on both a <code>servers</code> entry
+  and a <code>databases</code> entry (<code>null</code>/absent is fine — not every entry needs
+  one), purely for making a hand-read config file self-documenting (e.g.
+  "the real one, don't wipe" vs. "throwaway, safe to delete"). The app never
+  reads or writes it except to round-trip it — no dialog collects it in this
+  WI; it's for whoever hand-edits the file later. <code>DatabaseRegistry</code>'s
+  load/save must preserve it losslessly (round-trip, not drop unknown/
+  null values).</li>
+<li>Replaces <code>DataEngineConfig</code> and <code>DataEngineCredentialStore</code> with one new
+  class (working name <code>DatabaseRegistry</code>) in <code>MyMoney.Data</code> that loads/saves
+  this file and exposes typed access to both blocks. Exact class/method
+  shapes are an implementation-plan decision, not fixed here.</li>
+</ul>
+<h2 id="databaserole"><code>DatabaseRole</code><a class="headerlink" href="#databaserole" title="Permanent link">#</a></h2>
+<pre><code class="language-csharp">public enum DatabaseRole { Admin, User, Test }
+</code></pre>
+<ul>
+<li>For <code>SqlServerStoredProcDatabase</code>: the role selects which of the three
+  credential entries (<code>myMoneyAdmin</code>/<code>myMoneyUser</code>/<code>myMoneyTest</code>) under the
+  target server to connect with. SQL Server's own login permissions are the
+  actual enforcement — <code>Admin</code> can create catalogs/schema, <code>User</code> can only
+  call CRUD access procs, <code>Test</code> can call CRUD access procs plus test-only
+  procs. This is a real, server-enforced boundary today.</li>
+<li>For <code>SqliteDatabase</code>: this spec introduces the enum and threads it through
+  wherever a role needs to be requested, but does <strong>not</strong> implement any
+  enforcement for SQLite — see Non-Goals / Handoff to #41. Passing <code>Role =
+  Test</code> against a <code>SqliteDatabase</code> in this WI is a no-op distinction; #41
+  is expected to make it a real, software-enforced one via a
+  <code>RoleGuardedSqliteDatabase</code> facade.</li>
+</ul>
+<h2 id="file-menu-ux">File Menu UX<a class="headerlink" href="#file-menu-ux" title="Permanent link">#</a></h2>
+<ul>
+<li><strong><code>File | New</code></strong> — <strong>DEBUG builds</strong> get a submenu with two items, <strong>SQL
+  Server...</strong> and <strong>SQLite...</strong>. <strong>Release builds have no submenu at all</strong>:
+  <code>File | New</code> goes straight to the SQLite creation dialog (the only engine
+  Release ever offers, consistent with SQL Server being DEBUG-only per
+  Non-Goals). The SQL Server menu item and its dialog are compiled out
+  (<code>#if DEBUG</code>) in Release, not merely hidden/disabled — same treatment as
+  the "Test database:" checkbox below.</li>
+<li>Each variant opens a focused dialog (replacing <code>CreateDatabaseDialog</code>'s
+    do-everything design). Both collect a <strong>unique display name</strong> (defaults
+    to something sensible — catalog name or file name — but editable;
+    becomes the <code>databases</code> dictionary key).</li>
+<li>The <strong>"Test database:" checkbox</strong> (label reads "Test database:" followed
+    by the checkbox, not "Is test database") is <strong>DEBUG builds only</strong> (<code>#if
+    DEBUG</code>, compiled out entirely in Release, not merely hidden) on
+    whichever dialog(s) Release still shows — i.e. on Release's direct-to-
+    SQLite dialog too, not just on the SQL Server one. Release can never
+    create a database with <code>TestDatabase: true</code>.</li>
+<li><strong>SQL Server...</strong> (DEBUG only) additionally collects server name
+    (offering servers already present in the registry) and catalog name,
+    then runs the in-process bootstrap described below.</li>
+<li><strong>SQLite...</strong> collects a file location exactly as today's dialog does.</li>
+<li>On success, both add a new <code>databases</code> entry (name/engine/TestDatabase/
+    lastUsedUtc=now) to the registry.</li>
+<li><strong><code>File | Open</code></strong> → a list of registry entries, not a file browser.
+  Sorted by <code>lastUsedUtc</code> descending. DEBUG builds show every entry;
+  Release builds filter out anything with <code>TestDatabase: true</code>. Selecting one
+  connects directly — opening can never implicitly create a database, since
+  every listed entry by definition already exists.</li>
+<li><strong><code>RecentFilesMenu</code></strong> loses its own storage entirely. It becomes a view
+  over the same registry with the same Release-hides-test-entries filter,
+  sorted by <code>lastUsedUtc</code>, capped at the existing 10-item limit. Opening a
+  database through <em>any</em> path (Open dialog, a recent-file click, a
+  command-line argument) updates that entry's <code>lastUsedUtc</code>.</li>
+</ul>
+<h2 id="sql-server-bootstrap-mechanism-replaces-mymoneyadminexe">SQL Server Bootstrap Mechanism (replaces <code>MyMoneyAdmin.exe</code>)<a class="headerlink" href="#sql-server-bootstrap-mechanism-replaces-mymoneyadminexe" title="Permanent link">#</a></h2>
+<p><code>Source/WPF/MyMoneyAdmin</code> is retired entirely. Its bootstrap logic (today
+split across <code>BootstrapRunner</code>/<code>SaBootstrapConnection</code> and a CLI entry
+point) is ported into <code>MyMoney.Data</code> and becomes two permanent, parameterized
+stored procedures called directly from app code — no shelled-out process, no
+temp-proc-created-and-dropped-in-master pattern, no <code>USE &lt;database&gt;;</code> text
+substitution:</p>
+<ul>
+<li><strong><code>master.dbo.MyMoney_BootstrapServer</code></strong> — permanent proc in <code>master</code>,
+  callable as <code>sa</code>. Takes the three generated passwords as parameters.
+  Creates the <code>MyMoneyAdmin</code>/<code>MyMoneyUser</code>/<code>MyMoneyTest</code> logins if they
+  don't already exist (idempotent — matches the existing design's
+  idempotency guarantee) and grants <code>MyMoneyAdmin</code> the <code>dbcreator</code> server
+  role so it can create catalogs itself afterward. Called <strong>once per
+  server, ever</strong> — the app only invokes it when the target server has no
+  entry yet in the registry's <code>servers</code> block.</li>
+<li><strong><code>master.dbo.MyMoney_CreateCatalog @CatalogName NVARCHAR(128)</code></strong> —
+  permanent proc in <code>master</code>, callable as <code>MyMoneyAdmin</code>. Uses dynamic SQL
+  internally (<code>EXEC('CREATE DATABASE ' + QUOTENAME(@CatalogName))</code>,
+  <code>QUOTENAME</code> specifically to avoid SQL injection through the parameter) to
+  create a new catalog by name, idempotent via a <code>sys.databases</code> existence
+  check first. This is the "database name is a parameter to the stored
+  procedure" mechanism — the same proc creates the production catalog, any
+  test catalog, or any future catalog, with no per-catalog script
+  variant needed.</li>
+<li><strong>Schema/Access/Test proc deployment</strong>: once the catalog exists, open a
+  connection with <code>InitialCatalog</code> set directly to that catalog and execute
+  every <code>CREATE OR ALTER PROCEDURE</code>/table/index/grant statement from the
+  checked-in <code>.sql</code> files over that connection via plain ADO.NET (splitting
+  each file on <code>GO</code> client-side — a standard pattern, since <code>GO</code> is a
+  client-tool batch separator ADO.NET doesn't understand). Because the
+  connection is already scoped to the right catalog, <strong>the <code>USE &lt;database&gt;;</code>
+  line at the top of every existing script becomes dead weight for our own
+  bootstrap code</strong> — the bootstrap parser skips any statement matching
+  <code>^USE\b</code> rather than executing it. The line can stay in the checked-in
+  files for a human running them by hand in SSMS, or be removed; either way
+  it stops being load-bearing for anything the app itself does. No other
+  content in these scripts references a database name (confirmed by reading
+  <code>Categories_AccessProcs.sql</code> and others — <code>GRANT EXECUTE ... TO
+  MyMoneyUser</code> references only fixed login names, never a catalog name), so
+  no further script changes are needed beyond this.</li>
+<li><code>DataEngineStartup.RequiredDatabaseName</code>'s hardcoded <code>"MyMoney"</code> check is
+  removed — any catalog name is now valid.</li>
+</ul>
+<h2 id="test-harness-changes">Test Harness Changes<a class="headerlink" href="#test-harness-changes" title="Permanent link">#</a></h2>
+<p><code>SqlServerStoredProcDatabaseTests</code> and <code>SqlServerDatabaseContractTests</code>
+(via <code>SqlServerTestDatabase.WipeAllTables</code> and <code>MyMoneyTestConnectionResolver</code>)
+stop reading <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>,
+<code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>, and
+<code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE</code> entirely. Instead:</p>
+<ul>
+<li>They read the one <code>dataengine.config.json</code> and find the <code>databases</code> entry
+  with <code>engine: "SqlServer"</code> and <code>TestDatabase: true</code> (today, in practice, the
+  <code>"SQL Server Test"</code> entry pointing at the <code>MyMoneyTest</code> catalog on
+  <code>Redmond</code>).</li>
+<li><code>TestDatabase: true</code> on that entry <strong>is</strong> the acknowledgment that wiping it is
+  safe — there is no longer a separate opt-in flag to set. A missing
+  <code>TestDatabase: true</code> SQL Server entry means the tests skip (<code>Assert.Ignore</code>),
+  same graceful-skip behavior as today's missing-env-var case.</li>
+<li>The admin-connection <code>DELETE</code> fallback for the 5 owned-child tables still
+  uses that server's <code>myMoneyAdmin</code> credential from the registry's <code>servers</code>
+  block (not a separate admin connection string) until #41 replaces it with
+  proper <code>_Test_Reset</code> procs for those tables too.</li>
+</ul>
+<h2 id="handoff-to-41">Handoff to #41<a class="headerlink" href="#handoff-to-41" title="Permanent link">#</a></h2>
+<p>The following are explicitly <strong>not</strong> built by this WI, and #41 needs to
+know about them to preserve the contract this WI establishes:</p>
+<ol>
+<li><strong><code>RoleGuardedSqliteDatabase</code> facade</strong> (or equivalent): make the
+   <code>DatabaseRole</code> enum introduced here actually enforced in software for
+   <code>SqliteDatabase</code> — role-restricted operations (schema/file creation →
+   <code>Admin</code> only; test-only operations → <code>Test</code> only) should throw if the
+   caller's role doesn't permit them, mirroring the real permission
+   boundary SQL Server already provides. Until this lands, "test processes
+   only touch test-tier operations" holds for SQL Server by real
+   permission and for SQLite only by convention.</li>
+<li><strong>The remaining 5 <code>_Test_Reset</code> stored procedures</strong> (<code>Splits</code>,
+   <code>Investments</code>, <code>TransactionExtras</code>, <code>AccountAliases</code>, <code>RentUnits</code>) so
+   <code>SqlServerTestDatabase.WipeAllTables</code> can stop using a raw admin-
+   connection <code>DELETE</code> for those tables and go through <code>MyMoneyTest</code>
+   exclusively, matching the other 11 tables.</li>
+<li><strong>A dedicated, cleanly-typed test-tier business-layer API</strong> (the user's
+   own example: a real <code>ClearAllTables()</code> method) replacing today's static
+   <code>SqlServerTestDatabase.WipeAllTables()</code> utility, always connecting as
+   <code>MyMoneyTest</code>, callable only from the test-tier assembly.</li>
+<li><strong>A <code>LayerBoundaryTests</code>-style reflection check</strong> proving the shipped
+   <code>MyMoney</code>/<code>MyMoney.Data</code>/<code>MyMoney.Business</code> assemblies can never
+   reference <code>MyMoney.TestSupport</code> (or whatever the test-tier assembly is
+   named after #41's work) — today this is true by convention
+   (<code>MyMoney.csproj</code> simply doesn't reference it), not by an enforced,
+   regression-proof guarantee, mirroring the existing WPF-family boundary
+   test this codebase already has for a different layer pair.</li>
+</ol>
+<p>A comment will be posted on issue #41 itself, pointing at this section,
+once this spec is committed.</p>
+<h2 id="future-work-explicitly-out-of-scope-for-this-wi">Future Work (explicitly out of scope for this WI)<a class="headerlink" href="#future-work-explicitly-out-of-scope-for-this-wi" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>SQL Server as a Release-available engine.</strong> This spec's bootstrap
+  mechanism (permanent parameterized procs, no exe) is designed so lifting
+  the <code>#if DEBUG</code> restriction later is mostly a compile-flag change, not a
+  redesign — but that flip is not part of this WI.</li>
+<li><strong>A secrets-merge mechanism for ops-provisioned deployments.</strong> Needed
+  once SQL Server is Release-available and a real production database is
+  provisioned externally (not through this app's own in-process bootstrap)
+  with ops-chosen rather than auto-generated credentials. The general shape
+  discussed: a script that reads a secret source and the checked-in config
+  template and writes the merged, real config straight to disk in one
+  non-interactive step, so no intermediate value is ever displayed/logged.
+  Not needed for this WI, where bootstrap generates and writes its own
+  passwords in-process.</li>
+<li><strong>A database-upgrade rehearsal pipeline</strong>: backup, schema/proc migration,
+  app binary update, then a test run against the upgraded copy — for real,
+  non-test databases. Not needed while every database in this environment
+  is <code>TestDatabase: true</code>.</li>
+</ul>
+<h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">#</a></h2>
+<ul>
+<li>Unit tests for <code>DatabaseRegistry</code> load/save round-tripping (mirroring
+  the existing <code>DataEngineConfigTests</code>/<code>DataEngineCredentialStoreTests</code>
+  coverage, consolidated into the new single class).</li>
+<li><code>SqlServerStoredProcDatabaseTests</code>/<code>SqlServerDatabaseContractTests</code>
+  re-verified end-to-end against the live Redmond server after the env-var
+  removal, using a registry entry instead — confirms no regression in the
+  existing 16 + 191 passing tests from tonight's #27 work.</li>
+<li>Manual/FlaUI-style verification of the new File|New (both engines) →
+  File|Open round trip, and of <code>RecentFilesMenu</code> reflecting registry state
+  correctly, including the Release-build test-entry filtering (built with
+  a Release configuration, not just <code>#if DEBUG</code> inspected statically).</li>
+<li>Live bootstrap verification against Redmond: <code>MyMoney_BootstrapServer</code>
+  and <code>MyMoney_CreateCatalog</code> both idempotent on a second run, and creating
+  a genuinely new second catalog (a real <code>TestDatabase: true</code> entry distinct from
+  the production one) succeeds and is independently wipeable without
+  touching the first.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

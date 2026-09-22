@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-18-basics-test-implementation-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Implementing tests from the FlaUI/business-layer scenario catalog, starting with Basics - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Implementing tests from the FlaUI/business-layer scenario catalog, starting with Basics", url: "#_top", children: [
+              {title: "Context", url: "#context" },
+              {title: "Goal", url: "#goal" },
+              {title: "Testing responsibility by layer", url: "#testing-responsibility-by-layer" },
+              {title: "Non-goals (this pass)", url: "#non-goals-this-pass" },
+              {title: "Test content conventions (isolation + thoroughness)", url: "#test-content-conventions-isolation-thoroughness" },
+              {title: "Process (applies to every subsection, in every section)", url: "#process-applies-to-every-subsection-in-every-section" },
+              {title: "Basics: subsection breakdown and fixture plan", url: "#basics-subsection-breakdown-and-fixture-plan" },
+              {title: "Repeatable process for later sections (Accounts, Charts, Reports)", url: "#repeatable-process-for-later-sections-accounts-charts-reports" },
+              {title: "FlaUI execution environment", url: "#flaui-execution-environment" },
+              {title: "Testing/tooling notes", url: "#testingtooling-notes" },
+              {title: "Test input data for importers/parsers (synthetic vs. real-world samples)", url: "#test-input-data-for-importersparsers-synthetic-vs-real-world-samples" },
+              {title: "Open questions / future work", url: "#open-questions-future-work" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="implementing-tests-from-the-flauibusiness-layer-scenario-catalog-starting-with-basics">Implementing tests from the FlaUI/business-layer scenario catalog, starting with Basics<a class="headerlink" href="#implementing-tests-from-the-flauibusiness-layer-scenario-catalog-starting-with-basics" title="Permanent link">#</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p><code>docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md</code> (the "tracking doc")
+catalogs ~166 end-user scenarios across 6 functional areas (Home, Basics, Accounts, Charts,
+Reports, Development) plus an "Undocumented in help file" section, each row naming a
+business-layer API (or flagging its absence as a <code>Business-layer gap</code>), a FlaUI verification
+step, test data, and a <code>Status</code> column that is currently <code>Not started</code> or <code>Business-layer gap</code>
+for every single row — no test implementation has happened yet.</p>
+<p>This spec covers turning that catalog into running tests, one functional area ("section") at
+a time, starting with <strong>Basics</strong> (9 subsections, ~35 scenarios: Categories, Payees &amp; Aliases,
+Splits &amp; Transfers, Merging Duplicate Transactions, Currencies &amp; Securities,
+Auto-Categorization, Quick Search &amp; Advanced Queries, Attachments, Sample Data). Once Basics
+is done and assessed, the same process repeats for Accounts, Charts, and Reports — this spec
+also writes down that repeatable process so later sections don't need a fresh design pass.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">#</a></h2>
+<p>For each Basics subsection: write a business-layer unit test for every scenario whose API is
+already reachable without a UI, then a thin FlaUI test proving the real dialog/control wires
+user input to that API correctly. Update the tracking doc's <code>Status</code> column as each test lands.
+At the end of the section, do a short retro on whether the catalog itself held up (accurate
+descriptions, no missing gaps, no rows that needed splitting).</p>
+<h2 id="testing-responsibility-by-layer">Testing responsibility by layer<a class="headerlink" href="#testing-responsibility-by-layer" title="Permanent link">#</a></h2>
+<p>This catalog spans two layers (UI, business), and a third (data) already has its own
+established test suite from earlier work — keeping each layer's tests scoped to what only that
+layer can prove is what makes "don't duplicate coverage" (below) enforceable rather than just
+aspirational:</p>
+<ul>
+<li><strong>UI layer (FlaUI).</strong> Tests that the UI correctly hands entered values to the business-layer
+  API, correctly displays whatever the business layer returns, and correctly handles whatever
+  the business layer signals back — an error (<code>IBusinessLayerUiCallback.ShowError</code> and friends),
+  a confirmation prompt, an event/callback invocation — by showing the right dialog/state, not
+  silently swallowing it or crashing. Does <strong>not</strong> re-verify that the business layer's computed
+  values are themselves correct — that's a business-layer test's job (see "Predicted results"
+  above: the FlaUI test gets its expected value <em>from</em> the business-layer API, it doesn't
+  re-derive correctness independently at this layer).</li>
+<li><strong>Business layer.</strong> Tests that (a) computed results are correct — the actual logic/algorithms
+  (CRUD-lifecycle shape, code-path-driven design, both above), (b) calls made <em>to</em> the data
+  layer are correct — <code>MockDatabase</code>-backed tests confirming the right entities/values reach
+  <code>SaveOne</code>/<code>SaveBatch</code>/etc., and (c) when the data layer signals an error or event back, the
+  business layer handles it correctly. <code>MockDatabase.SaveBatch</code> already throws
+  <code>ConcurrencyConflictException</code> whenever a root's <code>RowVersion</code> doesn't match what's committed
+  (<code>MockDatabase.cs:113-117</code>, its normal conflict-detection path, not a special test-only mode)
+  — a business-layer test triggers this deliberately by saving a root once, then setting its
+  <code>RowVersion</code> to a stale value before saving again, and asserts the business layer's actual
+  response (propagate, wrap, surface via a callback), not just the happy-path save.
+  Does <strong>not</strong> re-verify the data layer's persistence mechanics themselves.</li>
+<li><strong>Data layer.</strong> Tests that <code>SqliteDatabase</code>/<code>SqlServerDatabase</code>/<code>XmlStore</code>/<code>CsvStore</code> actually
+  implement the <code>IDatabase</code> contract correctly. Already covered by the existing
+  <code>DatabaseContractTests</code>/dual-engine suite from the persistence-concurrency phase 2 work —
+  out of scope for this catalog entirely (the tracking doc's scenarios are UI + business layer
+  only; a scenario never needs a new data-layer test, only to lean on what already exists there).</li>
+</ul>
+<h2 id="non-goals-this-pass">Non-goals (this pass)<a class="headerlink" href="#non-goals-this-pass" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>New extraction work.</strong> Several Basics rows are <code>Business-layer gap</code> because the logic
+  hasn't been pulled out of the WPF project at all (e.g. <code>AttachmentManager</code>,
+  <code>RecentFilesMenu</code>-adjacent code — though most of those live in Accounts/Undocumented, not
+  Basics). Where a Basics row needs a real extraction rather than "just write a test," it is
+  <strong>not</strong> done here — file a follow-up issue (same pattern as the original migration's
+  deferred items) and leave the row <code>Business-layer gap</code> in the doc.</li>
+<li><strong>Hardware-dependent or otherwise non-automatable scenarios.</strong> Attachments' "Scan and crop a
+  receipt" needs real scanner hardware. Mark these <code>Not automatable in this environment</code> and
+  skip — no mock-the-scanner workaround.</li>
+<li><strong>Sections other than Basics.</strong> Accounts/Charts/Reports/the Undocumented section are future
+  work, using the repeatable process below, each getting its own short scoping pass (not a
+  full new spec) before starting.</li>
+<li><strong>SDD ceremony.</strong> No fresh-implementer-subagent-per-task, no ledger, no ruling log. This is
+  incremental test-writing against already-established conventions (existing fakes, existing
+  FlaUI patterns), not architecturally risky work — the user reviews each subsection directly
+  before moving to the next.</li>
+</ul>
+<h2 id="test-content-conventions-isolation-thoroughness">Test content conventions (isolation + thoroughness)<a class="headerlink" href="#test-content-conventions-isolation-thoroughness" title="Permanent link">#</a></h2>
+<p>Two separate concerns, solved separately:</p>
+<p><strong>Isolation (idempotent, order-independent, re-runnable any number of times) — Fresh Fixture,
+not Shared Fixture.</strong> The goal, stated precisely: adding a new test case must never change an
+existing test's result, and running tests in a different order (or the same test many times in
+a row) must never change any test's result. The standard, named answer to this (Meszaros,
+<em>xUnit Test Patterns</em>: "Fresh Fixture" vs. "Shared Fixture") is that every test builds its own
+clean starting state from scratch rather than reusing or incrementally patching a
+shared/persisted one — "nuke and pave" per test, not per run.</p>
+<p>Business-layer tests already get this for free — every existing test (<code>ExportersTests.cs</code>,
+etc.) constructs a fresh in-memory <code>new MyMoney()</code> per test method, so there's no shared or
+persisted state to leave behind; this is Fresh Fixture already in practice, just not named as
+such until now.</p>
+<p>FlaUI tests need the same property but currently have nothing enforcing it: <code>MainWindow</code>
+doesn't autosave (confirmed — writes only happen on explicit File|Save or on a dirty-database
+close prompt, <code>MainWindow.xaml.cs:5011</code>'s <code>OnClosing</code> → <code>SaveIfDirty()</code>), so a FlaUI test that
+mutates data and then just closes the app risks either blocking on an unanswered save prompt
+or, if answered "Yes," permanently drifting a shared fixture file — reintroducing exactly the
+order-dependence this section is trying to eliminate. The fix, matching the business-layer
+side's Fresh Fixture property instead of just working around the save-prompt risk: <strong>generate
+the fixture fresh, in code, at the start of every single test</strong> — see "Shared fixture builder"
+below — rather than maintaining and copying a static checked-in binary. Each test gets a
+brand-new scratch SQLite file built from identical seed logic every time, registers it in
+<code>DatabaseRegistry</code>, and deletes it in <code>[TearDown]</code> regardless of pass/fail. There is no
+shared file for a failed test to leave dirty, and no checked-in binary to drift or to manually
+regenerate when the schema changes.</p>
+<p><strong>Thoroughness (any test that exercises an entity's persistent lifecycle).</strong> Where a scenario
+adds, updates, or deletes a record, structure the test as a full round trip, not a single
+assertion:</p>
+<ol>
+<li>Query first — confirm the starting count is what's expected (0, or a known N from seeded
+   fixture/setup data).</li>
+<li>Add the record(s) — with a <strong>valid</strong> input, confirm success and re-query to confirm the
+   count increased by exactly the expected amount.</li>
+<li>Add/update with an <strong>invalid</strong> input (where the API has real validation to test) — confirm
+   the operation is rejected (exception, or whatever failure signal the API actually uses) and
+   that the record count/state is unchanged afterward. Skip this step for rows the tracking
+   doc already flags as having no validation seam (e.g. <code>Currency</code>'s silent-fallback case,
+   account-number truncation) — those get a test asserting the <em>actual</em> (non-rejecting)
+   behavior instead, so the test documents reality rather than an aspirational contract.</li>
+<li>Update the record(s) — confirm the update took (re-query and check the changed field), not
+   just that no exception was thrown.</li>
+<li>Query with a filter/condition designed against known seeded data to return an <strong>exact</strong>
+   count (e.g. "exactly 3 categories under this parent," "exactly 1 payee matching this
+   alias") — not a loose <code>Is.Not.Empty</code>/<code>Is.GreaterThan(0)</code> check. Exact counts catch a query
+   silently over- or under-matching in a way a non-empty check would miss.</li>
+<li>Delete the record(s) — re-query and confirm the count returns to 0 (or the pre-test
+   baseline), proving delete actually removed data rather than just not throwing.</li>
+</ol>
+<p>This is the shape for any test touching persistent entities (Categories, Payees, Aliases,
+Splits, Currencies, etc.) in both business-layer tests (within one fresh in-memory <code>MyMoney</code>)
+and FlaUI tests (against one scratch fixture copy). Read-only/pure-computation scenarios
+(<code>AutoCategorization</code>, <code>QuickFilterParser</code>) don't need this shape — they already fit the
+existing input-in/value-out unit test pattern.</p>
+<p><strong>Code-path-driven design for transformation/generation APIs.</strong> The CRUD-lifecycle shape
+above fits entity persistence (Categories, Payees, Splits, ...). It doesn't fit APIs whose job
+is producing an artifact or running a pipeline — exporters (XML/CSV/PDF/TXF), importers, Ofx
+parsing/download. For these, before writing tests:</p>
+<ol>
+<li>Read the API's actual implementation and enumerate its distinct code paths: one per output
+   format/success branch, one per validation/error condition, one per malformed-input handling
+   branch. The tracking doc's scenario rows are the starting point, not the full list — reading
+   the source usually surfaces branches no scenario description mentions (e.g. an exporter's
+   empty-input special case, or a specific <code>OfxErrorCode</code> dispatch branch).</li>
+<li>Design one test per enumerated branch, with input data deliberately shaped to hit that exact
+   branch — not input reused loosely across multiple "similar" tests.</li>
+<li>Assert precisely: for a success branch, that the produced artifact is actually well-formed
+   for that path (valid XML shape, correct TXF record format, expected byte content) — not just
+   "no exception was thrown." For an error branch, assert the specific error/exception
+   type/error code expected, not a generic <code>Assert.Throws&lt;Exception&gt;</code>.</li>
+<li>Since <code>coverlet.collector</code> is already referenced in <code>UnitTests.csproj</code>, spot-check with
+   <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --collect:"XPlat Code Coverage"</code> after a
+   batch of tests for one API — not a hard gate, but a cheap way to catch a branch that was
+   <em>designed</em> to be hit but whose test data didn't actually reach it.</li>
+</ol>
+<p><strong>FlaUI test session lifecycle (shared app instance, per-test data isolation).</strong> Launching the
+WPF app is the expensive part (several seconds cold start); opening/closing a database within
+an already-running app is fast. So the app itself is launched once per section, not once per
+test, while each test still gets its own scratch fixture copy:</p>
+<ul>
+<li>All of Basics' FlaUI test classes live in a new namespace (e.g. <code>Walkabout.UITests.Basics</code>),
+  separate from the existing <code>Walkabout.UITests.PayeeSelectionTests</code> so this doesn't touch or
+  risk that file.</li>
+<li>A <code>[SetUpFixture]</code> class in that namespace does <code>[OneTimeSetUp]</code> (launch the app once with
+  <code>/nosettings</code>, create the <code>UIA3Automation</code>, get the main window — before any test in the
+  namespace runs) and <code>[OneTimeTearDown]</code> (close the app, dispose automation — once, after
+  every test in the namespace has finished).</li>
+<li>Each individual <code>[Test]</code>'s own <code>[SetUp]</code>/<code>[TearDown]</code> handles per-test isolation within that
+  shared session: <code>[SetUp]</code> calls <code>BasicsFixtureBuilder.Build()</code>, saves it to a fresh scratch
+  path, registers it, opens it via File|Open against the already-running app; <code>[TearDown]</code>
+  closes the database (answering "don't save" to any prompt) and deletes the scratch file +
+  registry entry, so the next test starts from a clean "no database open" state without
+  relaunching the process.</li>
+</ul>
+<p>This generalizes past Basics without redesign — a later section's FlaUI test classes either
+join the same <code>[SetUpFixture]</code>-managed session or get their own namespace-scoped one, following
+the same shape.</p>
+<p><strong>Standard dialog-lifecycle scenarios (applied to every dialog, in addition to its specific
+scenarios).</strong> FlaUI has full visibility into the automation tree — what's in a control, what a
+dialog's title/state is, what a query returns before and after an action — so every dialog
+scenario gets these generic checks alongside its specific business scenario(s), not instead of
+them:</p>
+<ol>
+<li><strong>Cancel closes without side effects</strong> — open the dialog, enter data, click Cancel; re-query
+   the underlying state and assert it's identical to before the dialog opened.</li>
+<li><strong>Title-bar Close (X) behaves like Cancel</strong> — same as above, using the standard window Close
+   button instead of the dialog's own Cancel button.</li>
+<li><strong>OK/Save applies exactly what was entered</strong> — open the dialog, enter data, click OK/Save;
+   re-query and assert the state now matches exactly what was entered (this overlaps with each
+   subsection's specific scenario tests, which already cover the successful-save path in more
+   detail — the point of listing it here is to confirm the Cancel/Close tests above have a
+   contrasting "did apply" case to compare against, not to duplicate that coverage).</li>
+</ol>
+<p>Where the same dialog shape recurs (e.g. several dialogs in this catalog follow a simple
+enter-fields/OK-or-Cancel pattern), a shared helper method for the Cancel/Close checks is
+worth writing once and reusing, rather than rewriting the same three assertions per dialog.</p>
+<p><strong>Predicted results — source-derived expectations, not tautological self-checks.</strong> Every
+assertion's expected value must be known <em>before</em> the test runs, derived from reading the
+actual source and/or seed data — never observed from a run and then asserted as "correct"
+after the fact. This applies to every displayed value, not just simple fields: a chart's
+plotted series, a pie slice's proportion, a report's subtotal — if the source and the seed data
+are known, the exact expected number is knowable too.</p>
+<p>How the expected value is derived depends on whether a decoupled business-layer API already
+exists for that computation, and this distinction matters — getting it wrong reproduces a real
+bug this project already found and fixed (the final whole-branch review of the original
+business-layer migration caught <code>Invariant_CategoryTotalsReconcileWithTransactions</code> computing
+its "expected" value via the same code path it was supposed to be checking, so it could never
+fail even if the underlying calculation were wrong — fixed via a genuinely independent
+reimplementation, verified by mutation testing):</p>
+<ul>
+<li><strong>A decoupled API exists</strong> (most Basics scenarios, once each subsection's business-layer
+  tests land): call that API directly in the FlaUI test's arrange step against the same seed
+  data to compute the expected value, then assert the UI control shows exactly that. This is
+  legitimate, not tautological, because the API itself is independently unit-tested elsewhere
+  for correctness — the FlaUI test is specifically checking wiring ("does the UI correctly
+  reflect what an already-verified computation produced"), which is this whole effort's stated
+  purpose for FlaUI tests.</li>
+<li><strong>No decoupled API exists yet</strong> (this is most of Charts, per the tracking doc's own finding
+  that pie/history-chart aggregation lives in private methods baked into WPF <code>UserControl</code>
+  subclasses) — the expected value must be computed independently in the test itself (e.g. a
+  plain LINQ sum over the known seeded transactions, written fresh, not by calling into
+  <code>CategoryChart</code>'s own private aggregation) before that section's tests are written. Calling
+  the same UI-embedded method to "check itself" is the exact anti-pattern the incident above
+  already showed doesn't catch real bugs.</li>
+</ul>
+<p><strong>Deferred, not part of this pass:</strong> a randomized/property-based approach (random sequence of
+add/update/delete/query operations against a dynamically-tracked shadow model of "what the
+state should be," ending in a full reset) is a legitimate but materially heavier technique —
+a model-based stress-test harness, not a scenario test. Logged under Open Questions below as a
+possible future addition, not built into these ~35 scenario tests.</p>
+<h2 id="process-applies-to-every-subsection-in-every-section">Process (applies to every subsection, in every section)<a class="headerlink" href="#process-applies-to-every-subsection-in-every-section" title="Permanent link">#</a></h2>
+<ol>
+<li><strong>Business-layer tests first.</strong> For each scenario in the subsection whose row names a real,
+   already-reachable API: write a unit test in <code>Source/WPF/UnitTests/</code>, following the existing
+   pattern (<code>MyMoney.TestSupport</code>'s <code>MockDatabase</code>, the <code>FakeBusinessLayerUiCallback</code>/
+   <code>FakeImportProgressReporter</code> fakes already defined in <code>QifImporterTests.cs</code>/
+   <code>DatabaseLifecycleTests.cs</code> where a callback is needed). No new mocking infrastructure.</li>
+<li><strong>Run business-layer tests.</strong> <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter
+   "..."</code> — safe to run unattended. Confirm green before moving on.</li>
+<li><strong>FlaUI test second</strong>, only for scenarios whose business-layer half is now covered (or
+   never had one — e.g. a pure UI toggle). Follow <code>PayeeSelectionTests.cs</code>'s conventions:
+   <code>FlaUI.Core</code>/<code>FlaUI.UIA3</code>, NUnit, a fresh scratch database built by <code>BasicsFixtureBuilder</code>
+   per test (see "Test content conventions" below — never a checked-in binary), <code>DatabaseRegistry</code>
+   registration/cleanup, <code>[TearDown]</code> cleanup.</li>
+<li><strong>Run the FlaUI test.</strong> Fully automated, self-driving — the test code performs every
+   interaction (<code>Keyboard.Type</code>, clicks, dialog dismissal) and every assertion (reading control
+   values via UI Automation) itself, no human present or watching. The very first run of the
+   very first Basics FlaUI test happens with the user present to bootstrap the environment (see
+   "FlaUI execution environment" below); every run after that, I invoke <code>dotnet test
+   Source/WPF/UITests/UITests.csproj --filter "..."</code> myself with no assistance needed.</li>
+<li><strong>Update the tracking doc's Status column</strong> for every scenario touched in this subsection —
+   <code>Written</code> with the test file name, or <code>Passing</code> with today's date once the live FlaUI run
+   confirms it, or <code>Business-layer gap (deferred — issue #NN)</code> / <code>Not automatable in this
+   environment</code> for anything skipped.</li>
+<li><strong>Move to the next subsection.</strong></li>
+</ol>
+<p>At the end of all subsections in a section: a short written retro (in chat, not a new doc) —
+did any row's description turn out wrong once actually tested, did new gaps surface that
+weren't visible from static reading, does the doc need re-splitting anywhere. Decide the next
+section from there.</p>
+<h2 id="basics-subsection-breakdown-and-fixture-plan">Basics: subsection breakdown and fixture plan<a class="headerlink" href="#basics-subsection-breakdown-and-fixture-plan" title="Permanent link">#</a></h2>
+<h3 id="shared-fixture-builder">Shared fixture builder<a class="headerlink" href="#shared-fixture-builder" title="Permanent link">#</a></h3>
+<p>Not a checked-in binary — a shared, plain C# builder method (e.g.
+<code>BasicsFixtureBuilder.Build()</code>) living in <code>Source/WPF/MyMoney.TestSupport/</code> (WPF-free,
+already referenced by <code>UnitTests</code>; <code>UITests.csproj</code> needs one new <code>ProjectReference</code> to it,
+which it doesn't have today) that constructs a <code>MyMoney</code> graph purely via business-layer API
+calls — the same shape as the existing <code>Source/WPF/UITests/FixtureGenerator.cs</code>
+(<code>money.Payees.AddPayee</code>, <code>money.Accounts.AddAccount</code>, etc.), generalized from a one-off
+<code>[Explicit]</code> regeneration utility into a function called fresh on every test run. This is the
+Test Data Builder / Object Mother pattern (Meszaros): one place that knows how to construct
+known-valid domain objects, reused everywhere instead of each test hand-rolling setup, and
+reused <em>across both test layers</em> so "similar strategy, similar results" holds literally:</p>
+<ul>
+<li><strong>Business-layer tests</strong> call <code>BasicsFixtureBuilder.Build()</code> (or a narrower per-subsection
+  builder method where a test only needs a slice of it) to get an in-memory <code>MyMoney</code> directly
+  — no file I/O, matching the existing convention.</li>
+<li><strong>FlaUI tests</strong> call the same builder, then <code>SqliteDatabase.Save()</code> the result to a brand-new
+  scratch temp path at the start of every test (see the isolation discussion above) — nuke and
+  pave via code, not via copying a file.</li>
+</ul>
+<p>The builder seeds enough data to cover most Basics scenarios in one pass:</p>
+<ul>
+<li>3+ categories including a parent/child pair (<code>Fun:Movies</code>, <code>Fun:Videos</code>) and one category
+  with existing transactions, for the Categories subsection's rename/delete/merge scenarios.</li>
+<li>2+ payees with messy raw names suitable for rename/alias scenarios, plus one existing
+  <code>Alias</code> row and one narrow-alias-subsumption setup (2-3 narrow aliases for the same payee,
+  for the regex-consolidation scenario).</li>
+<li>A transaction with an out-of-balance split, and a linked transfer pair (one side reconciled,
+  one not), for Splits &amp; Transfers.</li>
+<li>Two near-duplicate transactions (same amount/date, different FID) for Merging Duplicate
+  Transactions.</li>
+<li>A non-USD currency row and a security with stock-split history, for Currencies &amp; Securities
+  (cost-basis-dependent scenarios reuse <code>CostBasisTests</code>' fixtures directly instead —
+  business-layer only, no FlaUI needed there per the tracking doc).</li>
+<li>Payee history at varying amounts/dates for Auto-Categorization's suggestion scenarios
+  (business-layer only — <code>AutoCategorization</code> is WPF-free, no FlaUI test needed for the
+  algorithm itself, only if a dialog visibly surfaces the suggestion).</li>
+<li>A mix of matching/non-matching transactions for Quick Search literal/boolean scenarios
+  (business-layer only — <code>QuickFilterParser</code> is WPF-free; a FlaUI test only for confirming the
+  Quick Search box itself filters the grid).</li>
+<li>One attachment on an existing transaction, for the attachment-delete scenario (add-via-
+  drag/drop and scan/crop are skipped per non-goals above).</li>
+</ul>
+<p>Individual business-layer tests are free to use only the slice of <code>BasicsFixtureBuilder</code>'s
+output they need, or build even narrower ad hoc <code>MyMoney</code> state directly (as
+<code>ExportersTests.cs</code>, etc. already do) — the shared builder is there for reuse where it helps,
+not a mandate to route every test through the full Basics graph when a smaller setup is
+clearer.</p>
+<p>FlaUI tests never touch a checked-in fixture file at all — each test calls the builder and
+saves a brand-new scratch SQLite file at the start of the test, registers it in
+<code>DatabaseRegistry</code>, and deletes the scratch file + registry entry in <code>[TearDown]</code> (see "Test
+content conventions" above).</p>
+<h3 id="subsections-in-implementation-order">Subsections, in implementation order<a class="headerlink" href="#subsections-in-implementation-order" title="Permanent link">#</a></h3>
+<ol>
+<li><strong>Auto-Categorization</strong> — business-layer only (<code>AutoCategorization.AutoCategoryMatch</code>,
+   <code>KNearestNeighbor&lt;T&gt;</code>), zero FlaUI needed per the tracking doc (pure logic feeding a text
+   field, no distinct dialog). Cheapest possible first subsection to prove the process.</li>
+<li><strong>Quick Search &amp; Advanced Queries</strong> — mostly business-layer (<code>QuickFilterParser</code>,
+   <code>MyMoney.ExecuteQuery</code>); one thin FlaUI test that types into the Quick Search box and
+   confirms the grid filters.</li>
+<li><strong>Categories</strong> — business-layer gaps: <code>GetOrCreateCategory</code> sub-category path, <code>OnDelete</code>,
+   <code>ReCategorize</code>. FlaUI: rename-collision rejection, delete-with-redirect, drag/drop
+   move/merge.</li>
+<li><strong>Currencies &amp; Securities</strong> — business-layer: <code>AddCurrency</code>/<code>GetCultureForCurrency</code>
+   (including the invalid-code fallback case), <code>RemoveCurrency</code>. FlaUI: add/remove a currency
+   row. Stock-split/cost-basis rows are already covered by <code>CostBasisTests</code> — skip re-testing.</li>
+<li><strong>Payees &amp; Aliases</strong> — business-layer: <code>ApplyAlias</code>/<code>FindAliasMatches</code>, <code>AddAlias</code>,
+   <code>FindSubsumedAliases</code> (the regex-consolidation case — flagged in the tracking doc as
+   entirely unverified today, worth prioritizing). FlaUI: rename dialog, regex consolidation
+   dialog's conflict warning.</li>
+<li><strong>Splits &amp; Transfers</strong> — business-layer: <code>Splits.Unassigned</code>/<code>HasUnassigned</code>,
+   <code>MyMoney.Transfer</code>/<code>Rebalance</code>, <code>RemoveTransfer</code> (both allowed and reconciled-blocked
+   cases — the blocked case's enforcement point needs tracing first, per the tracking doc's
+   "not fully verified" note). FlaUI: F6 balance, transfer-by-typing, F12 link.</li>
+<li><strong>Merging Duplicate Transactions</strong> — business-layer: <code>FindPotentialDuplicate</code>,
+   <code>Transaction.Merge</code> (field-preserving merge, attachment carry-over). FlaUI: merge button,
+   not-a-duplicate dismissal.</li>
+<li><strong>Attachments</strong> — business-layer: none available without extraction (<code>AttachmentManager</code>
+   isn't in <code>MyMoney.Business</code>) — file a follow-up issue for the extraction, same as the
+   original migration's deferred items. FlaUI: attachment-delete only, against the one
+   pre-seeded attachment in the fixture. Add/drag-drop and scan/crop: skipped per non-goals.</li>
+<li><strong>Sample Data</strong> — business-layer already covered (<code>SampleDataRegressionTests</code>,
+   <code>SampleDataLoaderTests</code> from the original migration) — only new work is a thin FlaUI test
+   for the Help-menu dialog wiring (<code>SampleDatabaseOptions</code>).</li>
+</ol>
+<p>This order runs cheapest/highest-confidence first (pure-logic subsections with no FlaUI at
+all) and ends on the two subsections most likely to surface real gaps (Attachments' missing
+extraction, Sample Data's thin remaining wiring).</p>
+<h2 id="repeatable-process-for-later-sections-accounts-charts-reports">Repeatable process for later sections (Accounts, Charts, Reports)<a class="headerlink" href="#repeatable-process-for-later-sections-accounts-charts-reports" title="Permanent link">#</a></h2>
+<p>Each future section gets, before starting:</p>
+<ol>
+<li>A quick scoping pass identifying its subsections' implementation order (cheapest/most
+   pure-logic first, same heuristic as above) and any shared-fixture needs — a few sentences
+   in chat, not a new design doc, unless a section's shape turns out to need one (e.g. Reports'
+   <code>IReportWriter</code>-interleaved architecture may need its own short design discussion once
+   reached, since none of its scenarios currently name a decoupled API to test at all).</li>
+<li>Confirmation that the lightweight (non-SDD) process from this spec still fits — if a later
+   section's scope turns out to need real extraction work as a prerequisite (e.g. Reports
+   needs a new query/aggregation API per the original migration's own non-goals), that's a
+   signal to stop and brainstorm that extraction separately before resuming test-writing.</li>
+</ol>
+<p>Otherwise, the process itself (business-layer test → run → FlaUI test → run live → update doc
+Status → next subsection → end-of-section retro) carries over unchanged.</p>
+<h2 id="flaui-execution-environment">FlaUI execution environment<a class="headerlink" href="#flaui-execution-environment" title="Permanent link">#</a></h2>
+<p>FlaUI tests are fully automated — no human clicks, types, or watches during a run — and use
+FlaUI's own UI Automation introspection (reading control values, confirming a dialog's
+presence/absence, confirming a button's effect on the underlying data) to make real assertions,
+not just "no exception was thrown."</p>
+<p><strong>Bootstrapping (one time only):</strong> the first FlaUI test run happens with the user present, to
+work through any first-run environment issues (window focus/<code>SetForeground</code> behavior,
+<code>DatabaseRegistry</code> paths, an unexpected dialog the test doesn't yet know how to handle). This
+is a one-time debugging session, not ongoing involvement — an earlier whole-solution <code>dotnet
+test</code> run did hang once during unattended dispatch (the app opened a dialog nothing answered),
+but that was a different incident's environment and hasn't been re-verified for this specific
+setup; rather than assume it's a hard wall here too, the first joint run establishes whether
+it's a real constraint or something fixable in the test code (e.g. handling a dialog the test
+didn't anticipate).</p>
+<p><strong>After bootstrapping:</strong> I run <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "..."</code>
+myself, autonomously, with no human interaction required — same as running the business-layer
+suite. If a genuine environment obstacle surfaces during bootstrapping that can't be fixed in
+the test code, we'll revisit execution options at that point rather than pre-planning around a
+constraint that hasn't actually been confirmed for this setup.</p>
+<h2 id="testingtooling-notes">Testing/tooling notes<a class="headerlink" href="#testingtooling-notes" title="Permanent link">#</a></h2>
+<ul>
+<li>Business-layer tests: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter
+  "Name=TestMethodName"</code> or a class-level filter — never the whole-solution <code>dotnet test
+  Source/WPF/MyMoney.sln</code> (pulls in FlaUI <code>UITests</code>/<code>ScenarioTest</code>, hangs unattended).</li>
+<li>FlaUI tests: fully self-driving, no human interaction during the run — see "FlaUI execution
+  environment" above for where that run actually happens.</li>
+<li>No new mocking framework, no new test-support abstractions — reuse what Task 10 and the
+  original migration already established.</li>
+</ul>
+<h2 id="test-input-data-for-importersparsers-synthetic-vs-real-world-samples">Test input data for importers/parsers (synthetic vs. real-world samples)<a class="headerlink" href="#test-input-data-for-importersparsers-synthetic-vs-real-world-samples" title="Permanent link">#</a></h2>
+<p>Doesn't block Basics (Importers/CSV/OFX live in Accounts, per the tracking doc's section
+breakdown) but is a general strategy decision worth settling now, before Accounts' CSV
+import/OFX download subsections need it, and it directly extends the "code-path-driven design"
+convention above — for an importer/parser, the "input shaped to hit a branch" <em>is</em> a file.</p>
+<p><strong>Synthetic/controlled data — the default, already this codebase's convention.</strong>
+<code>CsvTransactionImporterTests.cs</code> already builds input via a <code>CreateCsv(params string[][] rows)</code>
+helper; <code>OfxObjectModelTests.cs</code> already builds OFX content as inline <code>const string</code> XML
+literals. Both give exactly-known expected results by construction — the same principle as
+<code>BasicsFixtureBuilder</code>, applied to file-shaped input instead of a <code>MyMoney</code> graph. This stays
+the primary approach for branch-coverage tests: one minimal, purpose-built input per code path,
+not a large realistic-looking file that happens to also exercise that path.</p>
+<p><strong>Real-world sample files — a secondary, smaller set of realism/robustness tests.</strong> Bank-
+generated OFX/QFX/CSV files have institution-specific quirks (odd encodings, nonstandard
+fields, malformed-but-tolerated responses) that hand-crafted synthetic data won't think to
+include. If used:</p>
+<ul>
+<li><strong>Never check in a real, unmodified export.</strong> Any real file must be fully anonymized first —
+  account numbers, names, balances, dates shifted/scrubbed — same discipline already applied to
+  this project's SQL Server credentials. Prefer sourcing already-synthetic sample files (the
+  OFX spec itself ships example files) over starting from a real personal export at all.</li>
+<li>Store anonymized samples as checked-in fixtures (e.g.
+  <code>Source/WPF/UnitTests/Fixtures/RealWorldSamples/*.ofx</code>/<code>.csv</code>), read via <code>File.ReadAllText</code>,
+  clearly separated from the synthetic branch-coverage tests.</li>
+<li>Assert more loosely than the synthetic tests do — "parses without throwing," "produces the
+  expected transaction count," not exact byte-for-byte output — since a real-world file's exact
+  shape isn't something the test author fully controls, only observes.</li>
+<li>If you have real exports you'd like used this way, they need your own review/scrub before
+  handing them over — not something to source or anonymize on your behalf without you looking
+  at the content first.</li>
+</ul>
+<p>This is a small supplementary set of tests, not a replacement for the synthetic/branch-coverage
+approach, and gets scoped in detail when Accounts' CSV import/OFX subsections are reached.</p>
+<h2 id="open-questions-future-work">Open questions / future work<a class="headerlink" href="#open-questions-future-work" title="Permanent link">#</a></h2>
+<ul>
+<li>The exact enforcement point for "can't delete a transaction whose transfer partner is
+  reconciled" and "can't move a Reconciled transaction" hasn't been traced to a specific line
+  yet (flagged in the tracking doc as "not fully verified") — resolving this is part of writing
+  the Splits &amp; Transfers business-layer tests, not a blocker to starting.</li>
+<li>Attachments' <code>AttachmentManager</code> extraction is deferred to a follow-up issue, filed once this
+  section reaches that subsection (not filed speculatively now).</li>
+<li>A randomized/property-based test harness (random add/update/delete/query sequences against a
+  dynamically-tracked shadow model of expected state, ending in a full reset to a known state)
+  was considered as a way to stress-test persistence beyond fixed scenarios. Legitimate future
+  idea, but a materially heavier effort than scenario testing — not part of this pass. Worth
+  revisiting once several sections' worth of scenario tests exist and a stress-test layer on
+  top of them would add real value beyond what the scenario tests already catch.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,3379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-17-persistence-concurrency-phase2c/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Persistence Concurrency — Phase 2c (SQL Server SaveOne/SaveBatch/SaveTransfer) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Persistence Concurrency \u2014 Phase 2c (SQL Server SaveOne/SaveBatch/SaveTransfer) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "What\u0027s next", url: "#whats-next" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="persistence-concurrency-phase-2c-sql-server-saveonesavebatchsavetransfer-implementation-plan">Persistence Concurrency — Phase 2c (SQL Server SaveOne/SaveBatch/SaveTransfer) Implementation Plan<a class="headerlink" href="#persistence-concurrency-phase-2c-sql-server-saveonesavebatchsavetransfer-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Give <code>SqlServerStoredProcDatabase</code> a real <code>SaveOne</code>/<code>SaveBatch</code>/<code>SaveTransfer</code>
+implementation covering all 11 <code>IAggregateRoot</code> types, so the already-shared
+<code>DatabaseContractTests</code> suite (currently ~54 failing tests against <code>SqlServerDatabaseContractTests</code>)
+passes unmodified — closing out full cross-engine parity (<code>MockDatabase</code>, <code>SqliteDatabase</code>,
+<code>SqlServerStoredProcDatabase</code> all implementing the same contract identically).</p>
+<p><strong>Architecture:</strong> <code>SqlServerStoredProcDatabase</code> is stored-procedure-only (no direct table grants for
+<code>MyMoneyUser</code>/<code>MyMoneyTest</code>), unlike <code>SqliteDatabase</code>'s direct parameterized SQL. Each entity gets a
+new, additive <code>&lt;Table&gt;_SaveBatch</code> stored procedure that takes a whole batch as a Table-Valued
+Parameter (TVP) and does the version-checked insert/update/delete as set-based T-SQL inside its own
+<code>BEGIN TRANSACTION</code>/<code>COMMIT</code>/<code>ROLLBACK</code>. C# builds one <code>DataTable</code> per entity type in the batch and
+calls that entity's proc once — no per-row round trips, and for the common single-type-group case,
+no explicit client-side <code>SqlTransaction</code> at all (the proc owns atomicity server-side). A new,
+distinctly-named <code>Version BIGINT</code> column (not SQL Server's existing, unused, native <code>RowVersion
+timestamp</code> column — see Global Constraints) is the optimistic-concurrency mechanism, matching
+<code>SqliteDatabase</code>'s <code>Version</code> column exactly.</p>
+<p><strong>Tech Stack:</strong> .NET 10 (<code>net10.0-windows7.0</code>), <code>Microsoft.Data.SqlClient</code>, NUnit 4.6.1, SQL Server
+(live shared instance at <code>Redmond</code>, database <code>MyMoney</code>).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-17-persistence-concurrency-phase2c-design.md</code> (as amended
+by the correction committed at <code>ca200e3</code>). Builds on <code>docs/superpowers/plans/
+2026-09-16-persistence-concurrency-phase2b.md</code> (SQLite's proven pattern) and its entity-extension/
+RentBuilding/Transaction follow-ups (merged, no separate plan docs — executed directly from
+Phase 2b's established pattern).</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Additive only: <code>Save(MyMoney)</code>, every existing <code>UpdateXxx</code>/<code>ReadXxx</code> override, and every existing
+  <code>_Insert</code>/<code>_Update</code>/<code>_Delete</code>/<code>_SelectAll</code> stored proc are untouched. The new <code>_SaveBatch</code> procs and
+  the new <code>Version</code> column are a parallel, additive surface.</li>
+<li><strong>The new application-managed concurrency column is named <code>Version</code>, not <code>RowVersion</code>.</strong> Every one
+  of the 14 relevant tables already has an existing, unused <code>RowVersion timestamp NOT NULL</code> column
+  (SQL Server's native rowversion type, confirmed live against Redmond as <code>MyMoneyAdmin</code>) — a
+  different name is required to avoid colliding with it. Do not attempt to reuse or repurpose the
+  existing <code>RowVersion</code> column; leave it alone.</li>
+<li>Live schema reference (queried live against Redmond as <code>MyMoneyAdmin</code> — <code>MyMoneyUser</code>/<code>MyMoneyTest</code>
+  cannot see <code>INFORMATION_SCHEMA.COLUMNS</code> for tables they have no direct grant on, so always use the
+  admin connection for any future live schema check against this database):</li>
+</ul>
+<p><code>Accounts: Id int NOT NULL, AccountId nchar(20), OfxAccountId nvarchar(50), Name nvarchar(80) NOT NULL,
+    Description nvarchar(255), Type int NOT NULL, OpeningBalance money, Currency nchar(3),
+    OnlineAccount int, WebSite nvarchar(512), ReconcileWarning int, LastSync datetime,
+    SyncGuid uniqueidentifier, Flags int, LastBalance datetime, CategoryIdForPrincipal int,
+    CategoryIdForInterest int, RowVersion timestamp NOT NULL
+  Aliases: Id int NOT NULL, Pattern nvarchar(255) NOT NULL, Flags int NOT NULL, Payee int NOT NULL,
+    RowVersion timestamp NOT NULL
+  Categories: Id int NOT NULL, ParentId int, Name nvarchar(80) NOT NULL, Description nvarchar(255),
+    Type int NOT NULL, Color nchar(10), Budget money, Balance money, Frequency int, TaxRefNum int,
+    RowVersion timestamp NOT NULL
+  Currencies: Id int NOT NULL, Symbol nchar(20) NOT NULL, CultureCode nvarchar(80),
+    Name nvarchar(80) NOT NULL, Ratio money, LastRatio money, RowVersion timestamp NOT NULL
+  Investments: Id bigint NOT NULL, Security int, UnitPrice money NOT NULL, Units money,
+    Commission money, MarkUpDown money, Taxes money, Fees money, Load money,
+    InvestmentType int NOT NULL, TradeType int, TaxExempt bit, Withholding money,
+    RowVersion timestamp NOT NULL
+  LoanPayments: Id int NOT NULL, AccountId int NOT NULL, Date datetime NOT NULL, Principal money,
+    Interest money, Memo nvarchar(255), RowVersion timestamp NOT NULL
+  OnlineAccounts: Id int NOT NULL, Name nvarchar(80) NOT NULL, Institution nvarchar(80),
+    OFX nvarchar(255), OfxVersion nchar(10), FID nvarchar(50), UserId nchar(20),
+    Password nvarchar(50), UserCred1 nvarchar(200), UserCred2 nvarchar(200), AuthToken nvarchar(200),
+    BankId nvarchar(50), BranchId nvarchar(50), BrokerId nvarchar(50), LogoUrl nvarchar(1000),
+    AppId nchar(10), AppVersion nchar(10), ClientUid nchar(36), AccessKey nchar(36),
+    UserKey nvarchar(64), UserKeyExpireDate datetime, RowVersion timestamp NOT NULL
+  Payees: Id int NOT NULL, Name nvarchar(255) NOT NULL, RowVersion timestamp NOT NULL
+  RentBuildings: Id int NOT NULL, Name nvarchar(255) NOT NULL, Address nvarchar(255),
+    PurchasedDate datetime, PurchasedPrice money, LandValue money, EstimatedValue money,
+    OwnershipName1 nvarchar(255), OwnershipName2 nvarchar(255), OwnershipPercentage1 money,
+    OwnershipPercentage2 money, Note nvarchar(255), CategoryForTaxes int, CategoryForIncome int,
+    CategoryForInterest int, CategoryForRepairs int, CategoryForMaintenance int,
+    CategoryForManagement int, RowVersion timestamp NOT NULL
+  RentUnits: Id int NOT NULL, Building int NOT NULL, Name nvarchar(255) NOT NULL, Renter nvarchar(255),
+    Note nvarchar(255), RowVersion timestamp NOT NULL
+  Securities: Id int NOT NULL, Name nvarchar(80) NOT NULL, Symbol nchar(20) NOT NULL, Price money,
+    LastPrice money, CUSPID nchar(20), SECURITYTYPE int, TAXABLE tinyint, PriceDate datetime,
+    RowVersion timestamp NOT NULL
+  Splits: Transaction bigint NOT NULL, Id int NOT NULL, Category int, Payee int, Amount money NOT NULL,
+    Transfer bigint, Memo nvarchar(255), Flags int, BudgetBalanceDate datetime,
+    RowVersion timestamp NOT NULL
+  StockSplits: Id bigint NOT NULL, Date datetime NOT NULL, Security int, Numerator money NOT NULL,
+    Denominator money NOT NULL, RowVersion timestamp NOT NULL
+  Transactions: Id bigint NOT NULL, Account int NOT NULL, Date datetime NOT NULL, Status int,
+    Payee int, OriginalPayee nvarchar(255), Category int, Memo nvarchar(255), Number nchar(10),
+    ReconciledDate datetime, BudgetBalanceDate datetime, Transfer bigint, FITID nchar(40),
+    Flags int NOT NULL, Amount money NOT NULL, SalesTax money, TransferSplit int, MergeDate datetime,
+    RowVersion timestamp NOT NULL</code>
+- <code>IAggregateRoot.Id</code> is <code>long</code> on every entity (explicit interface implementation over each
+  concrete class's own <code>int Id</code>, except <code>Transaction</code>/<code>StockSplit</code> whose own <code>Id</code> is already <code>long</code>).
+  TVP <code>Id</code> columns use the table's real underlying type (<code>int</code> or <code>bigint</code> matching the schema
+  above); C# dictionaries keying by <code>IAggregateRoot.Id</code> use <code>long</code>.
+- Every task must leave <code>dotnet build Source/WPF/MyMoney.sln</code> at 0 errors and
+  <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> at the established baseline (SQL-Server-env-gated
+  <code>MyMoney.TestSupport</code> failures when the SQL Server env vars aren't set, 1 <code>ScenarioTest</code> FlaUI
+  flake — verify no <em>new</em> failures). Each task also runs the live-SQL-Server-specific command below
+  (requires <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>/<code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>/
+  <code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE=1</code> set — see <code>docs/dev/index.md</code>'s "Running the SQL Server
+  contract tests"):
+  <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+- The schema migration (Task 1) and every new stored proc/type (every task's SQL file) run once, by
+  hand, as <code>MyMoneyAdmin</code> against the live shared Redmond database — this is a real, shared resource
+  other work depends on, not a disposable test fixture. No app code runs migrations implicitly.</p>
+<hr />
+<h3 id="task-1-schema-migration-add-the-version-column-to-all-11-iaggregateroot-tables">Task 1: Schema migration — add the <code>Version</code> column to all 11 <code>IAggregateRoot</code> tables<a class="headerlink" href="#task-1-schema-migration-add-the-version-column-to-all-11-iaggregateroot-tables" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Data/SqlScripts/Migrations/2026-09-17-add-version-column.sql</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing — this is pure DDL, run by hand.
+- Produces: a <code>Version BIGINT NOT NULL DEFAULT 1</code> column on <code>Categories</code>, <code>Currencies</code>,
+  <code>OnlineAccounts</code>, <code>Accounts</code>, <code>Payees</code>, <code>Aliases</code>, <code>Securities</code>, <code>StockSplits</code>, <code>LoanPayments</code>,
+  <code>RentBuildings</code>, <code>Transactions</code> — every later task's <code>_SaveBatch</code> proc reads/writes this column by
+  this exact name.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the migration script</strong></li>
+</ul>
+<pre><code class="language-sql">-- 2026-09-17-add-version-column.sql
+-- Run once, by hand, as the MyMoneyAdmin login against the MyMoney database.
+-- Adds the application-managed optimistic-concurrency column persistence-concurrency Phase 2c
+-- needs. Named &quot;Version&quot;, not &quot;RowVersion&quot;: every one of these tables already has an unused
+-- native RowVersion timestamp column (SQL Server's own auto-incrementing binary(8) type), which
+-- can't be used for this purpose - it's a single counter shared by the whole database, not a
+-- per-row counter, so it can never satisfy &quot;a fresh row's version is 1&quot; (see
+-- docs/superpowers/specs/2026-09-17-persistence-concurrency-phase2c-design.md). This column is
+-- purely additive: nothing existing reads or writes it.
+
+USE MyMoney;
+GO
+
+ALTER TABLE dbo.Categories ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Currencies ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.OnlineAccounts ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Accounts ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Payees ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Aliases ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Securities ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.StockSplits ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.LoanPayments ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.RentBuildings ADD Version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Transactions ADD Version BIGINT NOT NULL DEFAULT 1;
+GO
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run it against Redmond as MyMoneyAdmin</strong></li>
+</ul>
+<pre><code class="language-powershell">$creds = Get-Content &quot;$env:USERPROFILE\.secrets\MyMoney\dataengine.credentials.json&quot; | ConvertFrom-Json
+$env:SQLCMDPASSWORD = $creds.MyMoneyAdmin.Password
+sqlcmd -S Redmond -d MyMoney -U $creds.MyMoneyAdmin.UserId -C -i &quot;Source/WPF/MyMoney.Data/SqlScripts/Migrations/2026-09-17-add-version-column.sql&quot;
+</code></pre>
+<p>Expected: no errors, no output other than SQL Server's own batch-completion messages.</p>
+<ul>
+<li>[ ] <strong>Step 3: Verify the column exists with the right shape</strong></li>
+</ul>
+<pre><code class="language-powershell">$env:SQLCMDPASSWORD = $creds.MyMoneyAdmin.Password
+sqlcmd -S Redmond -d MyMoney -U $creds.MyMoneyAdmin.UserId -C -Q &quot;SELECT TABLE_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME = N'Version' ORDER BY TABLE_NAME&quot;
+</code></pre>
+<p>Expected: 11 rows, one per table listed above, each <code>bigint</code>, <code>NO</code> (not nullable), and a default
+expression containing <code>1</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit the migration script</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Migrations/2026-09-17-add-version-column.sql
+git commit -m &quot;Add Version column migration for Phase 2c (run manually against Redmond)&quot;
+</code></pre>
+<p>Note: this commit records the script for reproducibility (e.g. re-running against a future restored
+copy of the database) — it does not re-run the migration; Step 2 already applied it to the live
+database directly.</p>
+<hr />
+<h3 id="task-2-category-establishes-the-shared-pattern-tvp-proc-c-dispatch-infrastructure">Task 2: <code>Category</code> — establishes the shared pattern (TVP, proc, C# dispatch infrastructure)<a class="headerlink" href="#task-2-category-establishes-the-shared-pattern-tvp-proc-c-dispatch-infrastructure" title="Permanent link">#</a></h3>
+<p>This is the pattern every later entity task repeats. It's written in full detail; later tasks are
+terser because they reuse <code>ExecuteSaveBatchProc</code> (defined here) verbatim.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql</code> (new TYPE, new proc,
+  new grants, appended)
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (new <code>SaveOne</code>/<code>SaveBatch</code>
+  overrides, new shared <code>ExecuteSaveBatchProc</code> helper, new <code>SaveCategoryBatch</code>/<code>NewCategoryRowTable</code>,
+  <code>ReadCategories</code> extended to hydrate <code>RowVersion</code>)
+- Test: <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs</code> (no new tests added here —
+  the shared <code>DatabaseContractTests</code> suite already covers <code>Category</code>; this task just needs it to pass)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IAggregateRoot</code>, <code>ConcurrencyConflictException(PersistentObject, long, long)</code> (throws if
+  <code>root</code> is null internally via <code>root.GetType()</code> — always resolve a real root before throwing),
+  <code>PersistentObject.RowVersion</code>/<code>IsInserted</code>/<code>IsChanged</code>/<code>IsDeleted</code>/<code>OnUpdated()</code>,
+  <code>PersistentContainer.RemoveChild(PersistentObject, bool)</code>.
+- Produces: <code>SqlServerStoredProcDatabase.ExecuteSaveBatchProc(SqlConnection, SqlTransaction,
+  string procName, (string ParamName, string TvpTypeName, DataTable Rows)[] tvpParameters,
+  Dictionary&lt;long, PersistentObject&gt; rootsById, Action&lt;long, long&gt; applyNewVersion)</code> — every later
+  entity task's <code>SaveXxxBatch</code> method calls this by this exact name/signature. <code>SaveBatch</code>'s dispatch
+  structure (a <code>Type firstType = list[0].GetType()</code> check, <code>if (firstType == typeof(Category)) { ... }
+  else { base.SaveBatch(list); return; }</code>) is what later tasks each add one more <code>else if</code> branch to.</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm the tests are currently failing for the right reason</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+(with the SQL Server env vars set — see Global Constraints)
+Expected: FAIL — <code>SaveOne_NewCategory_PersistsAndSetsRowVersionToOne</code>,
+<code>SaveOne_UpdateCategoryAfterReload_IncrementsRowVersion</code>,
+<code>SaveOne_StaleCategoryRowVersion_ThrowsConcurrencyConflictException</code>,
+<code>SaveOne_DeleteCategory_RemovesRowFromDatabaseAndContainer</code> all fail with
+<code>System.NotImplementedException : SaveOne is not yet implemented for SqlServer</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Add the TVP type and <code>_SaveBatch</code> proc</strong></li>
+</ul>
+<p>Append to <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql</code> (after the existing
+<code>GRANT EXECUTE ON dbo.Categories_Delete TO MyMoneyTest;</code> / <code>GO</code> block):</p>
+<pre><code class="language-sql">-- Phase 2c: SaveOne/SaveBatch support. Additive - the procs/grants above are untouched and still
+-- serve the old whole-graph Save(MyMoney) path.
+
+IF TYPE_ID(N'dbo.CategorySaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.CategorySaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Name NVARCHAR(80) NULL,
+        Description NVARCHAR(255) NULL,
+        Type INT NULL,
+        ParentId INT NULL,
+        Budget MONEY NULL,
+        Frequency INT NULL,
+        Balance MONEY NULL,
+        Color NCHAR(10) NULL,
+        TaxRefNum INT NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_SaveBatch
+    @Rows dbo.CategorySaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Categories c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Categories c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Categories (Id, Name, Description, Type, ParentId, Budget, Frequency, Balance, Color, TaxRefNum, Version)
+    SELECT Id, Name, Description, Type, ParentId, Budget, Frequency, Balance, Color, TaxRefNum, 1
+    FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET
+        Name = r.Name, Description = r.Description, Type = r.Type, ParentId = r.ParentId, Budget = r.Budget,
+        Frequency = r.Frequency, Balance = r.Balance, Color = r.Color, TaxRefNum = r.TaxRefNum, Version = c.Version + 1
+    FROM dbo.Categories c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c
+    FROM dbo.Categories c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Categories
+    WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Categories_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Categories_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.CategorySaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.CategorySaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Run it against Redmond as <code>MyMoneyAdmin</code>, same pattern as Task 1 Step 2:</p>
+<pre><code class="language-powershell">$creds = Get-Content &quot;$env:USERPROFILE\.secrets\MyMoney\dataengine.credentials.json&quot; | ConvertFrom-Json
+$env:SQLCMDPASSWORD = $creds.MyMoneyAdmin.Password
+sqlcmd -S Redmond -d MyMoney -U $creds.MyMoneyAdmin.UserId -C -i &quot;Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql&quot;
+</code></pre>
+<p>Expected: no errors.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadCategories</code> to hydrate <code>RowVersion</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code>, change the <code>Categories_SelectAll</code>
+proc's SELECT list (in <code>Categories_AccessProcs.sql</code>, the existing <code>dbo.Categories_SelectAll</code> proc)
+to also return <code>Version</code>:</p>
+<pre><code class="language-sql">CREATE OR ALTER PROCEDURE dbo.Categories_SelectAll
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Name, Description, Type, ParentId, Budget, Frequency, Balance, Color, TaxRefNum, Version
+    FROM dbo.Categories ORDER BY Id;
+END
+GO
+</code></pre>
+<p>(This replaces the existing <code>Categories_SelectAll</code> definition in the same file — purely additive to
+its SELECT list, existing callers ignore the extra column, no behavior change for the old path.)
+Re-run the same <code>sqlcmd -i</code> command from Step 2 to apply this change too.</p>
+<p>Then in <code>SqlServerStoredProcDatabase.cs</code>, change <code>ReadCategories</code>:</p>
+<pre><code class="language-csharp">        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Categories_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    categories.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Category c = new Category(categories);
+                        c.Id = id;
+                        categories.AddCategory(c);
+                        c.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        c.Description = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            c.Type = (CategoryType)reader.GetInt32(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            c.ParentId = reader.GetInt32(4);
+                        }
+                        if (!reader.IsDBNull(5))
+                        {
+                            c.Budget = reader.GetDecimal(5);
+                        }
+                        if (!reader.IsDBNull(6))
+                        {
+                            c.Frequency = (CalendarRange)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            c.Balance = reader.GetDecimal(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            c.Color = reader.GetString(8).TrimEnd();
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            c.TaxRefNum = reader.GetInt32(9);
+                        }
+                        c.OnUpdated();
+                        if (c.Type == CategoryType.Reserved)
+                        {
+                            c.Type = CategoryType.Expense;
+                        }
+                    }
+                    categories.EndUpdate();
+                }
+            }
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+        }
+</code></pre>
+<p>to (adds reading column index 10 and setting <code>c.RowVersion</code>, before <code>OnUpdated()</code> per
+<code>SqliteDatabase.ReadCategories</code>'s own established ordering):</p>
+<pre><code class="language-csharp">        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            using (var connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                using (var command = new SqlCommand(&quot;dbo.Categories_SelectAll&quot;, connection) { CommandType = CommandType.StoredProcedure })
+                using (var reader = command.ExecuteReader())
+                {
+                    categories.BeginUpdate(false);
+                    while (reader.Read())
+                    {
+                        int id = reader.GetInt32(0);
+                        Category c = new Category(categories);
+                        c.Id = id;
+                        categories.AddCategory(c);
+                        c.Name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        c.Description = reader.IsDBNull(2) ? null : reader.GetString(2);
+                        if (!reader.IsDBNull(3))
+                        {
+                            c.Type = (CategoryType)reader.GetInt32(3);
+                        }
+                        if (!reader.IsDBNull(4))
+                        {
+                            c.ParentId = reader.GetInt32(4);
+                        }
+                        if (!reader.IsDBNull(5))
+                        {
+                            c.Budget = reader.GetDecimal(5);
+                        }
+                        if (!reader.IsDBNull(6))
+                        {
+                            c.Frequency = (CalendarRange)reader.GetInt32(6);
+                        }
+                        if (!reader.IsDBNull(7))
+                        {
+                            c.Balance = reader.GetDecimal(7);
+                        }
+                        if (!reader.IsDBNull(8))
+                        {
+                            c.Color = reader.GetString(8).TrimEnd();
+                        }
+                        if (!reader.IsDBNull(9))
+                        {
+                            c.TaxRefNum = reader.GetInt32(9);
+                        }
+                        c.RowVersion = reader.GetInt64(10);
+                        c.OnUpdated();
+                        if (c.Type == CategoryType.Reserved)
+                        {
+                            c.Type = CategoryType.Expense;
+                        }
+                    }
+                    categories.EndUpdate();
+                }
+            }
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the shared <code>ExecuteSaveBatchProc</code> helper, <code>SaveOne</code>/<code>SaveBatch</code>, and
+  <code>NewCategoryRowTable</code>/<code>SaveCategoryBatch</code></strong></li>
+</ul>
+<p>Add <code>using System.Data;</code> and <code>using System.Collections.Generic;</code> to the top of
+<code>SqlServerStoredProcDatabase.cs</code> if not already present (the file's current imports are <code>using
+System;</code>, <code>using System.Collections;</code>, <code>using System.Data;</code>, <code>using System.Data.SqlTypes;</code>, <code>using
+System.Linq;</code>, <code>using Microsoft.Data.SqlClient;</code>, <code>using Walkabout.Utilities;</code> — <code>System.Data</code> is
+already there; <code>System.Collections.Generic</code> is not and must be added for <code>Dictionary&lt;,&gt;</code>/<code>List&lt;&gt;</code>).</p>
+<p>Add these members to the <code>SqlServerStoredProcDatabase</code> class (anywhere after the existing
+<code>ExecutePayeeProc</code> private method, before the closing class brace):</p>
+<pre><code class="language-csharp">        public override void SaveOne&lt;T&gt;(T root)
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public override void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            List&lt;PersistentObject&gt; list = new List&lt;PersistentObject&gt;(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Every root in the batch must be the SAME type - a batch mixing types (e.g. one
+            // Category and one Currency) falls through to the inherited stub until a later task
+            // adds real cross-type atomicity (each entity's _SaveBatch proc owns its own
+            // transaction; mixing types safely needs an ambient ombudsman transaction the proc's
+            // internal BEGIN TRAN can nest inside - not needed for any currently-real caller).
+            Type firstType = list[0].GetType();
+            foreach (PersistentObject root in list)
+            {
+                if (root.GetType() != firstType)
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+            }
+
+            this.Connect();
+            using (SqlConnection connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                List&lt;Action&gt; postCommitActions = new List&lt;Action&gt;();
+                if (firstType == typeof(Category))
+                {
+                    this.SaveCategoryBatch(list.ConvertAll(r =&gt; (Category)r), connection, null, postCommitActions);
+                }
+                else
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Executes one of the new *_SaveBatch stored procs (Categories_SaveBatch,
+        /// Currencies_SaveBatch, etc.) and applies the shared two-result-set contract every one of
+        /// them follows: a row with Result='CONFLICT' means the proc's own conflict check found a
+        /// stale or missing row and already rolled back its own transaction server-side before
+        /// returning - this throws ConcurrencyConflictException for that row's Id (looked up in
+        /// rootsById, since the exception needs the actual PersistentObject, not just its Id).
+        /// Every other returned row is Result='OK' with that row's new Version, applied via
+        /// applyNewVersion. transaction may be null (the common single-type-group case, where the
+        /// proc's own internal BEGIN TRAN/COMMIT/ROLLBACK is a complete, standalone transaction) or
+        /// a real ambient SqlTransaction (a later task's multi-type case, where the proc's internal
+        /// BEGIN TRAN nests inside it).
+        /// &lt;/summary&gt;
+        private void ExecuteSaveBatchProc(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string procName,
+            (string ParamName, string TvpTypeName, DataTable Rows)[] tvpParameters,
+            Dictionary&lt;long, PersistentObject&gt; rootsById,
+            Action&lt;long, long&gt; applyNewVersion)
+        {
+            using (SqlCommand command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+            {
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                foreach (var (paramName, tvpTypeName, rows) in tvpParameters)
+                {
+                    SqlParameter p = command.Parameters.AddWithValue(paramName, rows);
+                    p.SqlDbType = SqlDbType.Structured;
+                    p.TypeName = tvpTypeName;
+                }
+                using (SqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long id = reader.GetInt64(reader.GetOrdinal(&quot;Id&quot;));
+                        string result = reader.GetString(reader.GetOrdinal(&quot;Result&quot;));
+                        if (result == &quot;CONFLICT&quot;)
+                        {
+                            long storedVersion = reader.GetInt64(reader.GetOrdinal(&quot;StoredVersion&quot;));
+                            long callerVersion = reader.GetInt64(reader.GetOrdinal(&quot;CallerVersion&quot;));
+                            rootsById.TryGetValue(id, out PersistentObject conflictRoot);
+                            throw new ConcurrencyConflictException(conflictRoot, storedVersion, callerVersion);
+                        }
+                        long newVersion = reader.GetInt64(reader.GetOrdinal(&quot;NewVersion&quot;));
+                        applyNewVersion(id, newVersion);
+                    }
+                }
+            }
+        }
+
+        private static DataTable NewCategoryRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Description&quot;, typeof(string));
+            table.Columns.Add(&quot;Type&quot;, typeof(int));
+            table.Columns.Add(&quot;ParentId&quot;, typeof(int));
+            table.Columns.Add(&quot;Budget&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Frequency&quot;, typeof(int));
+            table.Columns.Add(&quot;Balance&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Color&quot;, typeof(string));
+            table.Columns.Add(&quot;TaxRefNum&quot;, typeof(int));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        /// &lt;summary&gt;
+        /// Writes a batch of Category rows via dbo.Categories_SaveBatch. Deletes get no row back
+        /// in the proc's result set (nothing to report a NewVersion for), so their postCommit
+        /// action is queued directly here, right after ExecuteSaveBatchProc returns without
+        /// throwing - which only happens once the whole batch (inserts, updates, AND deletes) has
+        /// already committed inside the proc's own transaction.
+        /// &lt;/summary&gt;
+        private void SaveCategoryBatch(List&lt;Category&gt; categories, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewCategoryRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Category&gt; byId = new Dictionary&lt;long, Category&gt;();
+            List&lt;Category&gt; deletedInThisBatch = new List&lt;Category&gt;();
+
+            foreach (Category c in categories)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, c.Id, c.Name, c.Description, (int)c.Type,
+                        c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value,
+                        c.Budget, (int)c.Frequency, c.Balance, (object)c.Color ?? DBNull.Value,
+                        c.TaxRefNum, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Categories_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.CategorySaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Category c = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Category c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Run the SQL Server contract tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+Expected: the 4 <code>Category</code>-specific tests listed in Step 1 now PASS. Every other test (still using
+the inherited whole-graph <code>Save</code>/<code>Load</code> path, or still hitting the <code>NotImplementedException</code> stub
+for other types) is unchanged from Step 1's baseline.</p>
+<ul>
+<li>[ ] <strong>Step 6: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect the established baseline, no new failures.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Categories_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Category on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-currency">Task 3: <code>Currency</code><a class="headerlink" href="#task-3-currency" title="Permanent link">#</a></h3>
+<p>Same shape as Task 2. <code>Currencies_SelectAll</code>'s existing column order (confirmed from
+<code>Currencies_AccessProcs.sql</code>): <code>Id(0), Symbol(1), Name(2), Ratio(3), LastRatio(4), CultureCode(5)</code>
+— <code>Version</code> becomes index 6.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Currencies_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>ExecuteSaveBatchProc</code> (Task 2).
+- Produces: <code>SaveCurrencyBatch</code>, <code>NewCurrencyRowTable</code> — used by Task 13's multi-type dispatcher.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — <code>SaveOne_NewCurrency_PersistsAndSetsRowVersionToOne</code>,
+  <code>SaveOne_UpdateCurrencyAfterReload_IncrementsRowVersion</code>,
+  <code>SaveOne_StaleCurrencyRowVersion_ThrowsConcurrencyConflictException</code>,
+  <code>SaveOne_DeleteCurrency_RemovesRowFromDatabaseAndContainer</code> fail with <code>NotImplementedException</code>.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Currencies_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.CurrencySaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.CurrencySaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Symbol NCHAR(20) NULL,
+        Name NVARCHAR(80) NULL,
+        Ratio MONEY NULL,
+        LastRatio MONEY NULL,
+        CultureCode NVARCHAR(80) NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Currencies_SaveBatch
+    @Rows dbo.CurrencySaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Currencies c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Currencies c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Currencies (Id, Symbol, Name, Ratio, LastRatio, CultureCode, Version)
+    SELECT Id, Symbol, Name, Ratio, LastRatio, CultureCode, 1
+    FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET Symbol = r.Symbol, Name = r.Name, Ratio = r.Ratio, LastRatio = r.LastRatio,
+        CultureCode = r.CultureCode, Version = c.Version + 1
+    FROM dbo.Currencies c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.Currencies c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Currencies WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Currencies_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Currencies_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.CurrencySaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.CurrencySaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also change <code>Currencies_SelectAll</code>'s SELECT list to <code>SELECT Id, Symbol, Name, Ratio, LastRatio,
+CultureCode, Version FROM dbo.Currencies ORDER BY Id;</code>. Run the whole file against Redmond as
+<code>MyMoneyAdmin</code> (same <code>sqlcmd -i</code> command as Task 2 Step 2, this file's path instead).</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadCurrencies</code></strong></li>
+</ul>
+<p>Add <code>s.RowVersion = reader.GetInt64(6);</code> immediately before <code>s.OnUpdated();</code> in
+<code>SqlServerStoredProcDatabase.ReadCurrencies</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewCurrencyRowTable</code>/<code>SaveCurrencyBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewCurrencyRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Symbol&quot;, typeof(string));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Ratio&quot;, typeof(decimal));
+            table.Columns.Add(&quot;LastRatio&quot;, typeof(decimal));
+            table.Columns.Add(&quot;CultureCode&quot;, typeof(string));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveCurrencyBatch(List&lt;Currency&gt; currencies, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewCurrencyRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Currency&gt; byId = new Dictionary&lt;long, Currency&gt;();
+            List&lt;Currency&gt; deletedInThisBatch = new List&lt;Currency&gt;();
+
+            foreach (Currency c in currencies)
+            {
+                long id = c.Id;
+                rootsById[id] = c;
+                byId[id] = c;
+                long callerRowVersion = c.RowVersion;
+
+                if (c.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, DBNull.Value);
+                }
+                else if (c.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, c.Id, c.Symbol, c.Name, c.Ratio, c.LastRatio, c.CultureCode, callerRowVersion);
+                }
+                else if (c.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, c.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(c);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Currencies_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.CurrencySaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Currency c = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        c.RowVersion = newVersion;
+                        c.OnUpdated();
+                    });
+                });
+
+            foreach (Currency c in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, change:</p>
+<pre><code class="language-csharp">                if (firstType == typeof(Category))
+                {
+                    this.SaveCategoryBatch(list.ConvertAll(r =&gt; (Category)r), connection, null, postCommitActions);
+                }
+                else
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">                if (firstType == typeof(Category))
+                {
+                    this.SaveCategoryBatch(list.ConvertAll(r =&gt; (Category)r), connection, null, postCommitActions);
+                }
+                else if (firstType == typeof(Currency))
+                {
+                    this.SaveCurrencyBatch(list.ConvertAll(r =&gt; (Currency)r), connection, null, postCommitActions);
+                }
+                else
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+</code></pre>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>Currency</code> tests now pass, nothing else regresses.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Currencies_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Currency on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-4-onlineaccount">Task 4: <code>OnlineAccount</code><a class="headerlink" href="#task-4-onlineaccount" title="Permanent link">#</a></h3>
+<p><code>OnlineAccounts_SelectAll</code>'s existing order: <code>Id(0), Name(1), Institution(2), OFX(3), FID(4),
+UserId(5), Password(6), BankId(7), BranchId(8), BrokerId(9), OfxVersion(10), LogoUrl(11), AppId(12),
+AppVersion(13), ClientUid(14), UserCred1(15), UserCred2(16), AuthToken(17), AccessKey(18),
+UserKey(19), UserKeyExpireDate(20)</code> — <code>Version</code> becomes index 21. Note the C# property is
+<code>i.Ofx</code> (not <code>OFX</code>) even though the column/parameter name is <code>OFX</code>/<code>@OFX</code>; <code>i.UserKeyExpireDate</code>
+is nullable and needs <code>SqlServerDatabase.DBNullableDateTimeParam(...)</code> when building the row, same
+helper <code>UpdateOnlineAccounts</code> already uses.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/OnlineAccounts_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>OnlineAccount</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>OnlineAccounts_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.OnlineAccountSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.OnlineAccountSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Name NVARCHAR(80) NULL,
+        Institution NVARCHAR(80) NULL,
+        OFX NVARCHAR(255) NULL,
+        FID NVARCHAR(50) NULL,
+        UserId NCHAR(20) NULL,
+        Password NVARCHAR(50) NULL,
+        BankId NVARCHAR(50) NULL,
+        BranchId NVARCHAR(50) NULL,
+        BrokerId NVARCHAR(50) NULL,
+        OfxVersion NCHAR(10) NULL,
+        LogoUrl NVARCHAR(1000) NULL,
+        AppId NCHAR(10) NULL,
+        AppVersion NCHAR(10) NULL,
+        ClientUid NCHAR(36) NULL,
+        UserCred1 NVARCHAR(200) NULL,
+        UserCred2 NVARCHAR(200) NULL,
+        AuthToken NVARCHAR(200) NULL,
+        AccessKey NCHAR(36) NULL,
+        UserKey NVARCHAR(64) NULL,
+        UserKeyExpireDate DATETIME NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.OnlineAccounts_SaveBatch
+    @Rows dbo.OnlineAccountSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.OnlineAccounts c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.OnlineAccounts c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.OnlineAccounts (Id, Name, Institution, OFX, FID, UserId, Password, BankId, BranchId,
+        BrokerId, OfxVersion, LogoUrl, AppId, AppVersion, ClientUid, UserCred1, UserCred2, AuthToken,
+        AccessKey, UserKey, UserKeyExpireDate, Version)
+    SELECT Id, Name, Institution, OFX, FID, UserId, Password, BankId, BranchId, BrokerId, OfxVersion,
+        LogoUrl, AppId, AppVersion, ClientUid, UserCred1, UserCred2, AuthToken, AccessKey, UserKey,
+        UserKeyExpireDate, 1
+    FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET
+        Name = r.Name, Institution = r.Institution, OFX = r.OFX, FID = r.FID, UserId = r.UserId,
+        Password = r.Password, BankId = r.BankId, BranchId = r.BranchId, BrokerId = r.BrokerId,
+        OfxVersion = r.OfxVersion, LogoUrl = r.LogoUrl, AppId = r.AppId, AppVersion = r.AppVersion,
+        ClientUid = r.ClientUid, UserCred1 = r.UserCred1, UserCred2 = r.UserCred2, AuthToken = r.AuthToken,
+        AccessKey = r.AccessKey, UserKey = r.UserKey, UserKeyExpireDate = r.UserKeyExpireDate,
+        Version = c.Version + 1
+    FROM dbo.OnlineAccounts c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.OnlineAccounts c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.OnlineAccounts WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.OnlineAccounts_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.OnlineAccounts_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.OnlineAccountSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.OnlineAccountSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>OnlineAccounts_SelectAll</code>'s SELECT list (keeping every existing column in
+place). Run the file against Redmond as <code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadOnlineAccounts</code></strong></li>
+</ul>
+<p>Add <code>i.RowVersion = reader.GetInt64(21);</code> immediately before <code>i.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewOnlineAccountRowTable</code>/<code>SaveOnlineAccountBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewOnlineAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Institution&quot;, typeof(string));
+            table.Columns.Add(&quot;OFX&quot;, typeof(string));
+            table.Columns.Add(&quot;FID&quot;, typeof(string));
+            table.Columns.Add(&quot;UserId&quot;, typeof(string));
+            table.Columns.Add(&quot;Password&quot;, typeof(string));
+            table.Columns.Add(&quot;BankId&quot;, typeof(string));
+            table.Columns.Add(&quot;BranchId&quot;, typeof(string));
+            table.Columns.Add(&quot;BrokerId&quot;, typeof(string));
+            table.Columns.Add(&quot;OfxVersion&quot;, typeof(string));
+            table.Columns.Add(&quot;LogoUrl&quot;, typeof(string));
+            table.Columns.Add(&quot;AppId&quot;, typeof(string));
+            table.Columns.Add(&quot;AppVersion&quot;, typeof(string));
+            table.Columns.Add(&quot;ClientUid&quot;, typeof(string));
+            table.Columns.Add(&quot;UserCred1&quot;, typeof(string));
+            table.Columns.Add(&quot;UserCred2&quot;, typeof(string));
+            table.Columns.Add(&quot;AuthToken&quot;, typeof(string));
+            table.Columns.Add(&quot;AccessKey&quot;, typeof(string));
+            table.Columns.Add(&quot;UserKey&quot;, typeof(string));
+            table.Columns.Add(&quot;UserKeyExpireDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveOnlineAccountBatch(List&lt;OnlineAccount&gt; accounts, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewOnlineAccountRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, OnlineAccount&gt; byId = new Dictionary&lt;long, OnlineAccount&gt;();
+            List&lt;OnlineAccount&gt; deletedInThisBatch = new List&lt;OnlineAccount&gt;();
+
+            foreach (OnlineAccount i in accounts)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object expireDate = SqlServerDatabase.DBNullableDateTimeParam(i.UserKeyExpireDate);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, i.Id, i.Name, i.Institution, i.Ofx, i.FID, i.UserId, i.Password,
+                        i.BankId, i.BranchId, i.BrokerId, i.OfxVersion, i.LogoUrl, i.AppId, i.AppVersion,
+                        i.ClientUid, i.UserCred1, i.UserCred2, i.AuthToken, i.AccessKey, i.UserKey,
+                        expireDate, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.OnlineAccounts_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.OnlineAccountSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    OnlineAccount i = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (OnlineAccount i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(OnlineAccount)) { this.SaveOnlineAccountBatch(list.ConvertAll(r =&gt; (OnlineAccount)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>OnlineAccount</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/OnlineAccounts_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for OnlineAccount on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-5-account">Task 5: <code>Account</code><a class="headerlink" href="#task-5-account" title="Permanent link">#</a></h3>
+<p><code>Accounts_SelectAll</code>'s existing order: <code>Id(0), AccountId(1), OfxAccountId(2), Name(3), Type(4),
+Description(5), OnlineAccount(6), OpeningBalance(7), LastSync(8), LastBalance(9), SyncGuid(10),
+Flags(11), Currency(12), WebSite(13), ReconcileWarning(14), CategoryIdForPrincipal(15),
+CategoryIdForInterest(16)</code> — <code>Version</code> becomes index 17. Uses the existing
+<code>SqlServerDatabase.DBDateTimeParam</code>/<code>DBNullableDateTimeParam</code>/<code>DBGuidParam</code> static helpers
+(<code>UpdateAccounts</code> already uses them) for <code>LastSync</code>/<code>LastBalance</code>/<code>SyncGuid</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Accounts_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>Account</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Accounts_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.AccountSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.AccountSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        AccountId NVARCHAR(20) NULL,
+        OfxAccountId NVARCHAR(50) NULL,
+        Name NVARCHAR(80) NULL,
+        Type INT NULL,
+        Description NVARCHAR(255) NULL,
+        OnlineAccount INT NULL,
+        OpeningBalance MONEY NULL,
+        LastSync DATETIME NULL,
+        LastBalance DATETIME NULL,
+        SyncGuid UNIQUEIDENTIFIER NULL,
+        Flags INT NULL,
+        Currency NVARCHAR(3) NULL,
+        WebSite NVARCHAR(512) NULL,
+        ReconcileWarning INT NULL,
+        CategoryIdForPrincipal INT NULL,
+        CategoryIdForInterest INT NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Accounts_SaveBatch
+    @Rows dbo.AccountSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Accounts c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Accounts c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Accounts (Id, AccountId, OfxAccountId, Name, Type, Description, OnlineAccount,
+        OpeningBalance, LastSync, LastBalance, SyncGuid, Flags, Currency, WebSite, ReconcileWarning,
+        CategoryIdForPrincipal, CategoryIdForInterest, Version)
+    SELECT Id, AccountId, OfxAccountId, Name, Type, Description, OnlineAccount, OpeningBalance,
+        LastSync, LastBalance, SyncGuid, Flags, Currency, WebSite, ReconcileWarning,
+        CategoryIdForPrincipal, CategoryIdForInterest, 1
+    FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET
+        AccountId = r.AccountId, OfxAccountId = r.OfxAccountId, Name = r.Name, Type = r.Type,
+        Description = r.Description, OnlineAccount = r.OnlineAccount, OpeningBalance = r.OpeningBalance,
+        LastSync = r.LastSync, LastBalance = r.LastBalance, SyncGuid = r.SyncGuid, Flags = r.Flags,
+        Currency = r.Currency, WebSite = r.WebSite, ReconcileWarning = r.ReconcileWarning,
+        CategoryIdForPrincipal = r.CategoryIdForPrincipal, CategoryIdForInterest = r.CategoryIdForInterest,
+        Version = c.Version + 1
+    FROM dbo.Accounts c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.Accounts c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Accounts WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Accounts_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Accounts_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.AccountSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.AccountSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>Accounts_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadAccounts</code></strong></li>
+</ul>
+<p>Add <code>a.RowVersion = reader.GetInt64(17);</code> immediately before <code>a.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewAccountRowTable</code>/<code>SaveAccountBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewAccountRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;AccountId&quot;, typeof(string));
+            table.Columns.Add(&quot;OfxAccountId&quot;, typeof(string));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Type&quot;, typeof(int));
+            table.Columns.Add(&quot;Description&quot;, typeof(string));
+            table.Columns.Add(&quot;OnlineAccount&quot;, typeof(int));
+            table.Columns.Add(&quot;OpeningBalance&quot;, typeof(decimal));
+            table.Columns.Add(&quot;LastSync&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;LastBalance&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;SyncGuid&quot;, typeof(Guid));
+            table.Columns.Add(&quot;Flags&quot;, typeof(int));
+            table.Columns.Add(&quot;Currency&quot;, typeof(string));
+            table.Columns.Add(&quot;WebSite&quot;, typeof(string));
+            table.Columns.Add(&quot;ReconcileWarning&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryIdForPrincipal&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryIdForInterest&quot;, typeof(int));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveAccountBatch(List&lt;Account&gt; accounts, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewAccountRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Account&gt; byId = new Dictionary&lt;long, Account&gt;();
+            List&lt;Account&gt; deletedInThisBatch = new List&lt;Account&gt;();
+
+            foreach (Account a in accounts)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+                object onlineAccountId = a.OnlineAccount != null ? (object)a.OnlineAccount.Id : DBNull.Value;
+                object categoryForPrincipal = a.CategoryForPrincipal != null ? (object)a.CategoryForPrincipal.Id : DBNull.Value;
+                object categoryForInterest = a.CategoryForInterest != null ? (object)a.CategoryForInterest.Id : DBNull.Value;
+                object lastSync = SqlServerDatabase.DBDateTimeParam(a.LastSync);
+                object lastBalance = SqlServerDatabase.DBDateTimeParam(a.LastBalance);
+                object syncGuid = SqlServerDatabase.DBGuidParam(a.SyncGuid);
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, a.Id, a.AccountId, a.OfxAccountId, a.Name, (int)a.Type, a.Description,
+                        onlineAccountId, a.OpeningBalance, lastSync, lastBalance, syncGuid, (int)a.Flags,
+                        a.Currency, a.WebSite, a.ReconcileWarning, categoryForPrincipal, categoryForInterest,
+                        callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, a.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Accounts_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.AccountSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Account a = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Account a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(Account)) { this.SaveAccountBatch(list.ConvertAll(r =&gt; (Account)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>Account</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Accounts_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Account on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-6-payee">Task 6: <code>Payee</code><a class="headerlink" href="#task-6-payee" title="Permanent link">#</a></h3>
+<p><code>Payees_SelectAll</code>'s existing order: <code>Id(0), Name(1)</code> — <code>Version</code> becomes index 2. Simplest entity:
+two columns.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Payees_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>Payee</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Payees_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.PayeeSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.PayeeSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Name NVARCHAR(255) NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Payees_SaveBatch
+    @Rows dbo.PayeeSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Payees c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Payees c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Payees (Id, Name, Version)
+    SELECT Id, Name, 1 FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET Name = r.Name, Version = c.Version + 1
+    FROM dbo.Payees c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.Payees c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Payees WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Payees_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Payees_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.PayeeSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.PayeeSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also change <code>Payees_SelectAll</code>'s SELECT list to <code>SELECT Id, Name, Version FROM dbo.Payees ORDER BY
+Id;</code>. Run the file against Redmond as <code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadPayees</code></strong></li>
+</ul>
+<p>Add <code>p.RowVersion = reader.GetInt64(2);</code> immediately before <code>p.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewPayeeRowTable</code>/<code>SavePayeeBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewPayeeRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SavePayeeBatch(List&lt;Payee&gt; payees, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewPayeeRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Payee&gt; byId = new Dictionary&lt;long, Payee&gt;();
+            List&lt;Payee&gt; deletedInThisBatch = new List&lt;Payee&gt;();
+
+            foreach (Payee p in payees)
+            {
+                long id = p.Id;
+                rootsById[id] = p;
+                byId[id] = p;
+                long callerRowVersion = p.RowVersion;
+
+                if (p.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, p.Id, p.Name, DBNull.Value);
+                }
+                else if (p.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, p.Id, p.Name, callerRowVersion);
+                }
+                else if (p.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, p.Id, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(p);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Payees_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.PayeeSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Payee p = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        p.RowVersion = newVersion;
+                        p.OnUpdated();
+                    });
+                });
+
+            foreach (Payee p in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    p.OnUpdated();
+                    p.Parent.RemoveChild(p, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(Payee)) { this.SavePayeeBatch(list.ConvertAll(r =&gt; (Payee)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>Payee</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Payees_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Payee on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-7-alias">Task 7: <code>Alias</code><a class="headerlink" href="#task-7-alias" title="Permanent link">#</a></h3>
+<p><code>Aliases_SelectAll</code>'s existing order: <code>Id(0), Pattern(1), Payee(2), Flags(3)</code> — <code>Version</code> becomes
+index 4. <code>a.Payee</code> is a resolved <code>Payee</code> object in C# (<code>a.Payee.Id</code> for the SQL parameter);
+<code>a.AliasType</code> casts to <code>int</code> for the <code>Flags</code> column, same as <code>UpdateAliases</code> already does.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Aliases_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>Alias</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Aliases_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.AliasSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.AliasSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Pattern NVARCHAR(255) NULL,
+        Payee INT NULL,
+        Flags INT NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Aliases_SaveBatch
+    @Rows dbo.AliasSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Aliases c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Aliases c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Aliases (Id, Pattern, Payee, Flags, Version)
+    SELECT Id, Pattern, Payee, Flags, 1 FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET Pattern = r.Pattern, Payee = r.Payee, Flags = r.Flags, Version = c.Version + 1
+    FROM dbo.Aliases c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.Aliases c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Aliases WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Aliases_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Aliases_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.AliasSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.AliasSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also change <code>Aliases_SelectAll</code>'s SELECT list to <code>SELECT Id, Pattern, Payee, Flags, Version FROM
+dbo.Aliases ORDER BY Id;</code>. Run the file against Redmond as <code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadAliases</code></strong></li>
+</ul>
+<p>Add <code>a.RowVersion = reader.GetInt64(4);</code> immediately before <code>a.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewAliasRowTable</code>/<code>SaveAliasBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewAliasRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Pattern&quot;, typeof(string));
+            table.Columns.Add(&quot;Payee&quot;, typeof(int));
+            table.Columns.Add(&quot;Flags&quot;, typeof(int));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveAliasBatch(List&lt;Alias&gt; aliases, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewAliasRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Alias&gt; byId = new Dictionary&lt;long, Alias&gt;();
+            List&lt;Alias&gt; deletedInThisBatch = new List&lt;Alias&gt;();
+
+            foreach (Alias a in aliases)
+            {
+                long id = a.Id;
+                rootsById[id] = a;
+                byId[id] = a;
+                long callerRowVersion = a.RowVersion;
+
+                if (a.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, DBNull.Value);
+                }
+                else if (a.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, a.Id, a.Pattern, a.Payee.Id, (int)a.AliasType, callerRowVersion);
+                }
+                else if (a.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, a.Id, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(a);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Aliases_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.AliasSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Alias a = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        a.RowVersion = newVersion;
+                        a.OnUpdated();
+                    });
+                });
+
+            foreach (Alias a in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    a.OnUpdated();
+                    a.Parent.RemoveChild(a, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(Alias)) { this.SaveAliasBatch(list.ConvertAll(r =&gt; (Alias)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>Alias</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Aliases_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Alias on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-8-security">Task 8: <code>Security</code><a class="headerlink" href="#task-8-security" title="Permanent link">#</a></h3>
+<p><code>Securities_SelectAll</code>'s existing order: <code>Id(0), Name(1), Symbol(2), Price(3), LastPrice(4),
+CuspId(5), SecurityType(6), Taxable(7), PriceDate(8)</code> — <code>Version</code> becomes index 9. <code>s.SecurityType</code>
+casts to <code>int</code>, <code>s.Taxable</code> (a <code>YesNo</code> enum) casts to <code>byte</code>, <code>s.PriceDate</code> uses
+<code>SqlServerDatabase.DBDateTimeParam</code>, matching <code>UpdateSecurities</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Securities_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>Security</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Securities_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.SecuritySaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.SecuritySaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Name NVARCHAR(80) NULL,
+        Symbol NVARCHAR(20) NULL,
+        Price MONEY NULL,
+        LastPrice MONEY NULL,
+        CuspId NVARCHAR(20) NULL,
+        SecurityType INT NULL,
+        Taxable TINYINT NULL,
+        PriceDate DATETIME NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Securities_SaveBatch
+    @Rows dbo.SecuritySaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.Securities c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.Securities c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.Securities (Id, Name, Symbol, Price, LastPrice, CuspId, SecurityType, Taxable, PriceDate, Version)
+    SELECT Id, Name, Symbol, Price, LastPrice, CuspId, SecurityType, Taxable, PriceDate, 1
+    FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET Name = r.Name, Symbol = r.Symbol, Price = r.Price, LastPrice = r.LastPrice,
+        CuspId = r.CuspId, SecurityType = r.SecurityType, Taxable = r.Taxable, PriceDate = r.PriceDate,
+        Version = c.Version + 1
+    FROM dbo.Securities c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.Securities c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Securities WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Securities_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Securities_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.SecuritySaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.SecuritySaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>Securities_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadSecurities</code></strong></li>
+</ul>
+<p>Add <code>s.RowVersion = reader.GetInt64(9);</code> immediately before <code>s.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewSecurityRowTable</code>/<code>SaveSecurityBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewSecurityRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Symbol&quot;, typeof(string));
+            table.Columns.Add(&quot;Price&quot;, typeof(decimal));
+            table.Columns.Add(&quot;LastPrice&quot;, typeof(decimal));
+            table.Columns.Add(&quot;CuspId&quot;, typeof(string));
+            table.Columns.Add(&quot;SecurityType&quot;, typeof(int));
+            table.Columns.Add(&quot;Taxable&quot;, typeof(byte));
+            table.Columns.Add(&quot;PriceDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveSecurityBatch(List&lt;Security&gt; securities, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewSecurityRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Security&gt; byId = new Dictionary&lt;long, Security&gt;();
+            List&lt;Security&gt; deletedInThisBatch = new List&lt;Security&gt;();
+
+            foreach (Security s in securities)
+            {
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object priceDate = SqlServerDatabase.DBDateTimeParam(s.PriceDate);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, s.Id, s.Name, s.Symbol, s.Price, s.LastPrice, s.CuspId,
+                        (int)s.SecurityType, (byte)s.Taxable, priceDate, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Securities_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.SecuritySaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Security s = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (Security s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(Security)) { this.SaveSecurityBatch(list.ConvertAll(r =&gt; (Security)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>Security</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Securities_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Security on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-9-stocksplit">Task 9: <code>StockSplit</code><a class="headerlink" href="#task-9-stocksplit" title="Permanent link">#</a></h3>
+<p><code>StockSplits_SelectAll</code>'s existing order: <code>Id(0), Date(1), Security(2), Numerator(3),
+Denominator(4)</code> — <code>Version</code> becomes index 5. <code>StockSplit.Id</code> is natively <code>long</code> (unlike the <code>int</code>
+entities before it, no cast needed anywhere). <code>s.Security</code> is a resolved <code>Security</code> object
+(<code>s.Security.Id</code> for the parameter, <code>DBNull.Value</code> if null); <code>s.Date</code> uses
+<code>SqlServerDatabase.DBDateTimeParam</code>. Note <code>UpdateStockSplits</code>'s existing guard (<code>if (s.Date ==
+DateTime.MinValue) { continue; }</code>) — carry the same guard into the new batch method, skipping a row
+with an unset <code>Date</code> entirely rather than sending it to the proc.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/StockSplits_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>StockSplit</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>StockSplits_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.StockSplitSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.StockSplitSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id BIGINT NOT NULL,
+        Date DATETIME NULL,
+        Security INT NULL,
+        Numerator MONEY NULL,
+        Denominator MONEY NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.StockSplits_SaveBatch
+    @Rows dbo.StockSplitSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.StockSplits c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.StockSplits c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.StockSplits (Id, Date, Security, Numerator, Denominator, Version)
+    SELECT Id, Date, Security, Numerator, Denominator, 1 FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET Date = r.Date, Security = r.Security, Numerator = r.Numerator,
+        Denominator = r.Denominator, Version = c.Version + 1
+    FROM dbo.StockSplits c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.StockSplits c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.StockSplits WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.StockSplits_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.StockSplits_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.StockSplitSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.StockSplitSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>StockSplits_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadStockSplits</code></strong></li>
+</ul>
+<p>Add <code>s.RowVersion = reader.GetInt64(5);</code> immediately before <code>s.OnUpdated();</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewStockSplitRowTable</code>/<code>SaveStockSplitBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewStockSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(long));
+            table.Columns.Add(&quot;Date&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;Security&quot;, typeof(int));
+            table.Columns.Add(&quot;Numerator&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Denominator&quot;, typeof(decimal));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveStockSplitBatch(List&lt;StockSplit&gt; stockSplits, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewStockSplitRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, StockSplit&gt; byId = new Dictionary&lt;long, StockSplit&gt;();
+            List&lt;StockSplit&gt; deletedInThisBatch = new List&lt;StockSplit&gt;();
+
+            foreach (StockSplit s in stockSplits)
+            {
+                if ((s.IsChanged || s.IsInserted) &amp;&amp; s.Date == DateTime.MinValue)
+                {
+                    continue;
+                }
+
+                long id = s.Id;
+                rootsById[id] = s;
+                byId[id] = s;
+                long callerRowVersion = s.RowVersion;
+                object securityId = s.Security != null ? (object)s.Security.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(s.Date);
+
+                if (s.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, s.Id, date, securityId, s.Numerator, s.Denominator, DBNull.Value);
+                }
+                else if (s.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, s.Id, date, securityId, s.Numerator, s.Denominator, callerRowVersion);
+                }
+                else if (s.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, s.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(s);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.StockSplits_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.StockSplitSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    StockSplit s = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        s.RowVersion = newVersion;
+                        s.OnUpdated();
+                    });
+                });
+
+            foreach (StockSplit s in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    s.OnUpdated();
+                    s.Parent.RemoveChild(s, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(StockSplit)) { this.SaveStockSplitBatch(list.ConvertAll(r =&gt; (StockSplit)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>StockSplit</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/StockSplits_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for StockSplit on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-10-loanpayment">Task 10: <code>LoanPayment</code><a class="headerlink" href="#task-10-loanpayment" title="Permanent link">#</a></h3>
+<p><code>LoanPayments_SelectAll</code>'s existing order: <code>Id(0), AccountId(1), Date(2), Principal(3),
+Interest(4), Memo(5)</code> — <code>Version</code> becomes index 6. <code>x.Date</code> uses
+<code>SqlServerDatabase.DBDateTimeParam</code>, matching <code>UpdateLoanPayments</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/LoanPayments_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — the 4 <code>LoanPayment</code> <code>SaveOne_*</code> tests.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>LoanPayments_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.LoanPaymentSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.LoanPaymentSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        AccountId INT NULL,
+        Date DATETIME NULL,
+        Principal MONEY NULL,
+        Interest MONEY NULL,
+        Memo NVARCHAR(255) NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.LoanPayments_SaveBatch
+    @Rows dbo.LoanPaymentSaveBatchRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Rows r
+        LEFT JOIN dbo.LoanPayments c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Rows r LEFT JOIN dbo.LoanPayments c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO dbo.LoanPayments (Id, AccountId, Date, Principal, Interest, Memo, Version)
+    SELECT Id, AccountId, Date, Principal, Interest, Memo, 1 FROM @Rows WHERE [Action] = 'I';
+
+    UPDATE c SET AccountId = r.AccountId, Date = r.Date, Principal = r.Principal, Interest = r.Interest,
+        Memo = r.Memo, Version = c.Version + 1
+    FROM dbo.LoanPayments c JOIN @Rows r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    DELETE c FROM dbo.LoanPayments c JOIN @Rows r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.LoanPayments WHERE Id IN (SELECT Id FROM @Rows WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.LoanPayments_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.LoanPayments_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.LoanPaymentSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.LoanPaymentSaveBatchRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>LoanPayments_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadLoanPayments</code></strong></li>
+</ul>
+<p>Add <code>x.RowVersion = reader.GetInt64(6);</code> immediately before <code>x.OnUpdated();</code> (after <code>collection.AddLoan(x);</code>, matching the existing method's ordering).</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewLoanPaymentRowTable</code>/<code>SaveLoanPaymentBatch</code>, extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewLoanPaymentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;AccountId&quot;, typeof(int));
+            table.Columns.Add(&quot;Date&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;Principal&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Interest&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Memo&quot;, typeof(string));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private void SaveLoanPaymentBatch(List&lt;LoanPayment&gt; loanPayments, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable rows = NewLoanPaymentRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, LoanPayment&gt; byId = new Dictionary&lt;long, LoanPayment&gt;();
+            List&lt;LoanPayment&gt; deletedInThisBatch = new List&lt;LoanPayment&gt;();
+
+            foreach (LoanPayment i in loanPayments)
+            {
+                long id = i.Id;
+                rootsById[id] = i;
+                byId[id] = i;
+                long callerRowVersion = i.RowVersion;
+                object date = SqlServerDatabase.DBDateTimeParam(i.Date);
+
+                if (i.IsInserted)
+                {
+                    rows.Rows.Add(&quot;I&quot;, i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, DBNull.Value);
+                }
+                else if (i.IsChanged)
+                {
+                    rows.Rows.Add(&quot;U&quot;, i.Id, i.AccountId, date, i.Principal, i.Interest, i.Memo, callerRowVersion);
+                }
+                else if (i.IsDeleted)
+                {
+                    rows.Rows.Add(&quot;D&quot;, i.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, callerRowVersion);
+                    deletedInThisBatch.Add(i);
+                }
+            }
+
+            if (rows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.LoanPayments_SaveBatch&quot;,
+                new[] { (&quot;@Rows&quot;, &quot;dbo.LoanPaymentSaveBatchRow&quot;, rows) },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    LoanPayment i = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        i.RowVersion = newVersion;
+                        i.OnUpdated();
+                    });
+                });
+
+            foreach (LoanPayment i in deletedInThisBatch)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    i.OnUpdated();
+                    i.Parent.RemoveChild(i, true);
+                });
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(LoanPayment)) { this.SaveLoanPaymentBatch(list.ConvertAll(r =&gt; (LoanPayment)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — the 4 <code>LoanPayment</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/LoanPayments_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for LoanPayment on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-11-rentbuilding-compound-owned-rentunits">Task 11: <code>RentBuilding</code> (compound — owned <code>RentUnit</code>s)<a class="headerlink" href="#task-11-rentbuilding-compound-owned-rentunits" title="Permanent link">#</a></h3>
+<p>First compound entity. <code>dbo.RentBuildings_SaveBatch</code> takes <strong>two</strong> TVPs: <code>@Buildings</code> (version-
+checked, like every entity so far) and <code>@Units</code> (no <code>ExpectedVersion</code> — <code>RentUnit</code> isn't
+<code>IAggregateRoot</code>, gated only by its parent building's version, per the design spec's R2). Units are
+reached via the sibling global <code>RentBuildings.Units</code> container (<code>((RentBuildings)building.Parent)
+.Units</code>), filtered to <code>u.Building</code> matching one of the buildings in this batch — populated and
+processed independently of whether the building's own row has a pending change, matching
+<code>SaveOne_RentBuildingWithUnitOnlyEdit_PersistsUnitEvenThoughBuildingItselfIsUnchanged</code>.
+<code>RentBuildings_SelectAll</code>'s existing order: <code>Id(0), Name(1), Address(2), PurchasedDate(3),
+PurchasedPrice(4), LandValue(5), EstimatedValue(6), CategoryForIncome(7), CategoryForTaxes(8),
+CategoryForInterest(9), CategoryForRepairs(10), CategoryForMaintenance(11),
+CategoryForManagement(12), OwnershipName1(13), OwnershipName2(14), OwnershipPercentage1(15),
+OwnershipPercentage2(16), Note(17)</code> — <code>Version</code> becomes index 18. <code>r.CategoryForIncome</code>/etc. are
+plain <code>int</code> fields on <code>RentBuilding</code> (a <code>-1</code> sentinel when unset, per <code>ReadRentBuildings</code>), not
+resolved <code>Category</code> objects — no null-check needed.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/RentBuildings_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — <code>SaveOne_NewRentBuilding_PersistsAndSetsRowVersionToOne</code>,
+  <code>SaveOne_UpdateRentBuildingAfterReload_IncrementsRowVersion</code>,
+  <code>SaveOne_StaleRentBuildingRowVersion_ThrowsConcurrencyConflictException</code>,
+  <code>SaveOne_DeleteRentBuilding_RemovesRowFromDatabaseAndContainer</code>,
+  <code>SaveOne_RentBuildingWithNewUnit_PersistsUnitAndSetsItClean</code>,
+  <code>SaveOne_RentBuildingWithUnitOnlyEdit_PersistsUnitEvenThoughBuildingItselfIsUnchanged</code>,
+  <code>SaveOne_RentBuildingWithDeletedUnit_RemovesUnitRow</code>.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>RentBuildings_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.RentBuildingSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.RentBuildingSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Name NVARCHAR(255) NULL,
+        Address NVARCHAR(255) NULL,
+        PurchasedDate DATETIME NULL,
+        PurchasedPrice MONEY NULL,
+        LandValue MONEY NULL,
+        EstimatedValue MONEY NULL,
+        CategoryForIncome INT NULL,
+        CategoryForTaxes INT NULL,
+        CategoryForInterest INT NULL,
+        CategoryForRepairs INT NULL,
+        CategoryForMaintenance INT NULL,
+        CategoryForManagement INT NULL,
+        OwnershipName1 NVARCHAR(255) NULL,
+        OwnershipName2 NVARCHAR(255) NULL,
+        OwnershipPercentage1 MONEY NULL,
+        OwnershipPercentage2 MONEY NULL,
+        Note NVARCHAR(255) NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+IF TYPE_ID(N'dbo.RentUnitRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.RentUnitRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        Building INT NOT NULL,
+        Name NVARCHAR(255) NULL,
+        Renter NVARCHAR(255) NULL,
+        Note NVARCHAR(255) NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.RentBuildings_SaveBatch
+    @Buildings dbo.RentBuildingSaveBatchRow READONLY,
+    @Units dbo.RentUnitRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Buildings r
+        LEFT JOIN dbo.RentBuildings c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(c.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Buildings r LEFT JOIN dbo.RentBuildings c ON c.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (c.Id IS NULL OR c.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Children before parent on delete, matching UpdateTransactions' documented FK-ordering rule.
+    DELETE u FROM dbo.RentUnits u JOIN @Units r ON u.Id = r.Id AND u.Building = r.Building WHERE r.[Action] = 'D';
+
+    DELETE c FROM dbo.RentBuildings c JOIN @Buildings r ON c.Id = r.Id WHERE r.[Action] = 'D';
+
+    INSERT INTO dbo.RentBuildings (Id, Name, Address, PurchasedDate, PurchasedPrice, LandValue, EstimatedValue,
+        CategoryForIncome, CategoryForTaxes, CategoryForInterest, CategoryForRepairs, CategoryForMaintenance,
+        CategoryForManagement, OwnershipName1, OwnershipName2, OwnershipPercentage1, OwnershipPercentage2, Note, Version)
+    SELECT Id, Name, Address, PurchasedDate, PurchasedPrice, LandValue, EstimatedValue, CategoryForIncome,
+        CategoryForTaxes, CategoryForInterest, CategoryForRepairs, CategoryForMaintenance, CategoryForManagement,
+        OwnershipName1, OwnershipName2, OwnershipPercentage1, OwnershipPercentage2, Note, 1
+    FROM @Buildings WHERE [Action] = 'I';
+
+    UPDATE c SET Name = r.Name, Address = r.Address, PurchasedDate = r.PurchasedDate, PurchasedPrice = r.PurchasedPrice,
+        LandValue = r.LandValue, EstimatedValue = r.EstimatedValue, CategoryForIncome = r.CategoryForIncome,
+        CategoryForTaxes = r.CategoryForTaxes, CategoryForInterest = r.CategoryForInterest,
+        CategoryForRepairs = r.CategoryForRepairs, CategoryForMaintenance = r.CategoryForMaintenance,
+        CategoryForManagement = r.CategoryForManagement, OwnershipName1 = r.OwnershipName1,
+        OwnershipName2 = r.OwnershipName2, OwnershipPercentage1 = r.OwnershipPercentage1,
+        OwnershipPercentage2 = r.OwnershipPercentage2, Note = r.Note, Version = c.Version + 1
+    FROM dbo.RentBuildings c JOIN @Buildings r ON c.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    INSERT INTO dbo.RentUnits (Id, Building, Name, Renter, Note)
+    SELECT Id, Building, Name, Renter, Note FROM @Units WHERE [Action] = 'I';
+
+    UPDATE u SET Name = r.Name, Renter = r.Renter, Note = r.Note
+    FROM dbo.RentUnits u JOIN @Units r ON u.Id = r.Id AND u.Building = r.Building
+    WHERE r.[Action] = 'U';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.RentBuildings WHERE Id IN (SELECT Id FROM @Buildings WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.RentBuildings_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.RentBuildings_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.RentBuildingSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.RentBuildingSaveBatchRow TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.RentUnitRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.RentUnitRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>RentBuildings_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadRentBuildings</code></strong></li>
+</ul>
+<p>Add <code>r.RowVersion = reader.GetInt64(18);</code> immediately before <code>r.OnUpdated();</code> (after the existing
+<code>foreach (var unit in money.Buildings.Units.GetList()...)</code> block and <code>collection.AddRentBuilding(r);</code>
+line, matching the method's existing ordering).</p>
+<ul>
+<li>[ ] <strong>Step 4: Add <code>NewRentBuildingRowTable</code>/<code>NewRentUnitRowTable</code>/<code>SaveRentBuildingBatch</code>, extend
+  <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        private static DataTable NewRentBuildingRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Address&quot;, typeof(string));
+            table.Columns.Add(&quot;PurchasedDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;PurchasedPrice&quot;, typeof(decimal));
+            table.Columns.Add(&quot;LandValue&quot;, typeof(decimal));
+            table.Columns.Add(&quot;EstimatedValue&quot;, typeof(decimal));
+            table.Columns.Add(&quot;CategoryForIncome&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryForTaxes&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryForInterest&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryForRepairs&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryForMaintenance&quot;, typeof(int));
+            table.Columns.Add(&quot;CategoryForManagement&quot;, typeof(int));
+            table.Columns.Add(&quot;OwnershipName1&quot;, typeof(string));
+            table.Columns.Add(&quot;OwnershipName2&quot;, typeof(string));
+            table.Columns.Add(&quot;OwnershipPercentage1&quot;, typeof(decimal));
+            table.Columns.Add(&quot;OwnershipPercentage2&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Note&quot;, typeof(string));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private static DataTable NewRentUnitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Building&quot;, typeof(int));
+            table.Columns.Add(&quot;Name&quot;, typeof(string));
+            table.Columns.Add(&quot;Renter&quot;, typeof(string));
+            table.Columns.Add(&quot;Note&quot;, typeof(string));
+            return table;
+        }
+
+        private void SaveRentBuildingBatch(List&lt;RentBuilding&gt; buildings, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable buildingRows = NewRentBuildingRowTable();
+            DataTable unitRows = NewRentUnitRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, RentBuilding&gt; byId = new Dictionary&lt;long, RentBuilding&gt;();
+            List&lt;RentBuilding&gt; deletedBuildings = new List&lt;RentBuilding&gt;();
+            List&lt;RentUnit&gt; deletedUnits = new List&lt;RentUnit&gt;();
+            List&lt;RentUnit&gt; savedUnits = new List&lt;RentUnit&gt;();
+
+            HashSet&lt;int&gt; buildingIds = new HashSet&lt;int&gt;();
+            RentBuildings buildingsContainer = null;
+            foreach (RentBuilding r in buildings)
+            {
+                buildingIds.Add(r.Id);
+                buildingsContainer = (RentBuildings)r.Parent;
+            }
+
+            if (buildingsContainer != null &amp;&amp; buildingsContainer.Units != null)
+            {
+                List&lt;RentUnit&gt; unitsSnapshot = new List&lt;RentUnit&gt;();
+                foreach (RentUnit u in buildingsContainer.Units)
+                {
+                    unitsSnapshot.Add(u);
+                }
+
+                foreach (RentUnit u in unitsSnapshot)
+                {
+                    if (!buildingIds.Contains(u.Building))
+                    {
+                        continue;
+                    }
+
+                    if (u.IsInserted)
+                    {
+                        unitRows.Rows.Add(&quot;I&quot;, u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsChanged)
+                    {
+                        unitRows.Rows.Add(&quot;U&quot;, u.Id, u.Building, u.Name, u.Renter, u.Note);
+                        savedUnits.Add(u);
+                    }
+                    else if (u.IsDeleted)
+                    {
+                        unitRows.Rows.Add(&quot;D&quot;, u.Id, u.Building, DBNull.Value, DBNull.Value, DBNull.Value);
+                        deletedUnits.Add(u);
+                    }
+                }
+            }
+
+            foreach (RentBuilding r in buildings)
+            {
+                long id = r.Id;
+                rootsById[id] = r;
+                byId[id] = r;
+                long callerRowVersion = r.RowVersion;
+                object purchasedDate = SqlServerDatabase.DBDateTimeParam(r.PurchasedDate);
+
+                if (r.IsInserted)
+                {
+                    buildingRows.Rows.Add(&quot;I&quot;, r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, DBNull.Value);
+                }
+                else if (r.IsChanged)
+                {
+                    buildingRows.Rows.Add(&quot;U&quot;, r.Id, r.Name, r.Address, purchasedDate, r.PurchasedPrice,
+                        r.LandValue, r.EstimatedValue, r.CategoryForIncome, r.CategoryForTaxes,
+                        r.CategoryForInterest, r.CategoryForRepairs, r.CategoryForMaintenance,
+                        r.CategoryForManagement, r.OwnershipName1, r.OwnershipName2, r.OwnershipPercentage1,
+                        r.OwnershipPercentage2, r.Note, callerRowVersion);
+                }
+                else if (r.IsDeleted)
+                {
+                    // 17 DBNull.Value placeholders between Id and ExpectedVersion, matching the
+                    // table's 17 nullable data columns (Name through Note) - count carefully if
+                    // touching this line, it's easy to drop one.
+                    buildingRows.Rows.Add(&quot;D&quot;, r.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedBuildings.Add(r);
+                }
+            }
+
+            if (buildingRows.Rows.Count == 0 &amp;&amp; unitRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.RentBuildings_SaveBatch&quot;,
+                new[]
+                {
+                    (&quot;@Buildings&quot;, &quot;dbo.RentBuildingSaveBatchRow&quot;, buildingRows),
+                    (&quot;@Units&quot;, &quot;dbo.RentUnitRow&quot;, unitRows)
+                },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    RentBuilding r = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        r.RowVersion = newVersion;
+                        r.OnUpdated();
+                    });
+                });
+
+            foreach (RentBuilding r in deletedBuildings)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    r.OnUpdated();
+                    r.Parent.RemoveChild(r, true);
+                });
+            }
+
+            foreach (RentUnit u in savedUnits)
+            {
+                postCommitActions.Add(() =&gt; u.OnUpdated());
+            }
+
+            foreach (RentUnit u in deletedUnits)
+            {
+                postCommitActions.Add(() =&gt; u.Parent.RemoveChild(u, true));
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(RentBuilding)) { this.SaveRentBuildingBatch(list.ConvertAll(r =&gt; (RentBuilding)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — all 7 <code>RentBuilding</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/RentBuildings_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for RentBuilding+RentUnit on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-12-transaction-compound-owned-splitsinvestment-transfer-fk-savetransfer">Task 12: <code>Transaction</code> (compound — owned <code>Splits</code>/<code>Investment</code>, Transfer FK) + <code>SaveTransfer</code><a class="headerlink" href="#task-12-transaction-compound-owned-splitsinvestment-transfer-fk-savetransfer" title="Permanent link">#</a></h3>
+<p>Most complex task. <code>dbo.Transactions_SaveBatch</code> takes <strong>three</strong> TVPs: <code>@Transactions</code>
+(version-checked), <code>@Splits</code>, <code>@Investments</code> (neither versioned — owned children, gated only by the
+parent transaction's version). <code>Transactions_SelectAll</code>'s existing order: <code>Id(0), Number(1), Date(2),
+Amount(3), Account(4), Status(5), Memo(6), Payee(7), Category(8), FITID(9), SalesTax(10), Flags(11),
+ReconciledDate(12), BudgetBalanceDate(13), MergeDate(14), OriginalPayee(15), Transfer(16),
+TransferSplit(17)</code> — <code>Version</code> becomes index 18. <code>Investment.Id</code> always equals its owning
+<code>Transaction.Id</code> (1:1, no separate sequence — confirmed by <code>Investments_SelectAll</code>/<code>ReadTransactions</code>
+both keying investments by the transaction's own <code>Id</code>). <code>Investment</code> has no <code>Parent</code>/<code>RemoveChild</code>
+(unlike <code>Split</code>/<code>RentUnit</code>) — it's a plain property on <code>Transaction</code>, not a <code>PersistentContainer</code>
+member; <code>MockDatabase.MarkOwnedChildrenClean</code>'s existing code only calls <code>OnUpdated()</code> for a
+non-deleted investment and does nothing at all for a deleted one — match that exactly, don't invent
+a <code>RemoveChild</code> call that doesn't exist for this type.</p>
+<p><strong>Transfer's self-referencing FK</strong> (see design doc): both <code>Transactions.Transfer</code>/<code>TransferSplit</code>
+and <code>Splits.Transfer</code> are inserted as <code>NULL</code> first, then a separate follow-up <code>UPDATE</code> sets the real
+cross-reference once every row in the batch already exists — safe regardless of whether SQL Server
+would have validated a self-referencing FK per-row or per-statement within one multi-row <code>INSERT</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Access/Transactions_AccessProcs.sql</code>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code></p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Confirm failing tests</strong> — <code>SaveOne_NewTransaction_PersistsAndSetsRowVersionToOne</code>,
+  <code>SaveOne_UpdateTransactionAfterReload_IncrementsRowVersion</code>,
+  <code>SaveOne_StaleTransactionRowVersion_ThrowsConcurrencyConflictException</code>,
+  <code>SaveOne_DeleteTransaction_RemovesRowFromDatabaseAndContainer</code>,
+  <code>SaveOne_TransactionWithNewSplit_PersistsSplitAndSetsItClean</code>,
+  <code>SaveOne_TransactionWithSplitOnlyEdit_PersistsSplitEvenThoughTransactionItselfIsUnchanged</code>,
+  <code>SaveOne_DeleteTransactionWithSplits_RemovesSplitsBeforeTransactionRow</code>,
+  <code>SaveOne_TransactionWithInvestment_PersistsInvestment</code>,
+  <code>SaveTransfer_CommitsBothTransactionsTogether</code>, <code>SaveTransfer_ConflictOnOneSideRollsBackBoth</code>.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Append to <code>Transactions_AccessProcs.sql</code></strong></p>
+</li>
+</ul>
+<pre><code class="language-sql">IF TYPE_ID(N'dbo.TransactionSaveBatchRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.TransactionSaveBatchRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id BIGINT NOT NULL,
+        Number NVARCHAR(10) NULL,
+        Account INT NULL,
+        Date DATETIME NULL,
+        Amount MONEY NULL,
+        Status INT NULL,
+        Memo NVARCHAR(255) NULL,
+        Payee INT NULL,
+        Category INT NULL,
+        FITID NVARCHAR(40) NULL,
+        SalesTax MONEY NULL,
+        Flags INT NULL,
+        ReconciledDate DATETIME NULL,
+        BudgetBalanceDate DATETIME NULL,
+        MergeDate DATETIME NULL,
+        OriginalPayee NVARCHAR(255) NULL,
+        Transfer BIGINT NULL,
+        TransferSplit INT NULL,
+        ExpectedVersion BIGINT NULL
+    )');
+END
+GO
+
+IF TYPE_ID(N'dbo.SplitRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.SplitRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id INT NOT NULL,
+        [Transaction] BIGINT NOT NULL,
+        Amount MONEY NULL,
+        Category INT NULL,
+        Memo NVARCHAR(255) NULL,
+        Transfer BIGINT NULL,
+        Payee INT NULL,
+        Flags INT NULL,
+        BudgetBalanceDate DATETIME NULL
+    )');
+END
+GO
+
+IF TYPE_ID(N'dbo.InvestmentRow') IS NULL
+BEGIN
+    EXEC('CREATE TYPE dbo.InvestmentRow AS TABLE (
+        [Action] CHAR(1) NOT NULL,
+        Id BIGINT NOT NULL,
+        Security INT NULL,
+        UnitPrice MONEY NULL,
+        Units MONEY NULL,
+        Commission MONEY NULL,
+        InvestmentType INT NULL,
+        TradeType INT NULL,
+        TaxExempt BIT NULL,
+        Withholding MONEY NULL,
+        MarkUpDown MONEY NULL,
+        Taxes MONEY NULL,
+        Fees MONEY NULL,
+        [Load] MONEY NULL
+    )');
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Transactions_SaveBatch
+    @Transactions dbo.TransactionSaveBatchRow READONLY,
+    @Splits dbo.SplitRow READONLY,
+    @Investments dbo.InvestmentRow READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    IF EXISTS (
+        SELECT 1 FROM @Transactions r
+        LEFT JOIN dbo.Transactions t ON t.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (t.Id IS NULL OR t.Version &lt;&gt; r.ExpectedVersion)
+    )
+    BEGIN
+        SELECT r.Id, ISNULL(t.Version, -1) AS StoredVersion, r.ExpectedVersion AS CallerVersion, 'CONFLICT' AS Result
+        FROM @Transactions r LEFT JOIN dbo.Transactions t ON t.Id = r.Id
+        WHERE r.[Action] IN ('U','D') AND (t.Id IS NULL OR t.Version &lt;&gt; r.ExpectedVersion);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Children before parent on delete.
+    DELETE s FROM dbo.Splits s JOIN @Splits r ON s.Id = r.Id AND s.[Transaction] = r.[Transaction] WHERE r.[Action] = 'D';
+    DELETE i FROM dbo.Investments i JOIN @Investments r ON i.Id = r.Id WHERE r.[Action] = 'D';
+    DELETE t FROM dbo.Transactions t JOIN @Transactions r ON t.Id = r.Id WHERE r.[Action] = 'D';
+
+    -- Parent before children on insert. Transfer/TransferSplit inserted NULL first - see this
+    -- task's own note on why, above.
+    INSERT INTO dbo.Transactions (Id, Number, Account, Date, Amount, Status, Memo, Payee, Category,
+        Transfer, TransferSplit, FITID, SalesTax, Flags, ReconciledDate, BudgetBalanceDate, MergeDate,
+        OriginalPayee, Version)
+    SELECT Id, Number, Account, Date, Amount, Status, Memo, Payee, Category, NULL, NULL, FITID,
+        SalesTax, Flags, ReconciledDate, BudgetBalanceDate, MergeDate, OriginalPayee, 1
+    FROM @Transactions WHERE [Action] = 'I';
+
+    UPDATE t SET Transfer = r.Transfer, TransferSplit = r.TransferSplit
+    FROM dbo.Transactions t JOIN @Transactions r ON t.Id = r.Id
+    WHERE r.[Action] = 'I' AND r.Transfer IS NOT NULL;
+
+    UPDATE t SET
+        Number = r.Number, Account = r.Account, Date = r.Date, Amount = r.Amount, Status = r.Status,
+        Memo = r.Memo, Payee = r.Payee, Category = r.Category, Transfer = r.Transfer,
+        TransferSplit = r.TransferSplit, FITID = r.FITID, SalesTax = r.SalesTax, Flags = r.Flags,
+        ReconciledDate = r.ReconciledDate, BudgetBalanceDate = r.BudgetBalanceDate, MergeDate = r.MergeDate,
+        OriginalPayee = r.OriginalPayee, Version = t.Version + 1
+    FROM dbo.Transactions t JOIN @Transactions r ON t.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    INSERT INTO dbo.Splits (Id, [Transaction], Amount, Category, Memo, Transfer, Payee, Flags, BudgetBalanceDate)
+    SELECT Id, [Transaction], Amount, Category, Memo, NULL, Payee, Flags, BudgetBalanceDate
+    FROM @Splits WHERE [Action] = 'I';
+
+    UPDATE s SET Transfer = r.Transfer
+    FROM dbo.Splits s JOIN @Splits r ON s.Id = r.Id AND s.[Transaction] = r.[Transaction]
+    WHERE r.[Action] = 'I' AND r.Transfer IS NOT NULL;
+
+    UPDATE s SET Amount = r.Amount, Category = r.Category, Memo = r.Memo, Transfer = r.Transfer,
+        Payee = r.Payee, Flags = r.Flags, BudgetBalanceDate = r.BudgetBalanceDate
+    FROM dbo.Splits s JOIN @Splits r ON s.Id = r.Id AND s.[Transaction] = r.[Transaction]
+    WHERE r.[Action] = 'U';
+
+    INSERT INTO dbo.Investments (Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType,
+        TaxExempt, Withholding, MarkUpDown, Taxes, Fees, [Load])
+    SELECT Id, Security, UnitPrice, Units, Commission, InvestmentType, TradeType, TaxExempt, Withholding,
+        MarkUpDown, Taxes, Fees, [Load]
+    FROM @Investments WHERE [Action] = 'I';
+
+    UPDATE i SET Security = r.Security, UnitPrice = r.UnitPrice, Units = r.Units, Commission = r.Commission,
+        InvestmentType = r.InvestmentType, TradeType = r.TradeType, TaxExempt = r.TaxExempt,
+        Withholding = r.Withholding, MarkUpDown = r.MarkUpDown, Taxes = r.Taxes, Fees = r.Fees, [Load] = r.[Load]
+    FROM dbo.Investments i JOIN @Investments r ON i.Id = r.Id
+    WHERE r.[Action] = 'U';
+
+    COMMIT TRANSACTION;
+
+    SELECT Id, Version AS NewVersion, 'OK' AS Result
+    FROM dbo.Transactions WHERE Id IN (SELECT Id FROM @Transactions WHERE [Action] IN ('I','U'));
+END
+GO
+
+GRANT EXECUTE ON dbo.Transactions_SaveBatch TO MyMoneyUser;
+GRANT EXECUTE ON dbo.Transactions_SaveBatch TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.TransactionSaveBatchRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.TransactionSaveBatchRow TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.SplitRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.SplitRow TO MyMoneyTest;
+GRANT EXECUTE ON TYPE::dbo.InvestmentRow TO MyMoneyUser;
+GRANT EXECUTE ON TYPE::dbo.InvestmentRow TO MyMoneyTest;
+GO
+</code></pre>
+<p>Also add <code>, Version</code> to <code>Transactions_SelectAll</code>'s SELECT list. Run the file against Redmond as
+<code>MyMoneyAdmin</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Extend <code>ReadTransactions</code></strong></li>
+</ul>
+<p>Add <code>t.RowVersion = reader.GetInt64(18);</code> right after <code>t.BatchMode = false;</code> and before
+<code>t.OnUpdated();</code> in the first <code>while (reader.Read())</code> loop (the one reading <code>Transactions_SelectAll</code>
+directly — not the Splits or Investments loops, which read different result sets and don't touch
+<code>RowVersion</code>).</p>
+<ul>
+<li>[ ] <strong>Step 4: Add the three <code>NewXxxRowTable</code> helpers, <code>SaveTransactionBatch</code>, <code>SaveTransfer</code>,
+  extend <code>SaveBatch</code></strong></li>
+</ul>
+<pre><code class="language-csharp">        public override void SaveTransfer(Transaction from, Transaction to)
+        {
+            this.SaveBatch(new PersistentObject[] { from, to });
+        }
+
+        private static DataTable NewTransactionRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(long));
+            table.Columns.Add(&quot;Number&quot;, typeof(string));
+            table.Columns.Add(&quot;Account&quot;, typeof(int));
+            table.Columns.Add(&quot;Date&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;Amount&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Status&quot;, typeof(int));
+            table.Columns.Add(&quot;Memo&quot;, typeof(string));
+            table.Columns.Add(&quot;Payee&quot;, typeof(int));
+            table.Columns.Add(&quot;Category&quot;, typeof(int));
+            table.Columns.Add(&quot;FITID&quot;, typeof(string));
+            table.Columns.Add(&quot;SalesTax&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Flags&quot;, typeof(int));
+            table.Columns.Add(&quot;ReconciledDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;BudgetBalanceDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;MergeDate&quot;, typeof(DateTime));
+            table.Columns.Add(&quot;OriginalPayee&quot;, typeof(string));
+            table.Columns.Add(&quot;Transfer&quot;, typeof(long));
+            table.Columns.Add(&quot;TransferSplit&quot;, typeof(int));
+            table.Columns.Add(&quot;ExpectedVersion&quot;, typeof(long));
+            return table;
+        }
+
+        private static DataTable NewSplitRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(int));
+            table.Columns.Add(&quot;Transaction&quot;, typeof(long));
+            table.Columns.Add(&quot;Amount&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Category&quot;, typeof(int));
+            table.Columns.Add(&quot;Memo&quot;, typeof(string));
+            table.Columns.Add(&quot;Transfer&quot;, typeof(long));
+            table.Columns.Add(&quot;Payee&quot;, typeof(int));
+            table.Columns.Add(&quot;Flags&quot;, typeof(int));
+            table.Columns.Add(&quot;BudgetBalanceDate&quot;, typeof(DateTime));
+            return table;
+        }
+
+        private static DataTable NewInvestmentRowTable()
+        {
+            DataTable table = new DataTable();
+            table.Columns.Add(&quot;Action&quot;, typeof(string));
+            table.Columns.Add(&quot;Id&quot;, typeof(long));
+            table.Columns.Add(&quot;Security&quot;, typeof(int));
+            table.Columns.Add(&quot;UnitPrice&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Units&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Commission&quot;, typeof(decimal));
+            table.Columns.Add(&quot;InvestmentType&quot;, typeof(int));
+            table.Columns.Add(&quot;TradeType&quot;, typeof(int));
+            table.Columns.Add(&quot;TaxExempt&quot;, typeof(bool));
+            table.Columns.Add(&quot;Withholding&quot;, typeof(decimal));
+            table.Columns.Add(&quot;MarkUpDown&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Taxes&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Fees&quot;, typeof(decimal));
+            table.Columns.Add(&quot;Load&quot;, typeof(decimal));
+            return table;
+        }
+
+        private void SaveTransactionBatch(List&lt;Transaction&gt; transactions, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            DataTable transactionRows = NewTransactionRowTable();
+            DataTable splitRows = NewSplitRowTable();
+            DataTable investmentRows = NewInvestmentRowTable();
+            Dictionary&lt;long, PersistentObject&gt; rootsById = new Dictionary&lt;long, PersistentObject&gt;();
+            Dictionary&lt;long, Transaction&gt; byId = new Dictionary&lt;long, Transaction&gt;();
+            List&lt;Transaction&gt; deletedTransactions = new List&lt;Transaction&gt;();
+            List&lt;Split&gt; savedSplits = new List&lt;Split&gt;();
+            List&lt;Split&gt; deletedSplits = new List&lt;Split&gt;();
+            List&lt;Investment&gt; savedInvestments = new List&lt;Investment&gt;();
+
+            foreach (Transaction t in transactions)
+            {
+                long id = t.Id;
+                rootsById[id] = t;
+                byId[id] = t;
+                long callerRowVersion = t.RowVersion;
+                object account = t.Account != null ? (object)t.Account.Id : DBNull.Value;
+                object payee = t.Payee != null ? (object)t.Payee.Id : DBNull.Value;
+                object category = t.Category != null ? (object)t.Category.Id : DBNull.Value;
+                object transferTarget = t.Transfer != null &amp;&amp; t.Transfer.Transaction != null ? (object)t.Transfer.Transaction.Id : DBNull.Value;
+                object transferSplit = t.Transfer != null &amp;&amp; t.Transfer.Split != null ? (object)t.Transfer.Split.Id : DBNull.Value;
+                object date = SqlServerDatabase.DBDateTimeParam(t.Date);
+                object reconciledDate = SqlServerDatabase.DBNullableDateTimeParam(t.ReconciledDate);
+                object budgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(t.BudgetBalanceDate);
+                object mergeDate = SqlServerDatabase.DBNullableDateTimeParam(t.MergeDate);
+
+                if (t.IsInserted)
+                {
+                    transactionRows.Rows.Add(&quot;I&quot;, t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, DBNull.Value);
+                }
+                else if (t.IsChanged)
+                {
+                    transactionRows.Rows.Add(&quot;U&quot;, t.Id, t.Number, account, date, t.Amount, (int)t.Status,
+                        t.Memo, payee, category, t.FITID, t.SalesTax, (int)t.Flags, reconciledDate,
+                        budgetBalanceDate, mergeDate, t.OriginalPayee, transferTarget, transferSplit, callerRowVersion);
+                }
+                else if (t.IsDeleted)
+                {
+                    transactionRows.Rows.Add(&quot;D&quot;, t.Id, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                        DBNull.Value, callerRowVersion);
+                    deletedTransactions.Add(t);
+                }
+
+                if (t.Splits != null)
+                {
+                    List&lt;Split&gt; splitsSnapshot = new List&lt;Split&gt;();
+                    foreach (Split s in t.Splits)
+                    {
+                        splitsSnapshot.Add(s);
+                    }
+
+                    foreach (Split s in splitsSnapshot)
+                    {
+                        object splitCategory = s.Category != null ? (object)s.Category.Id : DBNull.Value;
+                        object splitPayee = s.Payee != null ? (object)s.Payee.Id : DBNull.Value;
+                        object splitTransfer = s.Transfer != null &amp;&amp; s.Transfer.Transaction != null ? (object)s.Transfer.Transaction.Id : DBNull.Value;
+                        object splitBudgetBalanceDate = SqlServerDatabase.DBNullableDateTimeParam(s.BudgetBalanceDate);
+
+                        if (s.IsInserted)
+                        {
+                            splitRows.Rows.Add(&quot;I&quot;, s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsChanged)
+                        {
+                            splitRows.Rows.Add(&quot;U&quot;, s.Id, t.Id, s.Amount, splitCategory, s.Memo,
+                                splitTransfer, splitPayee, (int)s.Flags, splitBudgetBalanceDate);
+                            savedSplits.Add(s);
+                        }
+                        else if (s.IsDeleted)
+                        {
+                            splitRows.Rows.Add(&quot;D&quot;, s.Id, t.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                                DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                            deletedSplits.Add(s);
+                        }
+                    }
+                }
+
+                if (t.Investment != null)
+                {
+                    Investment i = t.Investment;
+                    object security = i.Security != null ? (object)i.Security.Id : DBNull.Value;
+
+                    if (i.IsInserted)
+                    {
+                        investmentRows.Rows.Add(&quot;I&quot;, i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsChanged)
+                    {
+                        investmentRows.Rows.Add(&quot;U&quot;, i.Id, security, i.UnitPrice, i.Units, i.Commission,
+                            (int)i.Type, (int)i.TradeType, i.TaxExempt, i.Withholding, i.MarkUpDown,
+                            i.Taxes, i.Fees, i.Load);
+                        savedInvestments.Add(i);
+                    }
+                    else if (i.IsDeleted)
+                    {
+                        investmentRows.Rows.Add(&quot;D&quot;, i.Id, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value,
+                            DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+                        // No savedInvestments.Add here and no separate &quot;deleted&quot; tracking either -
+                        // Investment has no Parent/RemoveChild (unlike Split/RentUnit), and
+                        // MockDatabase.MarkOwnedChildrenClean's own established behavior does
+                        // nothing at all for a deleted investment. Match that exactly.
+                    }
+                }
+            }
+
+            if (transactionRows.Rows.Count == 0 &amp;&amp; splitRows.Rows.Count == 0 &amp;&amp; investmentRows.Rows.Count == 0)
+            {
+                return;
+            }
+
+            this.ExecuteSaveBatchProc(connection, transaction, &quot;dbo.Transactions_SaveBatch&quot;,
+                new[]
+                {
+                    (&quot;@Transactions&quot;, &quot;dbo.TransactionSaveBatchRow&quot;, transactionRows),
+                    (&quot;@Splits&quot;, &quot;dbo.SplitRow&quot;, splitRows),
+                    (&quot;@Investments&quot;, &quot;dbo.InvestmentRow&quot;, investmentRows)
+                },
+                rootsById,
+                (id, newVersion) =&gt;
+                {
+                    Transaction t = byId[id];
+                    postCommitActions.Add(() =&gt;
+                    {
+                        t.RowVersion = newVersion;
+                        t.OnUpdated();
+                    });
+                });
+
+            foreach (Transaction t in deletedTransactions)
+            {
+                postCommitActions.Add(() =&gt;
+                {
+                    t.OnUpdated();
+                    t.Parent.RemoveChild(t, true);
+                });
+            }
+
+            foreach (Split s in savedSplits)
+            {
+                postCommitActions.Add(() =&gt; s.OnUpdated());
+            }
+
+            foreach (Split s in deletedSplits)
+            {
+                postCommitActions.Add(() =&gt; s.Parent.RemoveChild(s, true));
+            }
+
+            foreach (Investment i in savedInvestments)
+            {
+                postCommitActions.Add(() =&gt; i.OnUpdated());
+            }
+        }
+</code></pre>
+<p>In <code>SaveBatch</code>, add <code>else if (firstType == typeof(Transaction)) { this.SaveTransactionBatch(list.ConvertAll(r =&gt; (Transaction)r), connection, null, postCommitActions); }</code> before the final <code>else</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 5: Run SQL Server contract tests</strong> — all 10 <code>Transaction</code>/<code>SaveTransfer</code> tests now pass.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Access/Transactions_AccessProcs.sql Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch/SaveTransfer for Transaction on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<p>At this point every <code>IAggregateRoot</code> type has real <code>SaveOne</code>/<code>SaveBatch</code> support — the full
+<code>DatabaseContractTests</code> suite (minus the still-open mixed-type case, Task 13) should be green
+against <code>SqlServerDatabaseContractTests</code>.</p>
+<hr />
+<h3 id="task-13-genuinely-mixed-entity-type-savebatch-ambient-transaction-nested-rollback-handling">Task 13: Genuinely mixed-entity-type <code>SaveBatch</code> (ambient transaction, nested-rollback handling)<a class="headerlink" href="#task-13-genuinely-mixed-entity-type-savebatch-ambient-transaction-nested-rollback-handling" title="Permanent link">#</a></h3>
+<p>Every task so far dispatches a batch to exactly one entity's <code>SaveXxxBatch</code> method, since every
+current real caller (<code>SaveOne</code>, <code>SaveTransfer</code>, and the same-type batch conflict test) only ever
+sends a single type. This task adds real support for a batch spanning more than one entity type
+(e.g. one <code>Category</code> + one <code>Account</code> together) — contractually legal per
+<code>IDatabase.SaveBatch(IEnumerable&lt;PersistentObject&gt;)</code>'s signature, but untested until now. Each
+entity's <code>_SaveBatch</code> proc owns its own internal <code>BEGIN TRANSACTION</code>/<code>COMMIT</code>/<code>ROLLBACK</code>; true
+atomicity across two separate proc calls requires an ambient <code>SqlTransaction</code> opened by C# first, so
+each proc's internal <code>BEGIN TRAN</code> becomes a <em>nested</em> transaction — SQL Server's rule that <code>ROLLBACK
+TRANSACTION</code> always unwinds to the <em>outermost</em> <code>BEGIN</code>, regardless of nesting depth, is what makes
+this correct: if a later group's proc conflicts and rolls back, it correctly undoes every earlier
+group's work too (an inner <code>COMMIT</code> just decrements the nesting counter; only the true outer
+<code>Commit()</code> finalizes anything).</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs</code> (rewrite <code>SaveBatch</code>, add
+  <code>IsSupportedSaveBatchType</code>/<code>DispatchSaveBatchForType</code>)
+- Modify: <code>Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs</code> (new shared test)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: every <code>SaveXxxBatch</code> method from Tasks 2–12 (all already accept a <code>SqlTransaction
+  transaction</code> parameter, used as <code>null</code> until now).
+- Produces: nothing new for later tasks — this is the last SQL Server code change in this plan.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs</code> (a general-purpose,
+non-entity-specific test, alongside <code>SaveAndReload_ResolvesAccountCategoryAndInvestmentSecurityForwardReferences</code>):</p>
+<pre><code class="language-csharp">        [Test]
+        public void SaveBatch_MixedEntityTypesAcrossOneBatch_CommitsOrRollsBackTogether()
+        {
+            MyMoney money = new MyMoney();
+            Category category = money.Categories.GetOrCreateCategory(&quot;MixedBatchCategory&quot;, CategoryType.Expense);
+            Account account = money.Accounts.AddAccount(&quot;MixedBatchAccount&quot;);
+            this.Database.SaveBatch(new PersistentObject[] { category, account });
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Categories.FindCategory(&quot;MixedBatchCategory&quot;), Is.Not.Null);
+            Assert.That(reloaded.Accounts.FindAccount(&quot;MixedBatchAccount&quot;), Is.Not.Null);
+
+            // Both conflicting roots come from ONE shared reader graph - not two separate Load()
+            // calls - matching SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState's
+            // pattern above. Two different graphs would trip MockDatabase.SaveBatch's own
+            // same-graph guard (MockDatabase.cs's &quot;SaveBatch roots belong to different MyMoney
+            // graphs&quot; InvalidOperationException) before the RowVersion conflict check ever runs -
+            // an earlier draft of this test used readerA/readerB and failed against Mock for
+            // exactly that reason, caught during Task 13's implementation.
+            MyMoney reader = this.Database.Load(null);
+            Account staleAccount = reader.Accounts.FindAccount(&quot;MixedBatchAccount&quot;);
+            staleAccount.Description = &quot;Attempted stale&quot;;
+
+            Category freshCategory = reader.Categories.FindCategory(&quot;MixedBatchCategory&quot;);
+            freshCategory.Description = &quot;Attempted fresh&quot;;
+
+            // Someone else updates the account first, so staleAccount's RowVersion is now behind.
+            MyMoney otherWriter = this.Database.Load(null);
+            Account otherAccount = otherWriter.Accounts.FindAccount(&quot;MixedBatchAccount&quot;);
+            otherAccount.Description = &quot;Changed elsewhere&quot;;
+            this.Database.SaveOne(otherAccount);
+
+            // freshCategory listed FIRST deliberately - same reasoning as
+            // SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState: its
+            // own type-group's proc call &quot;succeeds&quot; (commits, or nests-and-decrements under an
+            // ambient transaction) before staleAccount's type-group conflicts on the next call.
+            Assert.Throws&lt;ConcurrencyConflictException&gt;(
+                () =&gt; this.Database.SaveBatch(new PersistentObject[] { freshCategory, staleAccount }));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Categories.FindCategory(&quot;MixedBatchCategory&quot;).Description, Is.Not.EqualTo(&quot;Attempted fresh&quot;));
+            Assert.That(freshCategory.IsChanged, Is.True);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run it against all three engines to confirm the current state</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SaveBatch_MixedEntityTypesAcrossOneBatch"</code>
+Expected: PASS against <code>MockDatabaseContractTests</code> and <code>SqliteDatabaseContractTests</code> (neither
+engine ever special-cased type — <code>MockDatabase</code> re-serializes the whole graph regardless of type
+mix; <code>SqliteDatabase</code> loops every root in one shared <code>SQLiteTransaction</code> regardless of type). FAIL
+against <code>SqlServerDatabaseContractTests</code> (with the SQL Server env vars set) — <code>SaveBatch</code>'s current
+<code>Type firstType = list[0].GetType()</code> guard sends a genuinely mixed-type batch to <code>base.SaveBatch</code>,
+the <code>NotImplementedException</code> stub.</p>
+<ul>
+<li>[ ] <strong>Step 3: Replace <code>SaveBatch</code> with the grouped, ambient-transaction-aware version</strong></li>
+</ul>
+<p>Replace the whole <code>SaveBatch</code> method (built incrementally across Tasks 2–12) with:</p>
+<pre><code class="language-csharp">        public override void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            List&lt;PersistentObject&gt; list = new List&lt;PersistentObject&gt;(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary&lt;Type, List&lt;PersistentObject&gt;&gt; groupedByType = new Dictionary&lt;Type, List&lt;PersistentObject&gt;&gt;();
+            foreach (PersistentObject root in list)
+            {
+                Type type = root.GetType();
+                if (!IsSupportedSaveBatchType(type))
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+                if (!groupedByType.TryGetValue(type, out List&lt;PersistentObject&gt; group))
+                {
+                    group = new List&lt;PersistentObject&gt;();
+                    groupedByType[type] = group;
+                }
+                group.Add(root);
+            }
+
+            this.Connect();
+            using (SqlConnection connection = new SqlConnection(this.GetConnectionString(true)))
+            {
+                connection.Open();
+                List&lt;Action&gt; postCommitActions = new List&lt;Action&gt;();
+
+                if (groupedByType.Count == 1)
+                {
+                    // Common case: one entity type, no ambient transaction needed - the proc's own
+                    // internal BEGIN TRAN/COMMIT/ROLLBACK is already a complete, standalone
+                    // transaction.
+                    foreach (var group in groupedByType)
+                    {
+                        this.DispatchSaveBatchForType(group.Key, group.Value, connection, null, postCommitActions);
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
+                    return;
+                }
+
+                using (SqlTransaction ambientTransaction = connection.BeginTransaction())
+                {
+                    try
+                    {
+                        foreach (var group in groupedByType)
+                        {
+                            this.DispatchSaveBatchForType(group.Key, group.Value, connection, ambientTransaction, postCommitActions);
+                        }
+                        ambientTransaction.Commit();
+                    }
+                    catch (Exception originalException)
+                    {
+                        try
+                        {
+                            ambientTransaction.Rollback();
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // A _SaveBatch proc's own internal ROLLBACK TRANSACTION on conflict
+                            // already unwound the WHOLE ambient transaction (SQL Server's
+                            // nested-transaction rule: ROLLBACK always targets the outermost
+                            // BEGIN, regardless of nesting depth) - by the time control returns
+                            // here, @@TRANCOUNT is already 0 and this SqlTransaction object is
+                            // &quot;zombied&quot;. That's success, not a new failure: only a genuinely new
+                            // rollback failure (any other exception type) should mask/wrap the
+                            // original exception, matching SqliteDatabase.SaveBatch's identical
+                            // never-hide-the-original-exception rule.
+                            _ = originalException;
+                        }
+                        throw;
+                    }
+                    foreach (Action action in postCommitActions)
+                    {
+                        action();
+                    }
+                }
+            }
+        }
+
+        private static bool IsSupportedSaveBatchType(Type type)
+        {
+            return type == typeof(Category) || type == typeof(Currency) || type == typeof(OnlineAccount)
+                || type == typeof(Account) || type == typeof(Payee) || type == typeof(Alias)
+                || type == typeof(Security) || type == typeof(StockSplit) || type == typeof(LoanPayment)
+                || type == typeof(RentBuilding) || type == typeof(Transaction);
+        }
+
+        private void DispatchSaveBatchForType(Type type, List&lt;PersistentObject&gt; roots, SqlConnection connection, SqlTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            if (type == typeof(Category))
+            {
+                this.SaveCategoryBatch(roots.ConvertAll(r =&gt; (Category)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Currency))
+            {
+                this.SaveCurrencyBatch(roots.ConvertAll(r =&gt; (Currency)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(OnlineAccount))
+            {
+                this.SaveOnlineAccountBatch(roots.ConvertAll(r =&gt; (OnlineAccount)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Account))
+            {
+                this.SaveAccountBatch(roots.ConvertAll(r =&gt; (Account)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Payee))
+            {
+                this.SavePayeeBatch(roots.ConvertAll(r =&gt; (Payee)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Alias))
+            {
+                this.SaveAliasBatch(roots.ConvertAll(r =&gt; (Alias)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Security))
+            {
+                this.SaveSecurityBatch(roots.ConvertAll(r =&gt; (Security)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(StockSplit))
+            {
+                this.SaveStockSplitBatch(roots.ConvertAll(r =&gt; (StockSplit)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(LoanPayment))
+            {
+                this.SaveLoanPaymentBatch(roots.ConvertAll(r =&gt; (LoanPayment)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(RentBuilding))
+            {
+                this.SaveRentBuildingBatch(roots.ConvertAll(r =&gt; (RentBuilding)r), connection, transaction, postCommitActions);
+            }
+            else if (type == typeof(Transaction))
+            {
+                this.SaveTransactionBatch(roots.ConvertAll(r =&gt; (Transaction)r), connection, transaction, postCommitActions);
+            }
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run the new test against all three engines</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SaveBatch_MixedEntityTypesAcrossOneBatch"</code>
+Expected: PASS against all three (<code>MockDatabaseContractTests</code>, <code>SqliteDatabaseContractTests</code>,
+<code>SqlServerDatabaseContractTests</code>).</p>
+<ul>
+<li>[ ] <strong>Step 5: Run the full SQL Server contract suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqlServerDatabaseContractTests"</code>
+Expected: every test passes — this is the first fully-green run of the whole shared suite against
+SQL Server.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 6: Full build and regression check</strong> — same commands as Task 2 Step 6.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 7: Commit</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlServerStoredProcDatabase.cs Source/WPF/MyMoney.TestSupport/DatabaseContractTests.cs
+git commit -m &quot;Support genuinely mixed-entity-type SaveBatch on SqlServerStoredProcDatabase&quot;
+</code></pre>
+<hr />
+<h3 id="task-14-_test_reset-procs-for-the-10-remaining-iaggregateroot-tables">Task 14: <code>_Test_Reset</code> procs for the 10 remaining <code>IAggregateRoot</code> tables<a class="headerlink" href="#task-14-_test_reset-procs-for-the-10-remaining-iaggregateroot-tables" title="Permanent link">#</a></h3>
+<p><strong>Scope correction found while planning this task</strong>: the design doc's "Test-support stored procs"
+section assumed <code>Payees_Test_Reset</code> (the one existing example) was already wired into
+<code>SqlServerTestDatabase.WipeAllTables()</code>. It isn't — grepped the whole codebase and confirmed
+<code>Payees_Test_Reset</code> is never called from anywhere, and no <code>MyMoneyTest</code>-tier connection-string
+environment variable exists at all (only <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>, <code>MyMoneyUser</code>
+tier, and <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>, <code>MyMoneyAdmin</code> tier, are wired up anywhere).
+Actually switching <code>WipeAllTables()</code> over would mean introducing a brand-new required environment
+variable and changing the documented "three environment variables" contract
+(<code>docs/dev/index.md</code>, <code>SqlServerDatabaseContractTests</code>'s own doc comment) — a bigger change than a
+ride-along fix warrants this late in an already-large plan. This task does the concrete, additive
+half only: define the missing procs, matching the one already-established (if unused) example, so
+they exist and are grantable whenever that wiring work is picked up. <code>WipeAllTables()</code> itself is
+untouched — still functionally correct via the admin connection, just not yet tiered. Recorded
+under "What's next" below, not silently dropped.</p>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlScripts/Test/Categories_TestProcs.sql</code>,
+  <code>Currencies_TestProcs.sql</code>, <code>OnlineAccounts_TestProcs.sql</code>, <code>Accounts_TestProcs.sql</code>,
+  <code>Aliases_TestProcs.sql</code>, <code>Securities_TestProcs.sql</code>, <code>StockSplits_TestProcs.sql</code>,
+  <code>LoanPayments_TestProcs.sql</code>, <code>RentBuildings_TestProcs.sql</code>, <code>Transactions_TestProcs.sql</code> (all
+  new files, one per entity, matching <code>Payees_TestProcs.sql</code>'s existing granularity)</p>
+<ul>
+<li>[ ] <strong>Step 1: Create the 10 new test-proc files</strong></li>
+</ul>
+<p>Each follows <code>Payees_TestProcs.sql</code>'s exact shape. Example (<code>Categories_TestProcs.sql</code>):</p>
+<pre><code class="language-sql">-- Categories_TestProcs.sql
+-- Run as the MyMoneyAdmin login against the MyMoney database.
+-- Test-support operations too risky to grant MyMoneyUser: this proc
+-- wipes all Categories rows unconditionally for test setup/teardown.
+
+USE MyMoney;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.Categories_Test_Reset
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.Categories;
+END
+GO
+
+GRANT EXECUTE ON dbo.Categories_Test_Reset TO MyMoneyTest;
+GO
+</code></pre>
+<p>Create the other 9 identically, substituting the table name (<code>Currencies</code>, <code>OnlineAccounts</code>,
+<code>Accounts</code>, <code>Aliases</code>, <code>Securities</code>, <code>StockSplits</code>, <code>LoanPayments</code>, <code>RentBuildings</code>,
+<code>Transactions</code>) in the filename, proc name (<code>&lt;Table&gt;_Test_Reset</code>), comment, and <code>DELETE FROM</code>
+target. Run each against Redmond as <code>MyMoneyAdmin</code>, same <code>sqlcmd -i</code> pattern as every earlier task.</p>
+<ul>
+<li>[ ] <strong>Step 2: Verify the procs exist and are granted correctly</strong></li>
+</ul>
+<pre><code class="language-powershell">$creds = Get-Content &quot;$env:USERPROFILE\.secrets\MyMoney\dataengine.credentials.json&quot; | ConvertFrom-Json
+$env:SQLCMDPASSWORD = $creds.MyMoneyAdmin.Password
+sqlcmd -S Redmond -d MyMoney -U $creds.MyMoneyAdmin.UserId -C -Q &quot;SELECT p.name FROM sys.procedures p WHERE p.name LIKE '%_Test_Reset' ORDER BY p.name&quot;
+</code></pre>
+<p>Expected: 11 rows (the new 10 plus the pre-existing <code>Payees_Test_Reset</code>).</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlScripts/Test/
+git commit -m &quot;Add _Test_Reset procs for the remaining IAggregateRoot tables (not yet wired into WipeAllTables)&quot;
+</code></pre>
+<hr />
+<h3 id="task-15-full-regression-check">Task 15: Full regression check<a class="headerlink" href="#task-15-full-regression-check" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong> none — verification only.</p>
+<ul>
+<li>[ ] <strong>Step 1: Full solution build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.</p>
+<ul>
+<li>[ ] <strong>Step 2: Full solution test run without SQL Server env vars</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code>
+Expected: matches the established baseline exactly (<code>MyMoney.TestSupport</code>'s <code>SqlServerDatabaseContractTests</code>
+tests fail fast with the <code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE</code>/connection-string guard messages when
+the SQL Server env vars aren't set — same as before this plan started; the 1 <code>ScenarioTest</code> FlaUI
+flake is pre-existing and unrelated). No new failures anywhere else.</p>
+<ul>
+<li>[ ] <strong>Step 3: Full solution test run WITH SQL Server env vars set</strong></li>
+</ul>
+<pre><code class="language-powershell">$creds = Get-Content &quot;$env:USERPROFILE\.secrets\MyMoney\dataengine.credentials.json&quot; | ConvertFrom-Json
+$env:MYMONEY_TEST_SQLSERVER_USER_CONNECTION = &quot;Data Source=Redmond;Initial Catalog=MyMoney;User ID=$($creds.MyMoneyUser.UserId);Password=$($creds.MyMoneyUser.Password);TrustServerCertificate=True&quot;
+$env:MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION = &quot;Data Source=Redmond;Initial Catalog=MyMoney;User ID=$($creds.MyMoneyAdmin.UserId);Password=$($creds.MyMoneyAdmin.Password);TrustServerCertificate=True&quot;
+$env:MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE = &quot;1&quot;
+dotnet test Source/WPF/MyMoney.sln -m:1
+</code></pre>
+<p>Expected: every test passes, including the full <code>SqlServerDatabaseContractTests</code> suite (the entire
+point of this plan) and <code>SqlServerStoredProcDatabaseTests</code> (<code>Source/WPF/UnitTests</code>, which shares the
+same live database). <code>-m:1</code> is required whenever these env vars are set — see <code>docs/dev/index.md</code>'s
+"Required flag when SQL Server env vars are set" (without it, <code>MyMoney.TestSupport</code> and <code>UnitTests</code>
+race against the same live database and can collide on primary keys).</p>
+<ul>
+<li>[ ] <strong>Step 4: Confirm issue #19's original ask is now fully proven, not just wired up</strong></li>
+</ul>
+<p>Re-read <code>docs/superpowers/specs/2026-09-17-persistence-concurrency-phase2c-design.md</code> and this
+plan's own header against the actual final state: every <code>IAggregateRoot</code> type has a real
+<code>SaveOne</code>/<code>SaveBatch</code> implementation on <code>SqlServerStoredProcDatabase</code>; <code>SaveTransfer</code> works;
+mixed-entity-type batches are atomic; the full shared <code>DatabaseContractTests</code> suite passes
+identically against <code>MockDatabase</code>, <code>SqliteDatabase</code>, and <code>SqlServerStoredProcDatabase</code>. No further
+action needed here beyond confirming — this step is a checkpoint, not new work.</p>
+<hr />
+<h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Wire <code>_Test_Reset</code> procs into <code>SqlServerTestDatabase.WipeAllTables()</code></strong> (Task 14's deferred
+  half): needs a new <code>MyMoneyTest</code>-tier connection-string environment variable
+  (e.g. <code>MYMONEY_TEST_SQLSERVER_TEST_CONNECTION</code>), updates to <code>docs/dev/index.md</code>'s documented
+  environment-variable contract, and care to preserve <code>TablesToWipe</code>'s existing FK-safe delete
+  order when mixing tiered-proc calls (for the 11 tables with a <code>_Test_Reset</code> proc) with the
+  remaining raw admin <code>DELETE</code>s (<code>Splits</code>, <code>Investments</code>, <code>TransactionExtras</code>, <code>AccountAliases</code>,
+  <code>RentUnits</code> — none of which are <code>IAggregateRoot</code> types this plan added <code>_SaveBatch</code> support for).</li>
+<li>R5 (pull-based staleness/refresh) — SQL Server's native Change Tracking
+  (<code>CHANGE_TRACKING_CURRENT_VERSION()</code>/<code>CHANGETABLE(CHANGES ...)</code>) is the recommended mechanism when
+  this is picked up, per the design doc.</li>
+<li>A real multi-connection SQLite contention test (still open from Phase 2b's own "what's next").</li>
+<li>The detached-root <code>InvalidOperationException</code> path and other untested <code>SaveBatch</code> edge cases
+  already flagged in prior-phase notes remain deferred, unrelated to this plan's scope.</li>
+<li>Cross-engine parity is now complete for <code>SaveOne</code>/<code>SaveBatch</code>/<code>SaveTransfer</code>: <code>MockDatabase</code>,
+  <code>SqliteDatabase</code>, and <code>SqlServerStoredProcDatabase</code> all pass the identical shared contract suite.
+  The persistence-concurrency redesign's core arc (Phase 1 → 2a → 2b → entity-extension →
+  RentBuilding → Transaction → test consolidation → Phase 2c) is done.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

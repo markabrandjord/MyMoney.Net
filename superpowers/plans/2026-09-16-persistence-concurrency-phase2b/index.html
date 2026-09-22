@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-16-persistence-concurrency-phase2b/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Persistence Concurrency — Phase 2b (SQLite Infra + Category Proof-of-Pattern) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Persistence Concurrency \u2014 Phase 2b (SQLite Infra + Category Proof-of-Pattern) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "What\u0027s next", url: "#whats-next" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="persistence-concurrency-phase-2b-sqlite-infra-category-proof-of-pattern-implementation-plan">Persistence Concurrency — Phase 2b (SQLite Infra + Category Proof-of-Pattern) Implementation Plan<a class="headerlink" href="#persistence-concurrency-phase-2b-sqlite-infra-category-proof-of-pattern-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Give <code>SqliteDatabase</code> its own real transaction/concurrency infrastructure (WAL mode,
+<code>busy_timeout</code>, an explicit per-call <code>SQLiteTransaction</code>, a row-count-returning SQL-execution path)
+and use it to implement <code>SaveOne</code>/<code>SaveBatch</code> for real for exactly one entity type (<code>Category</code>) —
+proving the pattern end-to-end (real atomic transaction, real <code>RowVersion</code> optimistic-concurrency
+conflict detection, real <code>Load()</code> round-trip of the version column) before committing to writing the
+same shape ten more times for the remaining aggregate-root types.</p>
+<p><strong>Architecture:</strong> Phase 2a proved the <em>contract</em> (shapes, exception semantics, atomicity-on-conflict
+behavior) against <code>MockDatabase</code>, an in-memory double with no real transactions. Phase 2b is the
+first <em>real</em> storage engine, and SQLite's per-row optimistic-concurrency mechanism works differently
+from <code>MockDatabase</code>'s: instead of a separate validate-then-mutate pass over an in-memory dictionary,
+each <code>UPDATE</code>/<code>DELETE</code> carries its own <code>WHERE Id=@Id AND Version=@Expected</code> clause and is executed
+inside one real <code>SQLiteTransaction</code> spanning the whole <code>SaveBatch</code> call. A zero-rows-affected
+<code>UPDATE</code>/<code>DELETE</code> <em>is</em> the conflict signal — no separate check needed — and if it happens partway
+through a multi-root batch, the transaction's rollback (triggered from the same <code>catch</code> that
+converts it into <code>ConcurrencyConflictException</code>) undoes everything already written in that call,
+giving genuine all-or-nothing atomicity for free from the database itself, not from application-level
+two-phase bookkeeping the way <code>MockDatabase</code> needed. This also means two of <code>MockDatabase</code>'s
+<a href="../2026-09-16-persistence-concurrency-phase2a/">Phase 2a final-review fixes</a> don't need SQLite
+analogues: a duplicate root in one batch naturally conflicts on its second write (the first write's
+commit-not-yet-happened value only exists at COMMIT time, but within one transaction the <em>second</em>
+<code>UPDATE</code> against the <em>same</em> uncommitted row still sees the first <code>UPDATE</code>'s effect per SQLite's
+read-your-own-writes semantics inside a transaction, so its <code>WHERE Version=@Expected</code> — still holding
+the caller's original stale value — finds zero rows and conflicts correctly), and there is no
+"multi-graph batch" failure mode at all, since each row write targets the real on-disk table by <code>Id</code>,
+never a whole in-memory graph.</p>
+<p>Scope is deliberately narrow: <strong>only <code>Category</code></strong> (the simplest aggregate root — no owned children,
+no FK columns) gets a real <code>SaveOne</code>/<code>SaveBatch</code> implementation in this plan. Every other aggregate
+root type still falls through to the inherited Phase 2a stub (<code>NotImplementedException</code>) when passed
+to <code>SqliteDatabase.SaveOne</code>/<code>SaveBatch</code>. <code>SaveTransfer</code> is untouched (still throws) — it's
+<code>Transaction</code>-specific and <code>Transaction</code> isn't wired yet. Extending the now-proven pattern to the
+remaining ~10 entity types, <code>SaveOne&lt;Transaction&gt;</code>'s compound Splits/Investment handling,
+<code>SaveOne&lt;RentBuilding&gt;</code>'s compound RentUnit handling, and <code>SaveTransfer</code> is a follow-up plan (not yet
+written) — see "What's next".</p>
+<p><strong>Key design facts this plan depends on</strong> (verified against actual code in this session, not
+assumed):
+- <code>SqliteDatabase : SqlServerDatabase</code> (<code>SqliteDatabase.cs:14</code>) inherits <code>Save(MyMoney)</code> and the
+  Phase 2a <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> stubs unchanged — it does not override any
+  <code>UpdateXxx</code>/<code>ReadXxx</code> method today.
+- <code>SqlServerDatabase.transaction</code> (<code>SqlDatabase.cs:703</code>, <code>private SqlTransaction</code>) is <strong>private</strong> —
+  <code>SqliteDatabase</code> cannot see it even if it wanted to. SQLite needs its own transaction field; there
+  is no shared engine-agnostic transaction machinery to reuse.
+- <code>SqliteDatabase</code>'s existing <code>ExecuteNonQuery</code>/<code>ExecuteScalar</code>/<code>ExecuteReader</code> overrides
+  (<code>SqliteDatabase.cs:422-556</code>) build every <code>SQLiteCommand</code> with <strong>no transaction parameter at all</strong>
+  — <code>Save(MyMoney)</code>'s existing SQLite atomicity rests entirely on <code>System.Data.SQLite</code>'s undocumented
+  connection-level auto-enlist behavior. This plan does not touch those existing methods (additive
+  only) — it adds new, separate, explicitly-transacted methods for the new primitives.
+- The <code>Version</code> column (SQLite's per-flavor name for the optimistic-concurrency column, added in
+  Phase 1) is <strong>completely dead in C# code today</strong> — grepped, the only reference anywhere in
+  <code>SqlDatabase.cs</code>/<code>SqliteDatabase.cs</code> is Phase 1's schema-diffing guard that skips it during
+  column-drop detection. No <code>SELECT</code>, <code>INSERT</code>, or <code>UPDATE</code> touches it. This plan is starting from a
+  clean slate, not extending partial wiring.
+- <code>ExecuteNonQuery</code> returns <code>void</code> everywhere today (base <code>SqlDatabase.cs:986</code>/<code>:1014</code>, SQLite
+  override <code>SqliteDatabase.cs:484</code>/<code>:510</code>) — the underlying <code>command.ExecuteNonQuery()</code> int
+  (rows-affected) return is discarded. Detecting a conflict needs that count, so this plan adds new
+  methods rather than changing the existing (widely-called) signature.</p>
+<p><strong>Tech Stack:</strong> .NET 10 (<code>net10.0-windows7.0</code>), <code>System.Data.SQLite</code> (confirmed — not
+<code>Microsoft.Data.Sqlite</code>), NUnit 4.6.1.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md</code> (R3's per-flavor
+atomicity, R4's <code>RowVersion</code> conflict detection — this plan implements both for real, for one
+engine). Builds on <code>docs/superpowers/plans/2026-09-16-persistence-concurrency-phase2a.md</code> (merged —
+<code>IAggregateRoot</code>, <code>ConcurrencyConflictException</code>, the <code>IDatabase.SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code>
+contract, <code>PersistentObject.RowVersion</code>).</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Additive only: <code>Save(MyMoney)</code>, every existing <code>UpdateXxx</code>/<code>ReadXxx</code> override, and
+  <code>SqliteDatabase</code>'s existing <code>ExecuteNonQuery</code>/<code>ExecuteScalar</code>/<code>ExecuteReader</code> overrides are
+  untouched. No UI/business call site is rewired — that is Phase 3 (R1).</li>
+<li>This plan touches <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code> (new members, plus a retrofit of
+  <code>CreateOrUpdateTable</code>'s existing body — see Task 2 Step 5) and
+  <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (one new <code>protected virtual</code> property, additive, no
+  behavior change for <code>SqlServerDatabase</code> since nothing reads it there yet, plus
+  <code>SqlServerDatabase.IncrementProgress</code>'s visibility changing from <code>private</code> to <code>protected</code> so
+  <code>SqliteDatabase.ReadCategories</code> can call it). <code>SqlServerStoredProcDatabase</code>
+  and real SQL Server behavior are Phase 2c's job, not this plan's.</li>
+<li><code>SqliteDatabase.SaveOne&lt;T&gt;</code>/<code>SaveBatch</code> only handle <code>Category</code> for real in this plan. Every other
+  type passed to them must fall through to <code>base.SaveOne</code>/<code>base.SaveBatch</code> (the inherited Phase 2a
+  stub) — do not partially implement any other entity type "while we're in there."</li>
+<li>Every task must leave <code>dotnet build Source/WPF/MyMoney.sln</code> at 0 errors and
+  <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> green (relative to the pre-existing baseline — the 7
+  SQL-Server-env-gated <code>MyMoney.TestSupport</code> failures and the 1 <code>ScenarioTest</code> FlaUI flake are
+  expected and unrelated; verify no <em>new</em> failures, not a fully clean run).</li>
+</ul>
+<hr />
+<h3 id="task-1-wal-mode-busy_timeout-on-every-sqlite-connection">Task 1: WAL mode + <code>busy_timeout</code> on every SQLite connection<a class="headerlink" href="#task-1-wal-mode-busy_timeout-on-every-sqlite-connection" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs:131-144</code> (<code>Connect()</code>)
+- Test: <code>Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing new.
+- Produces: nothing new — this task only changes connection-open behavior. Task 2 depends on the
+  connection already being WAL-mode by the time its new transaction-scoped methods run, but doesn't
+  call anything new from this task directly.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs</code> (it's a concrete, non-abstract
+<code>[TestFixture]</code> inheriting <code>DatabaseContractTests</code> — new <code>[Test]</code> methods go directly on it, same
+pattern <code>MockDatabaseContractTests</code> used in Phase 2a):</p>
+<pre><code class="language-csharp">        [Test]
+        public void Connect_EnablesWalModeAndBusyTimeout()
+        {
+            DataSet journalModeResult = this.Database.QueryDataSet(&quot;PRAGMA journal_mode;&quot;);
+            Assert.That(journalModeResult.Tables[0].Rows[0][0].ToString().ToLowerInvariant(), Is.EqualTo(&quot;wal&quot;));
+
+            DataSet busyTimeoutResult = this.Database.QueryDataSet(&quot;PRAGMA busy_timeout;&quot;);
+            Assert.That(Convert.ToInt32(busyTimeoutResult.Tables[0].Rows[0][0]), Is.EqualTo(5000));
+        }
+</code></pre>
+<p>Add <code>using System.Data;</code> to the top of the file (needed for <code>DataSet</code>) — the file's current imports
+are exactly <code>using System;</code>, <code>using System.IO;</code>, <code>using NUnit.Framework;</code>, <code>using Walkabout.Data;</code>
+(confirmed by reading it), so <code>System</code> (needed for nothing new in this task, already there for
+existing code) and <code>Walkabout.Data</code>/<code>NUnit.Framework</code> are already covered; only <code>System.Data</code> is
+missing.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~Connect_EnablesWalModeAndBusyTimeout"</code>
+Expected: FAIL — <code>PRAGMA journal_mode;</code> on a freshly-created SQLite file defaults to <code>delete</code>
+(SQLite's own default), not <code>wal</code>, and <code>PRAGMA busy_timeout;</code> defaults to <code>0</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the pragmas</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        public override DbConnection Connect()
+        {
+            if (this.sqliteConnection == null || this.sqliteConnection.State != ConnectionState.Open)
+            {
+                string constr = this.GetConnectionString(true);
+                this.sqliteConnection = new SQLiteConnection(constr);
+                this.sqliteConnection.Open();
+                using (var pragmaCommand = new SQLiteCommand(&quot;PRAGMA foreign_keys = ON;&quot;, this.sqliteConnection))
+                {
+                    pragmaCommand.ExecuteNonQuery();
+                }
+            }
+            return this.sqliteConnection;
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public override DbConnection Connect()
+        {
+            if (this.sqliteConnection == null || this.sqliteConnection.State != ConnectionState.Open)
+            {
+                string constr = this.GetConnectionString(true);
+                this.sqliteConnection = new SQLiteConnection(constr);
+                this.sqliteConnection.Open();
+                using (var pragmaCommand = new SQLiteCommand(&quot;PRAGMA foreign_keys = ON;&quot;, this.sqliteConnection))
+                {
+                    pragmaCommand.ExecuteNonQuery();
+                }
+                // WAL mode: readers never block writers, writers never block readers - the
+                // opposite of the default rollback-journal mode, which serializes all access.
+                // busy_timeout: a second writer retries for up to this many milliseconds instead
+                // of failing immediately with SQLITE_BUSY. 5000ms is a starting default (not
+                // spec-mandated - a same-machine local agent contending with an interactive user
+                // should resolve well within this window; revisit if real contention testing
+                // shows it's too short or needlessly long). See
+                // docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R3.
+                using (var walCommand = new SQLiteCommand(&quot;PRAGMA journal_mode=WAL;&quot;, this.sqliteConnection))
+                {
+                    walCommand.ExecuteNonQuery();
+                }
+                using (var busyTimeoutCommand = new SQLiteCommand(&quot;PRAGMA busy_timeout=5000;&quot;, this.sqliteConnection))
+                {
+                    busyTimeoutCommand.ExecuteNonQuery();
+                }
+            }
+            return this.sqliteConnection;
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~Connect_EnablesWalModeAndBusyTimeout"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 5: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect the same pre-existing failure counts as
+master's baseline (7 <code>MyMoney.TestSupport</code> SQL-Server-env-gated, 1 <code>ScenarioTest</code> FlaUI flake), no
+new failures. WAL mode changes the on-disk file format slightly (a <code>-wal</code>/<code>-shm</code> sidecar file
+appears next to the <code>.mmdb</code> file while open) — confirm no existing test asserts on the database
+file's exact contents or file count in a way this breaks (none should, per how
+<code>SqliteDatabaseContractTests</code>'s <code>TearDown</code> deletes by path, but verify).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs
+git commit -m &quot;Enable WAL mode and busy_timeout on every SQLite connection&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-real-saveonesavebatch-for-category-on-sqlitedatabase">Task 2: Real <code>SaveOne</code>/<code>SaveBatch</code> for <code>Category</code> on <code>SqliteDatabase</code><a class="headerlink" href="#task-2-real-saveonesavebatch-for-category-on-sqlitedatabase" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs:150-152</code> (new <code>VersionColumnName</code> property;
+  <code>IncrementProgress</code> visibility changed from <code>private</code> to <code>protected</code> so <code>SqliteDatabase.
+  ReadCategories</code> can call it)
+- Modify: <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code> (new field, new <code>SaveOne</code>/<code>SaveBatch</code>
+  overrides, new private helpers, new <code>ReadCategories</code> override, and a retrofit of
+  <code>CreateOrUpdateTable</code>'s existing body to add the <code>Version</code> column onto pre-existing tables that
+  predate Phase 1 Task 3 — see Step 5)
+- Test: <code>Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs</code>
+- Test: <code>Source/WPF/UnitTests/SqlMappingTests.cs</code> (regression coverage for the <code>CreateOrUpdateTable</code>
+  retrofit)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IAggregateRoot</code>, <code>ConcurrencyConflictException</code> (Phase 2a); <code>PersistentObject.RowVersion</code>
+  (Phase 1); <code>PersistentObject.IsInserted</code>/<code>IsChanged</code>/<code>IsDeleted</code>/<code>OnUpdated()</code> (existing,
+  <code>Money.cs:479-544</code>); <code>PersistentContainer.RemoveChild(PersistentObject, bool)</code> (existing, abstract
+  on <code>PersistentContainer</code>, overridden per container type — <code>Categories</code>' own override handles the
+  physical removal).
+- Produces: <code>SqlServerDatabase.VersionColumnName</code> (<code>protected virtual string</code>, default <code>"RowVersion"</code>)
+  — Phase 2c can override this identically to how <code>SqliteDatabase</code> does here, for SQL Server's native
+  <code>ROWVERSION</code> column, when it's built. A follow-up plan extending Phase 2b to the remaining entity
+  types reuses <code>SqliteDatabase</code>'s new <code>ExecuteNonQueryInTransaction</code>/<code>ExecuteScalarInTransaction</code>
+  helpers and the same <code>SaveBatch</code> dispatch-by-type structure this task establishes for <code>Category</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs</code>:</p>
+<pre><code class="language-csharp">        private static MyMoney BuildOneCategoryMoney(out Category category)
+        {
+            MyMoney money = new MyMoney();
+            category = money.Categories.GetOrCreateCategory(&quot;Groceries&quot;, CategoryType.Expense);
+            return money;
+        }
+
+        [Test]
+        public void SaveOne_NewCategory_PersistsAndSetsRowVersionToOne()
+        {
+            BuildOneCategoryMoney(out Category category);
+
+            this.Database.SaveOne(category);
+
+            Assert.That(category.RowVersion, Is.EqualTo(1));
+            Assert.That(category.IsInserted, Is.False);
+            Assert.That(category.IsChanged, Is.False);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Category found = reloaded.Categories.FindCategory(&quot;Groceries&quot;);
+            Assert.That(found, Is.Not.Null);
+            Assert.That(found.RowVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SaveOne_UpdateAfterReload_IncrementsRowVersion()
+        {
+            BuildOneCategoryMoney(out Category category);
+            this.Database.SaveOne(category);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Category found = reloaded.Categories.FindCategory(&quot;Groceries&quot;);
+            found.Description = &quot;Updated&quot;;
+            this.Database.SaveOne(found);
+
+            Assert.That(found.RowVersion, Is.EqualTo(2));
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Category foundAgain = reloadedAgain.Categories.FindCategory(&quot;Groceries&quot;);
+            Assert.That(foundAgain.Description, Is.EqualTo(&quot;Updated&quot;));
+            Assert.That(foundAgain.RowVersion, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SaveOne_StaleRowVersion_ThrowsConcurrencyConflictException()
+        {
+            BuildOneCategoryMoney(out Category category);
+            this.Database.SaveOne(category);
+
+            MyMoney readerA = this.Database.Load(null);
+            MyMoney readerB = this.Database.Load(null);
+
+            Category categoryA = readerA.Categories.FindCategory(&quot;Groceries&quot;);
+            categoryA.Description = &quot;From A&quot;;
+            this.Database.SaveOne(categoryA);
+
+            Category categoryB = readerB.Categories.FindCategory(&quot;Groceries&quot;);
+            categoryB.Description = &quot;From B&quot;;
+            var ex = Assert.Throws&lt;ConcurrencyConflictException&gt;(() =&gt; this.Database.SaveOne(categoryB));
+            Assert.That(ex.StoredRowVersion, Is.EqualTo(2));
+            Assert.That(ex.CallerRowVersion, Is.EqualTo(1));
+
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Categories.FindCategory(&quot;Groceries&quot;).Description, Is.EqualTo(&quot;From A&quot;));
+        }
+
+        [Test]
+        public void SaveOne_Delete_RemovesRowFromDatabaseAndContainer()
+        {
+            BuildOneCategoryMoney(out Category category);
+            this.Database.SaveOne(category);
+
+            MyMoney reloaded = this.Database.Load(null);
+            Category toDelete = reloaded.Categories.FindCategory(&quot;Groceries&quot;);
+            reloaded.Categories.RemoveCategory(toDelete);
+            Assert.That(toDelete.IsDeleted, Is.True);
+
+            this.Database.SaveOne(toDelete);
+
+            Assert.That(reloaded.Categories.FindCategory(&quot;Groceries&quot;), Is.Null);
+
+            MyMoney reloadedAgain = this.Database.Load(null);
+            Assert.That(reloadedAgain.Categories.FindCategory(&quot;Groceries&quot;), Is.Null);
+        }
+
+        [Test]
+        public void SaveBatch_OneStaleRootAmongMany_RollsBackTransactionAndPreservesInMemoryState()
+        {
+            MyMoney money = new MyMoney();
+            Category a = money.Categories.GetOrCreateCategory(&quot;A&quot;, CategoryType.Expense);
+            Category b = money.Categories.GetOrCreateCategory(&quot;B&quot;, CategoryType.Expense);
+            this.Database.SaveBatch(new PersistentObject[] { a, b });
+
+            MyMoney reader = this.Database.Load(null);
+            Category staleA = reader.Categories.FindCategory(&quot;A&quot;);
+            Category freshB = reader.Categories.FindCategory(&quot;B&quot;);
+
+            // Someone else updates A first, so staleA's RowVersion (1) is now behind.
+            MyMoney otherWriter = this.Database.Load(null);
+            Category otherA = otherWriter.Categories.FindCategory(&quot;A&quot;);
+            otherA.Description = &quot;Changed elsewhere&quot;;
+            this.Database.SaveOne(otherA);
+
+            staleA.Description = &quot;Attempted A&quot;;
+            freshB.Description = &quot;Attempted B&quot;;
+            long freshBOriginalRowVersion = freshB.RowVersion;
+
+            // freshB is listed FIRST deliberately: SaveBatch's loop processes roots in order, so
+            // freshB's own UPDATE executes and &quot;succeeds&quot; (within the still-open transaction) on
+            // iteration 1, and staleA's conflict is only detected and thrown on iteration 2 - by
+            // which point freshB's SQL has already run. This is what actually exercises the
+            // postCommitActions deferral: if B were listed second (i.e. never reached because A's
+            // conflict throws first), this assertion would pass trivially under ANY
+            // implementation, buggy or not, since B's code path would never execute at all.
+            Assert.Throws&lt;ConcurrencyConflictException&gt;(
+                () =&gt; this.Database.SaveBatch(new PersistentObject[] { freshB, staleA }));
+
+            // B must NOT have been committed, even though only A conflicted - proves the real
+            // SQLiteTransaction actually rolled back both writes, not just A's, including the one
+            // that already &quot;succeeded&quot; earlier in the same loop.
+            MyMoney reloaded = this.Database.Load(null);
+            Assert.That(reloaded.Categories.FindCategory(&quot;B&quot;).Description, Is.Not.EqualTo(&quot;Attempted B&quot;));
+
+            // B's in-memory state must ALSO be unchanged. This is the regression this test exists
+            // for: an earlier draft of SaveOneCategory applied RowVersion/OnUpdated immediately
+            // per-root inside the loop, so B's in-memory RowVersion got bumped and its dirty flag
+            // cleared as soon as its own UPDATE ran - even though the transaction that &quot;committed&quot;
+            // it was rolled back moments later by A's conflict on the very next iteration -
+            // postCommitActions exists specifically to prevent this.
+            Assert.That(freshB.RowVersion, Is.EqualTo(freshBOriginalRowVersion));
+            Assert.That(freshB.IsChanged, Is.True);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqliteDatabaseContractTests"</code>
+Expected: FAIL — <code>SaveOne</code> currently throws <code>NotImplementedException</code> (the inherited Phase 2a stub)
+for every call, since <code>SqliteDatabase</code> doesn't override it yet.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add <code>VersionColumnName</code> to the base class</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        public virtual bool SupportsParameterizedUpdate { get { return false; } }
+
+        public virtual bool Exists
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        public virtual bool SupportsParameterizedUpdate { get { return false; } }
+
+        /// &lt;summary&gt;
+        /// The per-flavor name of the optimistic-concurrency version column Phase 1 added to
+        /// every table: SQL Server's native ROWVERSION is named &quot;RowVersion&quot;; SQLite's
+        /// application-maintained INTEGER counter is named &quot;Version&quot; (SqliteDatabase overrides
+        /// this). See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+        /// &lt;/summary&gt;
+        protected virtual string VersionColumnName { get { return &quot;RowVersion&quot;; } }
+
+        public virtual bool Exists
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Add the SQLite transaction field and override <code>VersionColumnName</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        private SQLiteConnection sqliteConnection;
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        private SQLiteConnection sqliteConnection;
+
+        // Distinct from SqlServerDatabase's own `transaction` field (SqlDatabase.cs) - that one
+        // is private to the base class and SQL-Server-typed, so SQLite needs its own. Only
+        // SaveOne/SaveTransfer/SaveBatch's new code path uses this; Save(MyMoney) and every
+        // existing UpdateXxx/ReadXxx override are untouched and keep relying on
+        // System.Data.SQLite's connection-level auto-enlist behavior, same as today.
+        private SQLiteTransaction sqliteTransaction;
+
+        protected override string VersionColumnName { get { return &quot;Version&quot;; } }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Retrofit the <code>Version</code> column in <code>CreateOrUpdateTable</code>, then add the
+  transaction-scoped SQL-execution helpers and the rest of the new members</strong></li>
+</ul>
+<p>First, a schema-retrofit fix inside <code>CreateOrUpdateTable</code>'s existing "table already exists" <code>else</code>
+branch: <code>Version</code>/<code>RowVersion</code> is deliberately excluded from <code>mapping.Columns</code> (see the column-drop
+guard a few lines below, which skips it for the same reason), so the existing <code>newColumns</code> loop can
+never add it to a database file that predates Phase 1 Task 3 (which added the column only to
+<code>GetCreateTableScript</code>'s freshly-<code>CREATE</code>d tables). Without this, the new <code>ReadCategories</code> override
+added later in this step (its <code>SELECT</code> unconditionally includes the version column) would fail with
+"no such column: Version" against any such file. In <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code>,
+inside <code>CreateOrUpdateTable</code>'s <code>else</code> branch, insert the following between the `if (newColumns.Count</p>
+<blockquote>
+<p>0) { ... }<code>block and the</code>if (renames.Count &gt; 0) { ... }` block:</p>
+</blockquote>
+<pre><code class="language-csharp">                        if (actual.FindColumn(this.VersionColumnName) == null)
+                        {
+                            // Retrofit the optimistic-concurrency version column onto a database
+                            // file that predates persistence-concurrency Phase 1 Task 3 (which
+                            // added it only to GetCreateTableScript's freshly-CREATEd tables).
+                            // The newColumns loop above can never catch this itself: Version/
+                            // RowVersion is deliberately excluded from mapping.Columns (Task 4's
+                            // guard a few lines below, so it's also never treated as a column to
+                            // drop), since it's engine-injected rather than reflected off the
+                            // domain model. Without this, an old on-disk file would never get the
+                            // column added - harmless until persistence-concurrency Phase 2b's
+                            // SaveOne/ReadCategories (SqliteDatabase.ReadCategories) started
+                            // unconditionally selecting it, at which point every load of such a
+                            // file would fail with &quot;no such column: Version&quot;. DEFAULT 1 mirrors
+                            // GetCreateTableScript's own literal for freshly created tables, and
+                            // SQLite allows a NOT NULL ADD COLUMN precisely because it has one.
+                            string addVersionColumn = string.Format(
+                                &quot;ALTER TABLE [{0}] ADD COLUMN [{1}] INTEGER NOT NULL DEFAULT 1;&quot;,
+                                mapping.TableName, this.VersionColumnName);
+                            log.AppendLine(addVersionColumn);
+                            this.ExecuteScalar(addVersionColumn);
+                        }
+</code></pre>
+<p>Second, insert before the final closing braces (after the last method in the file,
+<code>CreateOrUpdateTable</code>'s closing <code>}</code> — the file currently ends with):</p>
+<pre><code class="language-csharp">                if (log.Length &gt; 0)
+                {
+                    this.AppendLog(log.ToString());
+                }
+            }
+        }
+
+    }
+}
+</code></pre>
+<p>change the above to (this is the state as of this fix wave — see "What's next" for what changed
+after this task's own initial review; in particular there is no <code>sqliteTransaction</code> field, <code>SaveBatch</code>
+uses a local <code>using</code>-scoped <code>SQLiteTransaction</code> instead):</p>
+<pre><code class="language-csharp">                if (log.Length &gt; 0)
+                {
+                    this.AppendLog(log.ToString());
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Runs a parameterized non-query inside the given explicit transaction and returns the
+        /// affected-row count - unlike the existing ExecuteNonQuery overrides (which never take a
+        /// transaction parameter and discard the row count), this is what SaveOne/SaveBatch need
+        /// to detect a RowVersion conflict (zero rows affected on an UPDATE/DELETE whose WHERE
+        /// clause checked the version). Private: only this class's new SaveOne/SaveBatch path
+        /// uses it.
+        /// &lt;/summary&gt;
+        private int ExecuteNonQueryInTransaction(SQLiteTransaction transaction, string cmd, params (string Name, object Value)[] parameters)
+        {
+            this.AppendLog(cmd);
+            using (SQLiteCommand command = new SQLiteCommand(cmd, this.sqliteConnection, transaction))
+            {
+                foreach (var (name, value) in parameters)
+                {
+                    DbParameter p = command.CreateParameter();
+                    p.ParameterName = name;
+                    p.Value = value ?? DBNull.Value;
+                    command.Parameters.Add(p);
+                }
+                return command.ExecuteNonQuery();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Same transaction-explicit pattern as ExecuteNonQueryInTransaction, for the single
+        /// follow-up SELECT SaveOneCategory issues after a detected conflict, to report the
+        /// store's actual current RowVersion in ConcurrencyConflictException rather than a
+        /// sentinel. Only reached on the rare conflict path.
+        /// &lt;/summary&gt;
+        private object ExecuteScalarInTransaction(SQLiteTransaction transaction, string cmd, params (string Name, object Value)[] parameters)
+        {
+            using (SQLiteCommand command = new SQLiteCommand(cmd, this.sqliteConnection, transaction))
+            {
+                foreach (var (name, value) in parameters)
+                {
+                    DbParameter p = command.CreateParameter();
+                    p.ParameterName = name;
+                    p.Value = value ?? DBNull.Value;
+                    command.Parameters.Add(p);
+                }
+                return command.ExecuteScalar();
+            }
+        }
+
+        public override void SaveOne&lt;T&gt;(T root)
+        {
+            this.SaveBatch(new PersistentObject[] { root });
+        }
+
+        public override void SaveBatch(IEnumerable&lt;PersistentObject&gt; roots)
+        {
+            List&lt;PersistentObject&gt; list = new List&lt;PersistentObject&gt;(roots);
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            // Only Category has a real implementation in this phase. If the batch contains
+            // anything else, delegate the WHOLE call to the inherited Phase 2a stub rather than
+            // partially committing some roots and throwing on others.
+            foreach (PersistentObject root in list)
+            {
+                if (!(root is Category))
+                {
+                    base.SaveBatch(list);
+                    return;
+                }
+            }
+
+            this.Connect();
+            using (SQLiteTransaction transaction = this.sqliteConnection.BeginTransaction())
+            {
+                // Every in-memory side effect (RowVersion assignment, OnUpdated, RemoveChild) is
+                // deferred into this list and only run AFTER Commit() succeeds. If any later root in
+                // this batch conflicts, the catch below rolls back EVERY write this transaction made -
+                // including ones whose own SQL statement already &quot;succeeded&quot; earlier in the loop. If
+                // this method mutated in-memory state immediately per-root instead, an earlier root's
+                // RowVersion/dirty-flag would end up claiming a commit that the rollback undid,
+                // violating R3 (&quot;a failure leaves in-memory dirty-tracking state exactly matching
+                // what's actually in the database&quot;). See SaveBatch_OneStaleRootAmongMany_
+                // RollsBackTransactionAndPreservesInMemoryState below, which fails without this.
+                List&lt;Action&gt; postCommitActions = new List&lt;Action&gt;();
+                try
+                {
+                    foreach (PersistentObject root in list)
+                    {
+                        this.SaveOneCategory((Category)root, transaction, postCommitActions);
+                    }
+                    transaction.Commit();
+                }
+                catch (Exception originalException)
+                {
+                    // A failing Rollback() (plausible under WAL/busy_timeout - Commit() can fail
+                    // with SQLITE_BUSY, and rollback of an already-troubled transaction can fail
+                    // too) must never silently replace/hide the original exception (e.g. a
+                    // ConcurrencyConflictException the caller needs to see), and must never leave
+                    // the caller thinking the rollback happened when it didn't.
+                    try
+                    {
+                        transaction.Rollback();
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        throw new Exception(&quot;Rollback failed after: &quot; + originalException.Message, rollbackException);
+                    }
+                    throw;
+                }
+
+                // Only reached after Commit() succeeded - the catch above always rethrows before
+                // falling through here, so postCommitActions never runs against a rolled-back
+                // transaction. Runs inside the using block, before the transaction is disposed.
+                foreach (Action action in postCommitActions)
+                {
+                    action();
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Writes one Category row with a RowVersion-checked WHERE clause on UPDATE/DELETE, and
+        /// queues (but does not yet apply) the matching in-memory side effect - see SaveBatch's
+        /// comment on postCommitActions for why applying it immediately would be wrong. SQL
+        /// mirrors UpdateCategories' existing parameterized branch (SqlDatabase.cs) exactly, plus
+        /// the version check/bump - deliberately duplicated rather than shared, since
+        /// UpdateCategories serves the whole-graph Save(MyMoney) path (additive-only constraint:
+        /// not touched here) and operates on a whole Categories collection, not one root.
+        /// &lt;/summary&gt;
+        private void SaveOneCategory(Category c, SQLiteTransaction transaction, List&lt;Action&gt; postCommitActions)
+        {
+            long callerRowVersion = c.RowVersion;
+
+            if (c.IsInserted)
+            {
+                this.ExecuteNonQueryInTransaction(transaction,
+                    &quot;INSERT INTO Categories (Id,Name,Description,Type,ParentId,Budget,Frequency,Balance,Color,TaxRefNum) &quot; +
+                    &quot;VALUES (@Id,@Name,@Description,@Type,@ParentId,@Budget,@Frequency,@Balance,@Color,@TaxRefNum);&quot;,
+                    (&quot;@Id&quot;, c.Id), (&quot;@Name&quot;, c.Name), (&quot;@Description&quot;, c.Description), (&quot;@Type&quot;, (int)c.Type),
+                    (&quot;@ParentId&quot;, c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), (&quot;@Budget&quot;, c.Budget),
+                    (&quot;@Frequency&quot;, (int)c.Frequency), (&quot;@Balance&quot;, c.Balance), (&quot;@Color&quot;, c.Color),
+                    (&quot;@TaxRefNum&quot;, c.TaxRefNum));
+                postCommitActions.Add(() =&gt;
+                {
+                    c.RowVersion = 1; // matches the schema's &quot;Version INTEGER NOT NULL DEFAULT 1&quot;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsChanged)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    &quot;UPDATE Categories SET Name=@Name,Description=@Description,Type=@Type,ParentId=@ParentId,Budget=@Budget,&quot; +
+                    &quot;Frequency=@Frequency,Balance=@Balance,Color=@Color,TaxRefNum=@TaxRefNum,&quot; +
+                    this.VersionColumnName + &quot;=&quot; + this.VersionColumnName + &quot;+1 &quot; +
+                    &quot;WHERE Id=@Id AND &quot; + this.VersionColumnName + &quot;=@ExpectedVersion;&quot;,
+                    (&quot;@Name&quot;, c.Name), (&quot;@Description&quot;, c.Description), (&quot;@Type&quot;, (int)c.Type),
+                    (&quot;@ParentId&quot;, c.ParentCategory != null ? (object)c.ParentCategory.Id : DBNull.Value), (&quot;@Budget&quot;, c.Budget),
+                    (&quot;@Frequency&quot;, (int)c.Frequency), (&quot;@Balance&quot;, c.Balance), (&quot;@Color&quot;, c.Color),
+                    (&quot;@TaxRefNum&quot;, c.TaxRefNum), (&quot;@Id&quot;, c.Id), (&quot;@ExpectedVersion&quot;, callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, &quot;Categories&quot;, c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =&gt;
+                {
+                    c.RowVersion = callerRowVersion + 1;
+                    c.OnUpdated();
+                });
+                return;
+            }
+
+            if (c.IsDeleted)
+            {
+                int rowsAffected = this.ExecuteNonQueryInTransaction(transaction,
+                    &quot;DELETE FROM Categories WHERE Id=@Id AND &quot; + this.VersionColumnName + &quot;=@ExpectedVersion;&quot;,
+                    (&quot;@Id&quot;, c.Id), (&quot;@ExpectedVersion&quot;, callerRowVersion));
+                if (rowsAffected == 0)
+                {
+                    this.ThrowConflict(c, &quot;Categories&quot;, c.Id, transaction, callerRowVersion);
+                }
+                postCommitActions.Add(() =&gt;
+                {
+                    c.OnUpdated();
+                    c.Parent.RemoveChild(c, true);
+                });
+                return;
+            }
+
+            // No pending change - nothing to do.
+        }
+
+        /// &lt;summary&gt;
+        /// A zero-rows-affected UPDATE/DELETE means a conflict, but not what the store's current
+        /// version actually is - one more SELECT (inside the same transaction, so it sees a
+        /// consistent view) gets an accurate diagnostic instead of a sentinel. -1 means the row no
+        /// longer exists at all (e.g. already deleted by someone else).
+        /// &lt;/summary&gt;
+        private void ThrowConflict(PersistentObject root, string tableName, int id, SQLiteTransaction transaction, long callerRowVersion)
+        {
+            object result = this.ExecuteScalarInTransaction(transaction,
+                &quot;SELECT &quot; + this.VersionColumnName + &quot; FROM &quot; + tableName + &quot; WHERE Id=@Id;&quot;, (&quot;@Id&quot;, id));
+            long storedRowVersion = (result == null || result == DBNull.Value) ? -1 : Convert.ToInt64(result);
+            throw new ConcurrencyConflictException(root, storedRowVersion, callerRowVersion);
+        }
+
+        /// &lt;summary&gt;
+        /// Overrides the inherited (shared-with-SqlServerDatabase) ReadCategories to also read
+        /// back the Version column - deliberately a full override, not a shared generic change,
+        /// so SQL Server's read path (which will need ROWVERSION's binary(8)-to-long conversion,
+        /// not a plain integer read) is untouched until Phase 2c actually needs it.
+        /// &lt;/summary&gt;
+        public override void ReadCategories(Categories categories, MyMoney money)
+        {
+            categories.Clear();
+            IDataReader reader = this.ExecuteReader(&quot;SELECT [Id],[Name],[Description],[Type],[ParentId],[Budget],[Frequency],[Balance],[Color],[TaxRefNum],[&quot; + this.VersionColumnName + &quot;] FROM Categories&quot;);
+            categories.BeginUpdate(false);
+            while (reader.Read())
+            {
+                this.IncrementProgress(&quot;Categories&quot;);
+                int id = reader.GetInt32(0);
+                Category c = new Category(categories);
+                c.Id = id;
+                categories.AddCategory(c);
+                c.Name = ReadDbString(reader, 1);
+                c.Description = ReadDbString(reader, 2);
+                if (!reader.IsDBNull(3))
+                {
+                    c.Type = (CategoryType)reader.GetInt32(3);
+                }
+                if (!reader.IsDBNull(4))
+                {
+                    c.ParentId = reader.GetInt32(4);
+                }
+                if (!reader.IsDBNull(5))
+                {
+                    c.Budget = reader.GetDecimal(5);
+                }
+                if (!reader.IsDBNull(6))
+                {
+                    c.Frequency = (CalendarRange)reader.GetInt32(6);
+                }
+                if (!reader.IsDBNull(7))
+                {
+                    c.Balance = reader.GetDecimal(7);
+                }
+                if (!reader.IsDBNull(8))
+                {
+                    c.Color = reader.GetString(8);
+                }
+                if (!reader.IsDBNull(9))
+                {
+                    c.TaxRefNum = reader.GetInt32(9);
+                }
+                c.RowVersion = reader.GetInt64(10);
+                c.OnUpdated();
+                // one more fix up that will need to be saved (so must come after c.OnUpdated).
+                if (c.Type == CategoryType.Reserved)
+                {
+                    c.Type = CategoryType.Expense;
+                }
+            }
+            categories.EndUpdate();
+            categories.FireChangeEvent(categories, categories, null, ChangeType.Reloaded);
+            reader.Close();
+        }
+
+    }
+}
+</code></pre>
+<p>(This second block replaces everything from <code>if (log.Length &gt; 0)</code> through the file's final <code>}</code>/<code>}</code> —
+the new members go between the end of <code>CreateOrUpdateTable</code> and the class/namespace closing braces.)</p>
+<p>No new <code>using</code> statements are needed beyond what Step 4 already covers: <code>SqliteDatabase.cs</code>'s
+existing imports already cover everything the new code uses — <code>System</code> (for
+<code>Action</code>/<code>DBNull</code>/<code>Convert</code>/<code>Exception</code>), <code>System.Collections.Generic</code> (for <code>List&lt;T&gt;</code>),
+<code>System.Data.Common</code> (for <code>DbParameter</code>), <code>System.Data.SQLite</code> (for
+<code>SQLiteTransaction</code>/<code>SQLiteCommand</code>) are all already present at the top of the file. <code>Category</code>,
+<code>Categories</code>, <code>ChangeType</code>, <code>PersistentObject</code>, <code>IAggregateRoot</code>, <code>ConcurrencyConflictException</code> need
+no <code>using</code> either — they're in <code>Walkabout.Data</code>, the same namespace <code>SqliteDatabase</code> itself is
+declared in.</p>
+<ul>
+<li>[ ] <strong>Step 6: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "FullyQualifiedName~SqliteDatabaseContractTests"</code>
+Expected: PASS — all 5 new tests plus every pre-existing <code>DatabaseContractTests</code> test (still
+exercising the untouched <code>Save(MyMoney)</code>/<code>Load</code> path for every type other than the new <code>SaveOne</code>
+calls).</p>
+<ul>
+<li>[ ] <strong>Step 7: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect the same pre-existing failure counts as
+master's baseline, no new failures.</p>
+<ul>
+<li>[ ] <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/MyMoney.TestSupport/SqliteDatabaseContractTests.cs
+git commit -m &quot;Implement real SaveOne/SaveBatch for Category on SqliteDatabase with RowVersion conflict detection&quot;
+</code></pre>
+<hr />
+<h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">#</a></h2>
+<p>This plan deliberately stops at one entity type — it proves SQLite's real transaction/conflict-check
+machinery works end-to-end (WAL mode, an explicit <code>SQLiteTransaction</code>, a row-count-aware execution
+path, a real <code>RowVersion</code> round-trip through <code>Load()</code>) before paying the cost of repeating the same
+shape for the other ~10 aggregate roots. The follow-up plan (not yet written) should:</p>
+<ul>
+<li>Extend <code>SaveBatch</code>'s dispatch (currently <code>if (!(root is Category))</code> falls through to the base
+  stub) to the remaining simple entities (<code>Account</code>, <code>OnlineAccount</code>, <code>Currency</code>, <code>Payee</code>, <code>Alias</code>,
+  <code>Security</code>, <code>StockSplit</code>, <code>LoanPayment</code>) — each following the exact pattern
+  <code>SaveOneCategory</code>/<code>ReadCategories</code> establish here, and per the subagent-driven-development skill's
+  "batch small same-shape work" guidance, these are good candidates for one batched implementer
+  dispatch rather than one per entity, once this plan's pattern is confirmed solid in review.</li>
+<li>Add <code>SaveOne&lt;Transaction&gt;</code> (compound: transaction row + owned <code>Splits</code> + <code>Investment</code>, matching
+  <code>UpdateTransactions</code>' existing inline shape at <code>SqlDatabase.cs:3197-3355</code>) and
+  <code>SaveOne&lt;RentBuilding&gt;</code> (compound: building row + owned <code>RentUnit</code>s, matching <code>UpdateBuildings</code>).
+  Both need their own task — genuinely more complex than the simple-entity batch.</li>
+<li>Add <code>SaveTransfer</code> (two <code>Transaction</code>s co-committing in one <code>SQLiteTransaction</code>) — needs
+  <code>SaveOne&lt;Transaction&gt;</code> first.</li>
+<li>Promote the now-proven <code>SaveOne</code>/conflict-detection tests into the shared <code>DatabaseContractTests</code>
+  base class (per Phase 2a's own "What's next" note) so <code>MockDatabaseContractTests</code> and
+  <code>SqliteDatabaseContractTests</code> both inherit and re-run them, instead of each having its own
+  near-duplicate copy.</li>
+<li>Add a genuine multi-process/multi-connection SQLite contention test (two <code>SqliteDatabase</code>
+  instances pointed at the same file, overlapping <code>SaveOne</code> calls, asserting both eventually succeed
+  via <code>busy_timeout</code> retry rather than an immediate <code>SQLITE_BUSY</code> failure) — <code>MockDatabase</code> has no
+  equivalent scenario, so this is SQLite-only coverage the design spec's testing strategy calls for.</li>
+<li>Decide whether <code>SaveOneCategory</code>'s pattern of a follow-up <code>SELECT</code> on conflict (for an accurate
+  <code>StoredRowVersion</code> in the exception) is worth generalizing into a small per-entity-agnostic helper
+  once 2-3 more entities exist to generalize from, or whether keeping it duplicated per entity (as
+  <code>UpdateXxx</code> already is) matches this codebase's existing style better.</li>
+<li><strong>Latent risk found during this plan's own review (Task 2), not yet fixed — pre-existing code,
+  untouched by this plan:</strong> <code>CreateOrUpdateTable</code>'s <code>newTable</code>-rebuild branch (<code>SqliteDatabase.cs:711-789</code>)
+  copies data into a rebuilt table via <code>INSERT INTO new_table SELECT &lt;cols&gt; FROM old_table</code>, where
+  <code>&lt;cols&gt;</code> comes from <code>mapping.Columns</code> — and <code>Version</code>/<code>RowVersion</code> is deliberately excluded from
+  <code>mapping.Columns</code> (same exclusion Task 2's ALTER-path retrofit relies on). If a future schema
+  change ever forces <code>newTable = true</code> on a table that has accumulated real per-row <code>Version</code>
+  history (once more entity types than just <code>Category</code> have real <code>SaveOne</code> traffic), the rebuild
+  would silently reset every row's version to <code>DEFAULT 1</code>, discarding conflict-detection history —
+  a real data-integrity gap once it's load-bearing, though not exercised by anything in Phase 2b.
+  The follow-up plan should add an explicit carry-forward of the actual <code>Version</code>/<code>RowVersion</code>
+  values in that rebuild path (e.g. include the version column by name in the <code>INSERT ... SELECT</code>,
+  rather than relying on <code>mapping.Columns</code>), plus a regression test forcing a <code>newTable</code> rebuild on
+  a table with non-default version values.</li>
+<li><strong>Exception-contract divergence from <code>MockDatabase</code></strong>: <code>SqliteDatabase.SaveBatch</code> disagrees with
+  Phase 2a's <code>MockDatabase.SaveBatch</code> on what exception type fires for: a null root in the batch, a
+  non-<code>IAggregateRoot</code> root, and a duplicate-inserted root (raw <code>SQLiteException</code> for the UNIQUE
+  constraint, not a typed exception). Most of these are correct-by-design given a real engine's
+  architecture (e.g. a duplicate <em>changed</em> root correctly conflicts via the <code>WHERE</code> clause with no
+  special-casing, unlike <code>MockDatabase</code>'s blanket pre-check), but they're still a real API-surface
+  inconsistency between the two <code>IDatabase</code> implementations. Before promoting the shared tests into
+  <code>DatabaseContractTests</code>'s base class (already planned above), explicitly decide which side is
+  normative for each divergence and reconcile.</li>
+<li><strong>INSERT-path Id collisions bypass <code>ConcurrencyConflictException</code> entirely</strong>: two writers racing
+  to insert a <code>Category</code> with the same client-side-allocated <code>Id</code> will hit a raw <code>SQLiteException</code>
+  (UNIQUE constraint violation) rather than <code>ConcurrencyConflictException</code> — the transaction still
+  rolls back correctly (no corruption), but a caller's <code>catch (ConcurrencyConflictException)</code> handler
+  won't fire for this specific race. Not fixed here — <code>Id</code> allocation across concurrent writers is a
+  separate, larger, not-yet-designed problem (out of this plan's scope).</li>
+<li><strong>SQL Server will need the identical <code>Version</code>-column retrofit</strong> <code>CreateOrUpdateTable</code> got here,
+  once Phase 2c wires up <code>SqlServerStoredProcDatabase</code>'s equivalent read path — harmless today since
+  <code>SqlServerDatabase.ReadCategories</code> (the shared base method) doesn't select the column yet, but
+  Phase 2c will hit the same bug this fix wave just closed if it's forgotten.</li>
+</ul>
+<h3 id="post-review-fix-wave-final-whole-branch-review">Post-review fix wave (final whole-branch review)<a class="headerlink" href="#post-review-fix-wave-final-whole-branch-review" title="Permanent link">#</a></h3>
+<p>The final whole-branch review of this plan (Tasks 1 and 2 both already merged individually) found 1
+Critical, 8 Important, and 9 Minor issues. A curated subset was fixed in commits <code>c983fec..53e1ad6</code>
+(on top of <code>1afe4d3</code>, Task 2's own last commit), already landed on this branch before Phase 2b was
+considered complete:</p>
+<ul>
+<li><strong>Critical:</strong> <code>Backup()</code> now runs <code>PRAGMA wal_checkpoint(TRUNCATE);</code> before copying the file (WAL
+  mode, enabled by Task 1, meant a raw <code>File.Copy</code> could silently produce a backup missing the most
+  recent committed transactions); <code>Delete()</code> and the static <code>Restore()</code> now also clean up the
+  <code>-wal</code>/<code>-shm</code> sidecar files (at the deleted path, and at the restore target before overwriting it,
+  respectively).</li>
+<li><strong>Important:</strong> <code>SaveBatch</code>'s <code>SQLiteTransaction</code> is now a <code>using</code>-scoped local variable (properly
+  disposed on every path) instead of an undisposed instance field; a failing <code>Rollback()</code> no longer
+  masks the original exception (it's wrapped with the rollback failure as an inner exception instead
+  of silently replacing it) or leaves the connection in an ambiguous state. The now-unused
+  <code>sqliteTransaction</code> field was removed entirely.</li>
+<li><strong>Important:</strong> Added a regression test for the <code>CreateOrUpdateTable</code> <code>Version</code>-column retrofit
+  (<code>Source/WPF/UnitTests/SqlMappingTests.cs</code>), and fixed a vacuous assertion in
+  <code>SaveOne_Delete_RemovesRowFromDatabaseAndContainer</code> (<code>SqliteDatabaseContractTests.cs</code>) that was
+  checking the wrong <code>Categories</code> lookup (name-based <code>FindCategory</code>, cleared unconditionally by
+  <code>RemoveCategory</code> itself) instead of the one that actually depends on <code>SaveOneCategory</code>'s deferred
+  <code>RemoveChild(c, true)</code> postCommit action (id-based <code>FindCategoryById</code>).</li>
+<li><strong>Minor:</strong> <code>ReadCategories</code> now interpolates <code>this.VersionColumnName</code> instead of hardcoding the
+  literal <code>"Version"</code>, matching every other new statement in this plan's diff.</li>
+<li>Deliberately deferred (see the fix-wave task's own "explicitly out of scope" list, not repeated
+  here): unbounded <code>AppendLog</code> growth, the misleading <code>NotImplementedException</code> message for
+  non-<code>Category</code> roots, <code>PRAGMA journal_mode=WAL</code>'s discarded return value, a throwing postCommit
+  action leaving partial in-memory state, the single-connection nature of the "independent reader"
+  tests, several untested code paths, and duplicated magic literals (<code>5000</code>, <code>"wal"</code>).</li>
+</ul>
+<p>Phase 2c (SQL Server stored procs, not yet planned) follows the same shape again for the third
+engine, reusing <code>VersionColumnName</code>'s override point and needing its own transaction/row-count
+machinery analogous to what this plan built for SQLite (SQL Server's is architecturally simpler,
+since <code>SqlServerStoredProcDatabase</code>'s per-call connection-opening — issue #27 — needs fixing
+regardless, at which point wiring in an explicit transaction is the same piece of work).</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

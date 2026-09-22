@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-15-sql-server-user-tier-crud-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>SQL Server MyMoneyUser CRUD Coverage (issue #22) — Design - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "SQL Server MyMoneyUser CRUD Coverage (issue #22) \u2014 Design", url: "#_top", children: [
+              {title: "Background", url: "#background" },
+              {title: "Scope", url: "#scope" },
+              {title: "Design", url: "#design" },
+              {title: "Out of scope", url: "#out-of-scope" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="sql-server-mymoneyuser-crud-coverage-issue-22-design">SQL Server <code>MyMoneyUser</code> CRUD Coverage (issue #22) — Design<a class="headerlink" href="#sql-server-mymoneyuser-crud-coverage-issue-22-design" title="Permanent link">#</a></h1>
+<h2 id="background">Background<a class="headerlink" href="#background" title="Permanent link">#</a></h2>
+<p>Item #2 (SQL Server dual-engine support) introduced a tiered-security model
+for the SQL Server engine: <code>MyMoneyAdmin</code> (db_owner, full schema control),
+<code>MyMoneyUser</code> (the login the shipped app actually connects as, via
+<code>DataEngineStartup.TryAutoLoad</code> → <code>DataEngineCredentialStore.GetCredential("MyMoneyUser")</code>),
+and <code>MyMoneyTest</code> (same tier as <code>MyMoneyUser</code>, plus test-support procs).
+Neither <code>MyMoneyUser</code> nor <code>MyMoneyTest</code> has any direct table grants — all
+access goes through stored procedures, following standard least-privilege
+practice (ownership chaining lets a proc touch a table its caller can't
+touch directly).</p>
+<p>At the time, item #2 deliberately scoped stored-proc coverage to <strong>Payees
+only</strong> — a vertical slice proving the pattern end-to-end (schema, tiered
+logins, <code>SqlServerStoredProcDatabase</code> overriding just the Payees CRUD
+methods), not a claim that every entity was covered. That was the right
+call for proving the pattern, but it means every other <code>[TableMapping]</code>
+entity — Accounts, Categories, Currencies, Securities, StockSplits, Aliases,
+Transactions, Splits, Investment, plus OnlineAccounts/AccountAliases/
+TransactionExtras/RentBuildings/RentUnits/LoanPayments — has no way to be
+read or written under the <code>MyMoneyUser</code> tier the shipped app actually uses.
+<code>SqlServerDatabase</code>'s generic CRUD path (<code>LazyCreateTables()</code> plus raw
+<code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code>/<code>SELECT</code>) needs direct table access, which
+<code>MyMoneyUser</code> doesn't have.</p>
+<p>This surfaced while scoping issue #19 (a cross-engine SQLite-vs-SQL-Server
+parity test), which needs a rich, multi-table dataset to round-trip through
+SQL Server — not just Payees. Rather than route #19's tests through
+<code>MyMoneyAdmin</code> (which would test a security posture the shipped app doesn't
+actually use), this issue closes the real gap so <code>MyMoneyUser</code> — the tier
+the app runs under — can actually perform full CRUD on the entities that
+matter.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">#</a></h2>
+<p>Nine entities, matching what issue #19's dataset needs and the core of the
+app's everyday usage: <strong>Accounts, Categories, Currencies, Securities,
+StockSplits, Aliases, Transactions, Splits, Investment.</strong></p>
+<p>Explicitly out of scope, split to issue #23: OnlineAccounts, AccountAliases,
+TransactionExtras, RentBuildings, RentUnits, LoanPayments. Nothing currently
+depends on these being reachable under <code>MyMoneyUser</code>.</p>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">#</a></h2>
+<h3 id="1-stored-procs-mirroring-payees_accessprocssql-exactly">1. Stored procs, mirroring <code>Payees_AccessProcs.sql</code> exactly<a class="headerlink" href="#1-stored-procs-mirroring-payees_accessprocssql-exactly" title="Permanent link">#</a></h3>
+<p>For each of the 9 entities, add a <code>SqlScripts/Access/&lt;Entity&gt;_AccessProcs.sql</code>
+script (or one combined script per logical group, e.g. <code>Transactions_AccessProcs.sql</code>
+covering Transactions+Splits+Investment together, since they're already
+handled as three separate methods/tables by the generic base class — see
+below) with <code>_SelectAll</code>/<code>_Insert</code>/<code>_Update</code>/<code>_Delete</code> procs, <code>GRANT EXECUTE</code>
+to both <code>MyMoneyUser</code> and <code>MyMoneyTest</code>, run as <code>MyMoneyAdmin</code> — same
+structure, same header comment convention, same "run as MyMoneyAdmin"
+instruction as the existing Payees script. <code>BootstrapRunner.cs</code> gets a new
+<code>ExecuteBatchScript(...)</code> line per script, so re-running the bootstrap
+against the existing SQL Server instance deploys them (idempotent, per the
+existing <code>CREATE OR ALTER PROCEDURE</code> convention).</p>
+<p>Transactions/Splits/Investment are <strong>not</strong> one atomic parent+children proc.
+The existing generic base class (<code>SqlDatabase.UpdateTransactions</code>,
+<code>UpdateSplits</code>, <code>UpdateInvestment</code>) already treats these as three separately
+updated tables, called in sequence — the stored-proc design mirrors that
+same shape exactly: three independent proc sets, three independent
+<code>SqlServerStoredProcDatabase</code> override methods, no new atomicity behavior
+introduced or removed relative to what the generic path already does.</p>
+<h3 id="2-c-calling-side-a-shared-generic-adonet-helper">2. C# calling side: a shared generic ADO.NET helper<a class="headerlink" href="#2-c-calling-side-a-shared-generic-adonet-helper" title="Permanent link">#</a></h3>
+<p><code>SqlServerStoredProcDatabase</code> currently has one bespoke set of Payees
+methods (<code>ReadPayees</code>, <code>UpdatePayees</code>, <code>ExecutePayeeProc</code>). Rather than
+writing 9 more fully independent bespoke method sets (high repetition) or
+building a metadata-driven codegen system (bigger lift than this issue
+needs — better suited to a future consolidation pass once more of the
+schema follows this pattern), add one shared helper analogous to
+<code>ExecutePayeeProc</code> but generic over the parameter list:</p>
+<pre><code class="language-csharp">private static void ExecuteProc(SqlConnection connection, string procName, params (string Name, object Value)[] parameters)
+{
+    using (var command = new SqlCommand(procName, connection) { CommandType = CommandType.StoredProcedure })
+    {
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+        command.ExecuteNonQuery();
+    }
+}
+</code></pre>
+<p>Each entity's override (<code>UpdateAccounts</code>, <code>UpdateCategories</code>, etc.) keeps
+the same per-entity <code>IsChanged</code>/<code>IsInserted</code>/<code>IsDeleted</code> dispatch loop
+<code>UpdatePayees</code> already uses, but calls this shared helper instead of
+hand-rolling its own <code>SqlCommand</code>/parameter-binding code. This keeps the
+existing local-<code>SqlConnection</code>-per-call style <code>SqlServerStoredProcDatabase</code>
+already uses (deliberately not switching to the base class's different
+ambient-connection/<code>this.transaction</code> style used by <code>ExecuteNonQuery</code> —
+keeping this subclass internally consistent with its own established
+pattern rather than mixing two connection-management styles).</p>
+<h3 id="3-load-extended-to-read-all-9-entities">3. <code>Load()</code> extended to read all 9 entities<a class="headerlink" href="#3-load-extended-to-read-all-9-entities" title="Permanent link">#</a></h3>
+<p><code>SqlServerStoredProcDatabase.Load()</code> currently reads only Payees, leaving
+every other collection empty by design (documented as the "Payees-only
+vertical slice" limitation). This issue extends it to call the new
+<code>ReadAccounts</code>/<code>ReadCategories</code>/etc. for all 9 newly-covered entities,
+following the same <code>_SelectAll</code> proc + local-connection read pattern
+<code>ReadPayees</code> already uses.</p>
+<h3 id="4-verification">4. Verification<a class="headerlink" href="#4-verification" title="Permanent link">#</a></h3>
+<p>Add <code>SqlServerDatabaseContractTests : DatabaseContractTests</code> (in
+<code>MyMoney.TestSupport</code>), using <code>SqlServerStoredProcDatabase</code> connected as
+<code>MyMoneyUser</code> (new env var, <code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code> is
+<strong>not</strong> needed here — <code>MyMoneyUser</code> now has everything the shared contract
+suite touches: Accounts, Categories, Payees, Transactions). This closes the
+"third contract-test flavor" item referenced in issue #1, as part of this
+issue rather than #19.</p>
+<p>Test isolation against the shared, persistent SQL Server database (unlike
+<code>SqliteDatabaseContractTests</code>'s fresh-temp-file-per-test, there's no
+"fresh database per test" here) is handled by a <code>SetUp</code>/<code>TearDown</code> helper
+that deletes all rows from the 9 covered tables using the <code>MyMoneyAdmin</code>
+connection (which has direct table access) — no new stored procs needed
+for this, since <code>MyMoneyAdmin</code> isn't subject to the EXECUTE-only
+restriction the tests themselves are proving out for <code>MyMoneyUser</code>.</p>
+<p>Currencies, Securities, StockSplits, Aliases, and Investment aren't
+exercised by the shared contract suite's <code>BuildSampleMoney()</code> — their
+correctness under the <code>MyMoneyUser</code> tier gets proven by issue #19's later
+rich-dataset parity test, which (once this issue lands) can run through
+<code>SqlServerStoredProcDatabase</code> + <code>MyMoneyUser</code> — the same tier the real app
+uses — instead of the <code>MyMoneyAdmin</code> workaround originally being considered.</p>
+<h2 id="out-of-scope">Out of scope<a class="headerlink" href="#out-of-scope" title="Permanent link">#</a></h2>
+<ul>
+<li>OnlineAccounts, AccountAliases, TransactionExtras, RentBuildings,
+  RentUnits, LoanPayments — split to issue #23.</li>
+<li>Any change to the tiered-security model itself, <code>MyMoneyAdmin</code>'s
+  bootstrap process, or the SQLite/generic <code>SqlServerDatabase</code> CRUD paths.</li>
+<li>Parameterizing <code>SqlServerDatabase</code>'s generic (non-stored-proc) CRUD path
+  — that's a separate, already-scoped-out decision from the SQLite
+  parameterization work (<code>SupportsParameterizedUpdate</code> is deliberately
+  <code>SqliteDatabase</code>-only).</li>
+<li>A metadata-driven codegen system for stored procs — noted as a possible
+  future consolidation once more of the schema follows this pattern, not
+  needed for this issue's scope.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

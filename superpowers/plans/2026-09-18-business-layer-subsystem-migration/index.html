@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-18-business-layer-subsystem-migration/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Business-Layer Subsystem Migration (Phase 1) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Business-Layer Subsystem Migration (Phase 1) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Task 1: Seed SampleDataGenerator and add a headless embedded-sample-data loader", url: "#task-1-seed-sampledatagenerator-and-add-a-headless-embedded-sample-data-loader" },
+              {title: "Task 2: Canary + property-based invariant tests", url: "#task-2-canary-property-based-invariant-tests" },
+              {title: "Task 3: Migrate Taxes", url: "#task-3-migrate-taxes" },
+              {title: "Task 4: Add the MyMoney.Business UI-callback interfaces (shared infrastructure for Tasks 5-7)", url: "#task-4-add-the-mymoneybusiness-ui-callback-interfaces-shared-infrastructure-for-tasks-5-7" },
+              {title: "Task 5: Migrate StockQuotes", url: "#task-5-migrate-stockquotes" },
+              {title: "Task 6: Migrate Importers + MainWindow\u0027s import dispatch", url: "#task-6-migrate-importers-mainwindows-import-dispatch" },
+              {title: "Task 7: Migrate MainWindow\u0027s file/database lifecycle", url: "#task-7-migrate-mainwindows-filedatabase-lifecycle" },
+              {title: "Task 8: Migrate Ofx-parsing", url: "#task-8-migrate-ofx-parsing" },
+              {title: "Task 9: Final validation and formal closure of #1", url: "#task-9-final-validation-and-formal-closure-of-1" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="business-layer-subsystem-migration-phase-1-implementation-plan">Business-Layer Subsystem Migration (Phase 1) Implementation Plan<a class="headerlink" href="#business-layer-subsystem-migration-phase-1-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Move Taxes, StockQuotes, Importers, Ofx-parsing, and MainWindow's file/database-lifecycle + import-dispatch logic from <code>Source/WPF/MyMoney</code> (the WPF app project) into <code>Source/WPF/MyMoney.Business</code>, each validated by real business-layer tests, so this logic is testable without the full WPF app or an interactive desktop.</p>
+<p><strong>Architecture:</strong> One subsystem per task, in dependency-of-difficulty order (Taxes → StockQuotes → Importers+MainWindow-import-dispatch → MainWindow-file-lifecycle → Ofx-parsing). Each task moves files via <code>git mv</code> (both projects share <code>RootNamespace=Walkabout</code> and rely on SDK-style implicit compile-item globbing, so a move is a pure filesystem operation — no namespace or <code>.csproj</code> <code>&lt;Compile&gt;</code> changes needed for <code>.cs</code> files). Where a file has genuine WPF coupling (<code>MessageBoxEx.Show</code>, a live <code>DownloadControl</code> reference), the coupling is cut via a small callback interface living in <code>MyMoney.Business</code>, with a thin WPF-backed adapter left in <code>MyMoney.csproj</code> — the same shape as the existing <code>IDataLayerUiCallback</code>/<code>WpfDataLayerUiCallback</code> pair, just for <code>MyMoney.Business</code> (which cannot reference <code>MyMoney.Data</code>, where <code>IDataLayerUiCallback</code> lives, without creating a circular project reference).</p>
+<p><strong>Tech Stack:</strong> C# / .NET 10.0-windows7.0, NUnit (UnitTests), <code>MyMoney.TestSupport</code>'s <code>MockDatabase</code>.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-18-business-layer-subsystem-migration-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li><code>MyMoney.Business</code> must end this plan with zero <code>PresentationFramework</code>/<code>PresentationCore</code>/<code>WindowsBase</code> assembly references, verified by the existing <code>LayerBoundaryTests.MyMoneyBusiness_HasNoWpfAssemblyReference</code> test (no changes needed to that test — it already covers the whole assembly, including newly added files).</li>
+<li>No new test framework/harness: reuse <code>MyMoney.TestSupport</code>'s <code>MockDatabase</code> and the existing <code>DatabaseContractTests*</code> pattern.</li>
+<li>Every subsystem migration ends with <code>dotnet build Source/WPF/MyMoney.sln</code> and <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code> + <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj</code> green before moving to the next task.</li>
+<li>Reports, the rest of MainWindow's orchestration, dual-engine parity, and FlaUI-level testing are explicitly out of scope — do not touch <code>Source/WPF/MyMoney/Reports/</code>.</li>
+<li><strong>Every migrated subsystem's test coverage must (a) run independently of WPF</strong> — no <code>System.Windows.*</code> imports, no WPF <code>Dispatcher</code>/<code>Application</code> construction in any test file for a migrated subsystem (<code>UiDispatcher.CurrentContext</code>, where genuinely needed, gets a plain <code>System.Threading.SynchronizationContext</code>, not a <code>DispatcherSynchronizationContext</code> — verified during Task 3 planning that <code>UiDispatcher.BeginInvoke</code>/<code>Invoke</code> in <code>Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs</code> only actually calls into <code>context</code> when the calling thread differs from the thread that set <code>CurrentContext</code>, so a single-threaded test never exercises the real dispatcher and a WPF one is never required) — <strong>and (b) cover both the success path and at least one meaningful invalid-input/failure path</strong> per public API surface being migrated (malformed input, out-of-range values, a missing/not-found lookup, an error callback firing) — not happy-path-only coverage. Each task below that touches tests names its own concrete invalid-input cases; where a task's existing steps don't yet name one, add it using the same judgment before considering the task done.</li>
+</ul>
+<hr />
+<h2 id="task-1-seed-sampledatagenerator-and-add-a-headless-embedded-sample-data-loader">Task 1: Seed <code>SampleDataGenerator</code> and add a headless embedded-sample-data loader<a class="headerlink" href="#task-1-seed-sampledatagenerator-and-add-a-headless-embedded-sample-data-loader" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/SampleDataGenerator.cs</code>
+- Create: <code>Source/WPF/MyMoney.Business/SampleDataLoader.cs</code>
+- Modify: <code>Source/WPF/MyMoney/Database/SampleDatabase.cs:38-49</code> (dedupe against the new loader)
+- Test: <code>Source/WPF/UnitTests/SampleDataLoaderTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>SampleDataGenerator(MyMoney money, Dictionary&lt;string, StockQuoteHistory&gt; quotes, int? randomSeed = null)</code> (new optional 3rd parameter; existing 2-arg call sites unaffected).
+- Produces: <code>SampleDataLoader.LoadEmbeddedSampleData(Assembly resourceAssembly, string tempDir) -&gt; (SampleData Data, Dictionary&lt;string, StockQuoteHistory&gt; Quotes)</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add a seeded-Random overload to <code>SampleDataGenerator</code></strong></li>
+</ul>
+<p>Current state (verified in <code>Source/WPF/MyMoney.Business/SampleDataGenerator.cs:17-24</code>):</p>
+<pre><code class="language-csharp">public class SampleDataGenerator
+{
+    private readonly MyMoney money;
+    private Account checking;
+    private readonly Random rand = new Random();
+    private readonly Dictionary&lt;string, StockQuoteHistory&gt; quotes;
+
+    public SampleDataGenerator(MyMoney money, Dictionary&lt;string, StockQuoteHistory&gt; quotes)
+</code></pre>
+<p>Change the <code>rand</code> field to a plain <code>readonly Random</code> (no inline initializer) and set it in the constructor:</p>
+<pre><code class="language-csharp">public class SampleDataGenerator
+{
+    private readonly MyMoney money;
+    private Account checking;
+    private readonly Random rand;
+    private readonly Dictionary&lt;string, StockQuoteHistory&gt; quotes;
+
+    public SampleDataGenerator(MyMoney money, Dictionary&lt;string, StockQuoteHistory&gt; quotes, int? randomSeed = null)
+    {
+        this.money = money;
+        this.quotes = quotes;
+        this.rand = randomSeed.HasValue ? new Random(randomSeed.Value) : new Random();
+    }
+</code></pre>
+<p>(Confirm the existing constructor body only assigned <code>this.money</code>/<code>this.quotes</code> before this change — if it did anything else, preserve those lines.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Build to confirm no regressions from the field change</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors (the two existing 2-arg call sites — <code>SampleDatabase.cs</code> — still bind fine since <code>randomSeed</code> defaults to <code>null</code>).</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the headless embedded-sample-data loader</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Business/SampleDataLoader.cs</code>:</p>
+<pre><code class="language-csharp">using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Reflection;
+using System.Xml;
+using System.Xml.Serialization;
+using Walkabout.StockQuotes;
+using Walkabout.Utilities;
+
+namespace Walkabout.Data
+{
+    /// &lt;summary&gt;
+    /// Extracts and deserializes the embedded sample-data resources
+    /// (SampleData.xml, SampleStockQuotes.zip) without any WPF dependency.
+    /// The resources are embedded in whichever assembly the caller passes
+    /// in (MyMoney.csproj today) -- this class doesn't assume which
+    /// assembly that is, so it works the same way from a headless test as
+    /// from the WPF-hosted SampleDatabase wizard.
+    /// &lt;/summary&gt;
+    public static class SampleDataLoader
+    {
+        public static (SampleData Data, Dictionary&lt;string, StockQuoteHistory&gt; Quotes) LoadEmbeddedSampleData(
+            Assembly resourceAssembly, string tempDir)
+        {
+            Directory.CreateDirectory(tempDir);
+
+            string xmlPath = Path.Combine(tempDir, &quot;SampleData.xml&quot;);
+            ProcessHelper.ExtractEmbeddedResourceAsFile(resourceAssembly, &quot;Walkabout.Database.SampleData.xml&quot;, xmlPath);
+
+            string zipPath = Path.Combine(tempDir, &quot;SampleStockQuotes.zip&quot;);
+            ProcessHelper.ExtractEmbeddedResourceAsFile(resourceAssembly, &quot;Walkabout.Database.SampleStockQuotes.zip&quot;, zipPath);
+
+            string quoteFolder = Path.Combine(tempDir, &quot;StockQuotes&quot;);
+            if (Directory.Exists(quoteFolder))
+            {
+                Directory.Delete(quoteFolder, true);
+            }
+            ZipFile.ExtractToDirectory(zipPath, tempDir);
+
+            SampleData data;
+            XmlSerializer serializer = new XmlSerializer(typeof(SampleData));
+            using (XmlReader reader = XmlReader.Create(xmlPath))
+            {
+                data = (SampleData)serializer.Deserialize(reader);
+            }
+
+            Dictionary&lt;string, StockQuoteHistory&gt; quotes = new Dictionary&lt;string, StockQuoteHistory&gt;();
+            foreach (SampleSecurity ss in data.Securities)
+            {
+                StockQuoteHistory history = StockQuoteHistory.Load(quoteFolder, ss.Symbol);
+                if (history != null)
+                {
+                    quotes[ss.Symbol] = history;
+                }
+            }
+
+            return (data, quotes);
+        }
+    }
+}
+</code></pre>
+<p>Verify <code>ProcessHelper.ExtractEmbeddedResourceAsFile</code>'s exact signature in
+<code>Source/WPF/MyMoney.Business/Utilities/ProcessHelper.cs</code> before compiling — adjust the call
+if the parameter order/names differ from <code>(Assembly, string resourceName, string targetPath)</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Write a test proving the loader works against the real embedded resources</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/SampleDataLoaderTests.cs</code>:</p>
+<pre><code class="language-csharp">using System.IO;
+using System.Linq;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class SampleDataLoaderTests
+    {
+        [Test]
+        public void LoadEmbeddedSampleData_ReturnsNonEmptyDataAndQuotes()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), &quot;MyMoneyTests&quot;, &quot;SampleDataLoaderTests&quot;);
+            var (data, quotes) = SampleDataLoader.LoadEmbeddedSampleData(typeof(Walkabout.MainWindow).Assembly, tempDir);
+
+            Assert.That(data, Is.Not.Null);
+            Assert.That(data.Accounts, Is.Not.Empty);
+            Assert.That(data.Payees, Is.Not.Empty);
+            Assert.That(data.Securities, Is.Not.Empty);
+            Assert.That(quotes, Is.Not.Empty, &quot;expected at least one security's quote history to load&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Run the test</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataLoaderTests"</code>
+Expected: PASS. If it fails on the embedded resource name, open <code>Source/WPF/MyMoney/MyMoney.csproj</code> and confirm the exact resource name Visual Studio's naming convention produced (verified during research as <code>Walkabout.Database.SampleData.xml</code>/<code>Walkabout.Database.SampleStockQuotes.zip</code> — <code>RootNamespace.FolderPath.FileName</code>).</p>
+<ul>
+<li>[ ] <strong>Step 6: Dedupe <code>SampleDatabase.Create()</code> against the new loader</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/Database/SampleDatabase.cs</code>, replace the manual extraction (lines ~38-49, the <code>ProcessHelper.ExtractEmbeddedResourceAsFile</code> + zip-extraction + XML-deserialize block) with a call to <code>SampleDataLoader.LoadEmbeddedSampleData</code>, keeping the <code>SampleDatabaseOptions</code> dialog step (WPF-only) and the <code>this.manager.DownloadLog.AddHistory(history)</code> loop (still WPF-project-only, since it needs the <code>StockQuoteManager</code> instance):</p>
+<pre><code class="language-csharp">public void Create()
+{
+    string temp = Path.Combine(Path.GetTempPath(), &quot;MyMoney&quot;);
+    var (data, quotes) = SampleDataLoader.LoadEmbeddedSampleData(System.Reflection.Assembly.GetExecutingAssembly(), temp);
+
+    SampleDatabaseOptions options = new SampleDatabaseOptions();
+    options.Owner = Application.Current.MainWindow;
+    options.SampleData = Path.Combine(temp, &quot;SampleData.xml&quot;);
+    if (options.ShowDialog() == false)
+    {
+        return;
+    }
+
+    foreach (var kvp in quotes)
+    {
+        this.manager.DownloadLog.AddHistory(kvp.Value);
+    }
+
+    new SampleDataGenerator(this.money, quotes).Create(data, options.Inflation, options.Years, options.Employer, options.PayCheck);
+}
+</code></pre>
+<p>Note: this reorders the dialog to appear <em>after</em> extraction instead of before (the original showed the dialog, then extracted quotes only after confirmation) — check with a quick manual run whether that's an acceptable behavior change, since extraction is fast and the dialog's <code>Cancel</code> path previously skipped the zip/quote work entirely. If preserving the original ordering matters, keep the XML-only extraction before the dialog and call the quotes-loading half of <code>LoadEmbeddedSampleData</code> only after <code>ShowDialog()</code> returns true (split the method into two, e.g. <code>LoadSampleDataXml</code> and <code>LoadQuoteHistory</code>, if so).</p>
+<ul>
+<li>[ ] <strong>Step 7: Build and run full existing suite</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> then <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: 0 errors, all tests green (including the pre-existing sample-data-driven ones, e.g. issue #51's <code>SampleDataGenerator.Symbol</code> fix regression test if one exists).</p>
+<ul>
+<li>[ ] <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/SampleDataGenerator.cs Source/WPF/MyMoney.Business/SampleDataLoader.cs Source/WPF/MyMoney/Database/SampleDatabase.cs Source/WPF/UnitTests/SampleDataLoaderTests.cs
+git commit -m &quot;feat: add seeded SampleDataGenerator and headless embedded-sample-data loader&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-canary-property-based-invariant-tests">Task 2: Canary + property-based invariant tests<a class="headerlink" href="#task-2-canary-property-based-invariant-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/SampleDataRegressionTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>SampleDataLoader.LoadEmbeddedSampleData</code> (Task 1), <code>SampleDataGenerator(MyMoney, Dictionary&lt;string,StockQuoteHistory&gt;, int?)</code> (Task 1), <code>MockDatabase</code> (existing, <code>Walkabout.Data</code> namespace).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the property-based invariant tests (no golden value needed)</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/SampleDataRegressionTests.cs</code>:</p>
+<pre><code class="language-csharp">using System.IO;
+using System.Linq;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class SampleDataRegressionTests
+    {
+        private MyMoney GenerateSample(int seed)
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), &quot;MyMoneyTests&quot;, &quot;SampleDataRegressionTests&quot;, seed.ToString());
+            var (data, quotes) = SampleDataLoader.LoadEmbeddedSampleData(typeof(Walkabout.MainWindow).Assembly, tempDir);
+
+            var money = new MyMoney();
+            new SampleDataGenerator(money, quotes, randomSeed: seed).Create(data, inflation: 0.02, years: 10, employer: &quot;ACME inc&quot;, paycheck: 2000m);
+            return money;
+        }
+
+        [Test]
+        public void Invariant_SplitsSumToTransactionAmount()
+        {
+            var money = this.GenerateSample(seed: 42);
+            foreach (var t in money.Transactions)
+            {
+                if (t.IsSplit)
+                {
+                    decimal splitTotal = t.Splits.Sum(s =&gt; s.Amount);
+                    Assert.That(splitTotal, Is.EqualTo(t.Amount).Within(0.01m),
+                        $&quot;Transaction {t.Id} splits sum to {splitTotal} but transaction amount is {t.Amount}&quot;);
+                }
+            }
+        }
+
+        [Test]
+        public void Invariant_TransfersBalance()
+        {
+            var money = this.GenerateSample(seed: 42);
+            foreach (var t in money.Transactions)
+            {
+                if (t.Transfer != null &amp;&amp; !t.IsDeleted)
+                {
+                    var other = t.Transfer.Transaction;
+                    Assert.That(other, Is.Not.Null, $&quot;Transaction {t.Id} has a Transfer with no linked Transaction&quot;);
+                    Assert.That(other.Amount, Is.EqualTo(-t.Amount).Within(0.01m),
+                        $&quot;Transfer pair {t.Id}/{other.Id} does not balance: {t.Amount} vs {other.Amount}&quot;);
+                }
+            }
+        }
+
+        [Test]
+        public void Invariant_CategoryTotalsReconcileWithTransactions()
+        {
+            var money = this.GenerateSample(seed: 42);
+            var byCategory = money.Transactions
+                .Where(t =&gt; !t.IsDeleted &amp;&amp; !t.IsSplit &amp;&amp; t.Category != null)
+                .GroupBy(t =&gt; t.Category)
+                .ToDictionary(g =&gt; g.Key, g =&gt; g.Sum(t =&gt; t.Amount));
+
+            foreach (var category in money.Categories)
+            {
+                if (byCategory.TryGetValue(category, out decimal expectedTotal))
+                {
+                    decimal actualTotal = money.Transactions
+                        .Where(t =&gt; !t.IsDeleted &amp;&amp; !t.IsSplit &amp;&amp; t.Category == category)
+                        .Sum(t =&gt; t.Amount);
+                    Assert.That(actualTotal, Is.EqualTo(expectedTotal).Within(0.01m));
+                }
+            }
+        }
+    }
+}
+</code></pre>
+<p>Before finalizing, check <code>Transaction</code>'s real property names (<code>IsSplit</code>, <code>Splits</code>, <code>Transfer</code>, <code>Category</code>, <code>Amount</code>) against <code>Source/WPF/MyMoney.Business/*.cs</code> (the domain model) — adjust names if they differ from what's assumed here.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run the invariant tests</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests"</code>
+Expected: all 3 PASS against the current, unmigrated codebase (this proves the invariants hold <em>before</em> any subsystem migration, establishing the baseline every later task must keep green).</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the seed-derived canary</strong></li>
+</ul>
+<p>This step requires running code once to discover the real value, then pinning it — that's the standard way to write a canary test, not a placeholder. Add a temporary diagnostic test:</p>
+<pre><code class="language-csharp">        [Test]
+        public void Diagnostic_PrintCanaryTotal()
+        {
+            var money = this.GenerateSample(seed: 42);
+            decimal netWorth = money.Accounts.Where(a =&gt; !a.IsClosed).Sum(a =&gt; a.Balance);
+            TestContext.WriteLine($&quot;CANARY_NET_WORTH={netWorth}&quot;);
+        }
+</code></pre>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~Diagnostic_PrintCanaryTotal" -v n</code>
+Read the printed <code>CANARY_NET_WORTH=</code> value from the test output.</p>
+<ul>
+<li>[ ] <strong>Step 4: Replace the diagnostic with the real pinned canary test</strong></li>
+</ul>
+<p>Delete <code>Diagnostic_PrintCanaryTotal</code> and add, using the value observed in Step 3 (replace <code>&lt;OBSERVED_VALUE&gt;</code> with it — do not leave this unresolved):</p>
+<pre><code class="language-csharp">        [Test]
+        public void Canary_Seed42NetWorth_IsStable()
+        {
+            var money = this.GenerateSample(seed: 42);
+            decimal netWorth = money.Accounts.Where(a =&gt; !a.IsClosed).Sum(a =&gt; a.Balance);
+            Assert.That(netWorth, Is.EqualTo(&lt;OBSERVED_VALUE&gt;m).Within(0.01m),
+                &quot;Net worth for seed 42 changed - a subsystem migration may have altered behavior, not just location&quot;);
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Run the full regression file</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests"</code>
+Expected: all 4 tests PASS (3 invariants + 1 canary).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/SampleDataRegressionTests.cs
+git commit -m &quot;test: add seed-derived canary and property-based invariants for phase-1 migration safety net&quot;
+</code></pre>
+<hr />
+<h2 id="task-3-migrate-taxes">Task 3: Migrate Taxes<a class="headerlink" href="#task-3-migrate-taxes" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Move: <code>Source/WPF/MyMoney/Taxes/CapitalGains.cs</code> → <code>Source/WPF/MyMoney.Business/Taxes/CapitalGains.cs</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/FederalTaxes.cs</code> → <code>Source/WPF/MyMoney.Business/Taxes/FederalTaxes.cs</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/FederalTaxes.json</code> → <code>Source/WPF/MyMoney.Business/Taxes/FederalTaxes.json</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/StateTaxes.cs</code> → <code>Source/WPF/MyMoney.Business/Taxes/StateTaxes.cs</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/StateTaxes.json</code> → <code>Source/WPF/MyMoney.Business/Taxes/StateTaxes.json</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/TaxCategory.cs</code> → <code>Source/WPF/MyMoney.Business/Taxes/TaxCategory.cs</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/TxfExporter.cs</code> → <code>Source/WPF/MyMoney.Business/Taxes/TxfExporter.cs</code>
+- Move: <code>Source/WPF/MyMoney/Taxes/TxfSpec.txt</code> → <code>Source/WPF/MyMoney.Business/Taxes/TxfSpec.txt</code>
+- Modify: <code>Source/WPF/MyMoney/MyMoney.csproj:606-616</code> (remove the 3 explicit item entries for the moved data files)
+- Modify: <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code> (add matching entries)
+- Modify: <code>Source/WPF/UnitTests/CostBasisTests.cs</code> (remove stale WPF <code>Dispatcher</code> setup — see Step 3a)
+- Modify: <code>Source/WPF/UnitTests/TaxTests.cs</code> (add an invalid-input case — see Step 3c)
+- Create: <code>Source/WPF/UnitTests/TaxCategoryTests.cs</code> (new invalid-input coverage for <code>TaxCategory</code>'s parsing methods — see Step 3b)</p>
+<p><strong>Interfaces:</strong> None — Taxes has zero WPF coupling (verified: 0/5 <em>source</em> files reference <code>System.Windows</code>), this is a pure relocation. The one exception is the <em>test</em> file <code>CostBasisTests.cs</code>, which has stale WPF coupling of its own (see Step 3a) — fixing that is part of this task's independent-testability requirement, not a source-file coupling issue.</p>
+<ul>
+<li>[ ] <strong>Step 1: Move the 5 <code>.cs</code> files and 3 data files</strong></li>
+</ul>
+<pre><code class="language-bash">git mv Source/WPF/MyMoney/Taxes/CapitalGains.cs Source/WPF/MyMoney.Business/Taxes/CapitalGains.cs
+git mv Source/WPF/MyMoney/Taxes/FederalTaxes.cs Source/WPF/MyMoney.Business/Taxes/FederalTaxes.cs
+git mv Source/WPF/MyMoney/Taxes/FederalTaxes.json Source/WPF/MyMoney.Business/Taxes/FederalTaxes.json
+git mv Source/WPF/MyMoney/Taxes/StateTaxes.cs Source/WPF/MyMoney.Business/Taxes/StateTaxes.cs
+git mv Source/WPF/MyMoney/Taxes/StateTaxes.json Source/WPF/MyMoney.Business/Taxes/StateTaxes.json
+git mv Source/WPF/MyMoney/Taxes/TaxCategory.cs Source/WPF/MyMoney.Business/Taxes/TaxCategory.cs
+git mv Source/WPF/MyMoney/Taxes/TxfExporter.cs Source/WPF/MyMoney.Business/Taxes/TxfExporter.cs
+git mv Source/WPF/MyMoney/Taxes/TxfSpec.txt Source/WPF/MyMoney.Business/Taxes/TxfSpec.txt
+</code></pre>
+<p><code>.cs</code> files need no namespace change: both projects share <code>&lt;RootNamespace&gt;Walkabout&lt;/RootNamespace&gt;</code>, and every file under <code>Taxes/</code> already declares <code>namespace Walkabout.Taxes</code> explicitly (verified in <code>CapitalGains.cs:6</code>) — that declaration is independent of which project compiles it.</p>
+<ul>
+<li>[ ] <strong>Step 2: Move the explicit csproj item declarations for the data files</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, remove these 4 lines (verified at lines 314, 606-608, 613-615, 616):</p>
+<pre><code class="language-xml">    &lt;None Remove=&quot;Taxes\StateTaxes.json&quot; /&gt;
+</code></pre>
+<pre><code class="language-xml">    &lt;Content Include=&quot;Taxes\FederalTaxes.json&quot;&gt;
+      &lt;CopyToOutputDirectory&gt;Always&lt;/CopyToOutputDirectory&gt;
+    &lt;/Content&gt;
+</code></pre>
+<pre><code class="language-xml">    &lt;Content Include=&quot;Taxes\StateTaxes.json&quot;&gt;
+      &lt;CopyToOutputDirectory&gt;Always&lt;/CopyToOutputDirectory&gt;
+    &lt;/Content&gt;
+</code></pre>
+<pre><code class="language-xml">    &lt;EmbeddedResource Include=&quot;Taxes\TxfSpec.txt&quot; /&gt;
+</code></pre>
+<p>In <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>, add a new <code>&lt;ItemGroup&gt;</code> (before the closing <code>&lt;/Project&gt;</code>):</p>
+<pre><code class="language-xml">  &lt;ItemGroup&gt;
+    &lt;None Remove=&quot;Taxes\StateTaxes.json&quot; /&gt;
+    &lt;Content Include=&quot;Taxes\FederalTaxes.json&quot;&gt;
+      &lt;CopyToOutputDirectory&gt;Always&lt;/CopyToOutputDirectory&gt;
+    &lt;/Content&gt;
+    &lt;Content Include=&quot;Taxes\StateTaxes.json&quot;&gt;
+      &lt;CopyToOutputDirectory&gt;Always&lt;/CopyToOutputDirectory&gt;
+    &lt;/Content&gt;
+    &lt;EmbeddedResource Include=&quot;Taxes\TxfSpec.txt&quot; /&gt;
+  &lt;/ItemGroup&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3a: Remove <code>CostBasisTests.cs</code>'s stale WPF Dispatcher setup</strong></li>
+</ul>
+<p>Verified during plan amendment: <code>CostBasisTests.cs</code> currently does, in (at least) two test methods:</p>
+<pre><code class="language-csharp">UiDispatcher.CurrentContext = new System.Windows.Threading.DispatcherSynchronizationContext(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+</code></pre>
+<p>This is unnecessary WPF coupling in a test that doesn't test any cross-thread scenario — it's a leftover from before the #7 <code>UiDispatcher</code> portability rewrite. Confirmed by reading <code>Source/WPF/MyMoney.Business/Utilities/Dispatcher.cs:33-73</code>: <code>UiDispatcher.BeginInvoke</code>/<code>Invoke</code> only route through <code>context.Post</code>/<code>context.Send</code> when the <em>calling</em> thread differs from the thread that set <code>CurrentContext</code> — a single-threaded test (this one) always takes the "already on the UI thread" branch and never actually invokes the context object at all, regardless of its concrete type. Replace both occurrences with:</p>
+<pre><code class="language-csharp">UiDispatcher.CurrentContext = new System.Threading.SynchronizationContext();
+</code></pre>
+<p>and remove the now-unused <code>using System.Windows.Controls;</code> import at the top of the file. Do not touch <code>Source/WPF/UnitTests/CrossThreadEventMarshalingTests.cs</code> — that file's use of <code>DispatcherSynchronizationContext</code> is deliberate (it specifically tests cross-thread marshaling behavior against a real WPF dispatcher as one of <code>UiDispatcher</code>'s genuinely-supported cases), not stale.</p>
+<ul>
+<li>[ ] <strong>Step 3b: Add invalid-input tests for <code>TaxCategory</code>'s parsing methods</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/TaxCategoryTests.cs</code>. These methods are <code>internal</code>, so this test file must live in <code>UnitTests</code> (which already has <code>InternalsVisibleTo</code> access per the existing <code>MyMoney.Business</code> <code>AssemblyInfo.cs</code> grant) and use <code>Walkabout.Taxes</code>. Verified behavior (read directly from <code>TaxCategory.cs</code> during plan amendment — none of these throw; they degrade gracefully, which is exactly what these tests must pin down):</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Taxes;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class TaxCategoryTests
+    {
+        [Test]
+        public void ParseInt_ValidNumber_ReturnsParsedValue()
+        {
+            Assert.That(TaxCategory.ParseInt(&quot;42&quot;), Is.EqualTo(42));
+        }
+
+        [Test]
+        public void ParseInt_InvalidNumber_ReturnsZero()
+        {
+            Assert.That(TaxCategory.ParseInt(&quot;not-a-number&quot;), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParseSign_KnownCodes_ReturnsExpectedSign()
+        {
+            Assert.That(TaxCategory.ParseSign(&quot;E&quot;), Is.EqualTo(-1));
+            Assert.That(TaxCategory.ParseSign(&quot;I&quot;), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ParseSign_UnknownCode_ReturnsZero()
+        {
+            Assert.That(TaxCategory.ParseSign(&quot;garbage&quot;), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParseSortOrder_UnknownCode_ReturnsNone()
+        {
+            Assert.That(TaxCategory.ParseSortOrder(&quot;not-a-real-code&quot;), Is.EqualTo(SortOrder.None));
+        }
+
+        [Test]
+        public void Parse_WrongTokenCount_ReturnsNull()
+        {
+            // A well-formed line has 8 whitespace/quote-delimited tokens; this has 2.
+            Assert.That(TaxCategory.Parse(&quot;1 2&quot;), Is.Null);
+        }
+    }
+}
+</code></pre>
+<p>Confirm <code>SortOrder</code> is <code>public</code> (or otherwise accessible from <code>UnitTests</code>) before compiling — it's referenced as <code>TaxCategory.ParseSortOrder</code>'s return type in <code>TaxCategory.cs</code>, so it must already be visible somewhere <code>TaxCategory.cs</code> itself can use it; verify its accessibility modifier matches what this test needs.</p>
+<ul>
+<li>[ ] <strong>Step 3c: Add an invalid-input case to <code>TaxTests.cs</code></strong></li>
+</ul>
+<p><code>StateTaxes.Load()</code>'s existing test (<code>TestStateIncomeTaxes</code>) looks up <code>"CA"</code> via <code>(from s in stateTaxes.Data where s.Abbreviation == "CA" select s).FirstOrDefault()</code> and asserts it's found. Add the mirror negative case — a state abbreviation that doesn't exist:</p>
+<pre><code class="language-csharp">        [Test]
+        public void TestStateTaxes_UnknownAbbreviation_ReturnsNull()
+        {
+            var stateTaxes = StateTaxes.Load();
+            var unknown = (from s in stateTaxes.Data where s.Abbreviation == &quot;ZZ&quot; select s).FirstOrDefault();
+            Assert.That(unknown, Is.Null, &quot;Expected no state tax data for a made-up abbreviation&quot;);
+        }
+</code></pre>
+<p>Before finalizing, open <code>FederalTaxes.cs</code>'s <code>GetIncomeTax</code>/<code>GetCapitalGainsTax</code> (lines 47, 125) and <code>StateTaxes.cs</code>'s equivalents (lines 85, 150) and check their actual behavior for a negative or zero <code>baseIncome</code>/<code>paycheck</code>/<code>gains</code> argument — whichever it turns out to be (clamps to zero, returns a negative tax, throws), add one test asserting that real, observed behavior. Don't guess the behavior; read the method first.</p>
+<ul>
+<li>[ ] <strong>Step 4: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors. If <code>MyMoney.csproj</code> call sites into <code>Walkabout.Taxes</code> types fail to resolve, confirm <code>MyMoney.csproj</code> still has its existing <code>ProjectReference</code> to <code>MyMoney.Business.csproj</code> (it does — verified at <code>MyMoney.csproj:649</code>).</p>
+<ul>
+<li>[ ] <strong>Step 5: Run the existing Taxes tests, the new invalid-input tests, and the phase-1 safety net — independently of the rest of the suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CostBasisTests|FullyQualifiedName~TaxTests|FullyQualifiedName~TaxCategoryTests|FullyQualifiedName~SampleDataRegressionTests"</code>
+Expected: all PASS. This exact filtered command — run in isolation, without the rest of <code>UnitTests.csproj</code> — is the "runs independently" proof: no WPF <code>Application</code>/<code>Dispatcher</code> needed to reach green (after Step 3a's fix), no other test fixture's setup required.</p>
+<ul>
+<li>[ ] <strong>Step 6: Confirm the layer boundary still holds</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~LayerBoundaryTests"</code>
+Expected: PASS (Taxes' source files had zero WPF references, so this should be a no-op confirmation).</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Taxes Source/WPF/MyMoney.Business/Taxes Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/CostBasisTests.cs Source/WPF/UnitTests/TaxTests.cs Source/WPF/UnitTests/TaxCategoryTests.cs
+git commit -m &quot;refactor: move Taxes into MyMoney.Business, decouple CostBasisTests from WPF, add invalid-input coverage&quot;
+</code></pre>
+<hr />
+<h2 id="task-4-add-the-mymoneybusiness-ui-callback-interfaces-shared-infrastructure-for-tasks-5-7">Task 4: Add the <code>MyMoney.Business</code> UI-callback interfaces (shared infrastructure for Tasks 5-7)<a class="headerlink" href="#task-4-add-the-mymoneybusiness-ui-callback-interfaces-shared-infrastructure-for-tasks-5-7" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.Business/IBusinessLayerUiCallback.cs</code>
+- Create: <code>Source/WPF/MyMoney/WpfBusinessLayerUiCallback.cs</code>
+- Create: <code>Source/WPF/MyMoney.Business/Importers/IImportProgressReporter.cs</code>
+- Create: <code>Source/WPF/MyMoney/Controls/DownloadControlProgressReporter.cs</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Properties/AssemblyInfo.cs</code> (add <code>InternalsVisibleTo("MyMoney")</code>)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>IBusinessLayerUiCallback</code> with <code>void ShowError(string message, string title)</code>, <code>bool Confirm(string message, string title)</code>, <code>bool ConfirmOkCancel(string message, string title)</code>.
+- Produces: <code>IImportProgressReporter</code> with <code>void SetEntries(ThreadSafeObservableCollection&lt;DownloadData&gt; entries)</code>, <code>void SelectEntry(DownloadData entry)</code>.</p>
+<p>This task exists because <code>StockQuoteManager</code> (Task 5), <code>QifImporter</code>/<code>CsvImportController</code>/<code>Exporters</code> (Task 6), and <code>Ofx.cs</code> (Task 8) each call <code>MessageBoxEx.Show</code> directly, and <code>QifImporter</code>/<code>CsvImportController</code> also hold a direct reference to the WPF <code>DownloadControl</code> <code>UserControl</code>. <code>MyMoney.Data</code> already solves the message-box problem for itself via <code>IDataLayerUiCallback</code> (<code>Source/WPF/MyMoney.Data/IDataLayerUiCallback.cs</code>), but <code>MyMoney.Business</code> cannot reference <code>MyMoney.Data</code> — <code>MyMoney.Data.csproj</code> already references <code>MyMoney.Business.csproj</code> (verified), so the reverse would be circular. Hence a separate, <code>Business</code>-side interface, same shape.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add <code>InternalsVisibleTo("MyMoney")</code> to <code>MyMoney.Business</code></strong></li>
+</ul>
+<p>Every subsystem being moved (StockQuotes, Importers, Ofx) has <code>internal</code> types/members that WPF-project-only files call across the assembly boundary once moved (verified: <code>Dialogs/ChangePasswordDialog.cs</code> calls <code>Ofx.cs</code>'s <code>internal async Task ChangePassword(...)</code>; several <code>StockQuoteManager</code> members are <code>internal</code>). Rather than widen dozens of individual members to <code>public</code>, follow the existing precedent in <code>Source/WPF/MyMoney.Business/Properties/AssemblyInfo.cs</code>, which already grants this to <code>MyMoney.Data</code> and <code>UnitTests</code>:</p>
+<pre><code class="language-csharp">[assembly: InternalsVisibleTo(&quot;MyMoney&quot;)]
+</code></pre>
+<p>Add this line alongside the existing <code>InternalsVisibleTo("MyMoney.Data")</code>/<code>InternalsVisibleTo("UnitTests")</code> lines.</p>
+<ul>
+<li>[ ] <strong>Step 2: Create the <code>IBusinessLayerUiCallback</code> interface</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Business/IBusinessLayerUiCallback.cs</code>:</p>
+<pre><code class="language-csharp">namespace Walkabout.Data
+{
+    /// &lt;summary&gt;
+    /// MyMoney.Business has no WPF dependency, so code that needs to show
+    /// an error or ask the user a yes/no question (StockQuoteManager,
+    /// the Importers, Ofx.cs's protocol-edge-case prompts) goes through
+    /// this instead of calling MessageBoxEx directly. MyMoney.csproj
+    /// supplies the real, WPF-backed implementation. Mirrors
+    /// MyMoney.Data's IDataLayerUiCallback, which MyMoney.Business cannot
+    /// reference directly (MyMoney.Data already references
+    /// MyMoney.Business; the reverse would be circular).
+    /// &lt;/summary&gt;
+    public interface IBusinessLayerUiCallback
+    {
+        void ShowError(string message, string title);
+        bool Confirm(string message, string title);
+        bool ConfirmOkCancel(string message, string title);
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Create the WPF-backed implementation</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney/WpfBusinessLayerUiCallback.cs</code>:</p>
+<pre><code class="language-csharp">using System.Windows;
+using Walkabout.Data;
+
+namespace Walkabout
+{
+    public class WpfBusinessLayerUiCallback : IBusinessLayerUiCallback
+    {
+        public void ShowError(string message, string title)
+        {
+            MessageBoxEx.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        public bool Confirm(string message, string title)
+        {
+            return MessageBoxEx.Show(message, title, MessageBoxButton.YesNo) == MessageBoxResult.Yes;
+        }
+
+        public bool ConfirmOkCancel(string message, string title)
+        {
+            return MessageBoxEx.Show(message, title, MessageBoxButton.OKCancel, MessageBoxImage.Exclamation) == MessageBoxResult.OK;
+        }
+    }
+}
+</code></pre>
+<p>Verify <code>MessageBoxEx.Show</code>'s exact overloads in this codebase before compiling (used elsewhere in <code>MainWindow.xaml.cs</code>) — adjust parameter order/names if they differ from what's assumed here.</p>
+<ul>
+<li>[ ] <strong>Step 4: Create the <code>IImportProgressReporter</code> interface</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.Business/Importers/IImportProgressReporter.cs</code>:</p>
+<pre><code class="language-csharp">using Walkabout.Utilities;
+
+namespace Walkabout.Importers
+{
+    /// &lt;summary&gt;
+    /// QifImporter and CsvImportController used to hold a direct reference
+    /// to the WPF DownloadControl (a UserControl) and manipulate its
+    /// DownloadEventTree.ItemsSource/SelectEntry directly. This interface
+    /// replaces that direct reference so both importers can live in
+    /// MyMoney.Business. MyMoney.csproj supplies a thin adapter forwarding
+    /// to the real DownloadControl.
+    /// &lt;/summary&gt;
+    public interface IImportProgressReporter
+    {
+        void SetEntries(ThreadSafeObservableCollection&lt;DownloadData&gt; entries);
+        void SelectEntry(DownloadData entry);
+    }
+}
+</code></pre>
+<p>Confirm <code>ThreadSafeObservableCollection&lt;T&gt;</code> and <code>DownloadData</code>'s actual namespaces before compiling — <code>DownloadData</code> currently lives in <code>Source/WPF/MyMoney/Importers/DownloadData.cs</code> under <code>namespace Walkabout.Importers</code> (moves in Task 6, so this reference will resolve once both are in <code>MyMoney.Business</code>); <code>ThreadSafeObservableCollection</code> needs locating (search <code>Source/WPF/MyMoney.Business/Utilities/</code> and <code>Source/WPF/MyMoney/Utilities/</code> — it's referenced from <code>QifImporter.cs</code> today, so it already compiles from wherever it currently lives).</p>
+<ul>
+<li>[ ] <strong>Step 5: Create the WPF-backed <code>DownloadControl</code> adapter</strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney/Controls/DownloadControlProgressReporter.cs</code>:</p>
+<pre><code class="language-csharp">using Walkabout.Importers;
+using Walkabout.Utilities;
+
+namespace Walkabout.Controls
+{
+    public class DownloadControlProgressReporter : IImportProgressReporter
+    {
+        private readonly DownloadControl control;
+
+        public DownloadControlProgressReporter(DownloadControl control)
+        {
+            this.control = control;
+        }
+
+        public void SetEntries(ThreadSafeObservableCollection&lt;DownloadData&gt; entries)
+        {
+            this.control.DownloadEventTree.ItemsSource = entries;
+        }
+
+        public void SelectEntry(DownloadData entry)
+        {
+            this.control.SelectEntry(entry);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors. <code>DownloadData</code>/<code>ThreadSafeObservableCollection</code> resolution may fail until Task 6 physically moves <code>DownloadData.cs</code> — if so, it's fine to leave <code>IImportProgressReporter.cs</code> uncompilable-in-isolation and complete this build check as part of Task 6 instead; note that dependency explicitly if it comes up.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/IBusinessLayerUiCallback.cs Source/WPF/MyMoney/WpfBusinessLayerUiCallback.cs Source/WPF/MyMoney.Business/Importers/IImportProgressReporter.cs Source/WPF/MyMoney/Controls/DownloadControlProgressReporter.cs Source/WPF/MyMoney.Business/Properties/AssemblyInfo.cs
+git commit -m &quot;feat: add MyMoney.Business UI-callback interfaces for the subsystem migration&quot;
+</code></pre>
+<hr />
+<h2 id="task-5-migrate-stockquotes">Task 5: Migrate StockQuotes<a class="headerlink" href="#task-5-migrate-stockquotes" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Move: all 9 files in <code>Source/WPF/MyMoney/StockQuotes/</code> → <code>Source/WPF/MyMoney.Business/StockQuotes/</code>
+- Modify: <code>Source/WPF/MyMoney.Business/StockQuotes/ExchangeRateService.cs</code> (remove unused <code>System.Windows.Documents</code>/<code>System.Windows.Forms</code> usings)
+- Modify: <code>Source/WPF/MyMoney.Business/StockQuotes/TwelveData.cs</code> (remove unused <code>System.Windows.*</code> usings)
+- Modify: <code>Source/WPF/MyMoney.Business/StockQuotes/StockQuoteManager.cs</code> (add <code>IBusinessLayerUiCallback</code> property, replace the one <code>MessageBoxEx.Show</code> call)
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> (wire <code>WpfBusinessLayerUiCallback</code> into <code>StockQuoteManager</code> construction)
+- Modify: <code>Source/WPF/MyMoney/MyMoney.csproj:327</code> (move the <code>StockQuotes\Design.dgml</code> <code>&lt;None Include&gt;</code> entry)
+- Test: reuse <code>SampleDataRegressionTests</code> (Task 2) as the safety net; plus new tests per the Global Constraints' independent-testability/invalid-input requirement — see Step 7a below
+- Create: <code>Source/WPF/UnitTests/StockQuoteThrottleTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IBusinessLayerUiCallback</code> (Task 4).
+- Produces: <code>StockQuoteManager.UiCallback</code> settable property (<code>IBusinessLayerUiCallback</code>, defaults <code>null</code>).</p>
+<ul>
+<li>[ ] <strong>Step 1: Move the 9 files</strong></li>
+</ul>
+<pre><code class="language-bash">git mv Source/WPF/MyMoney/StockQuotes/*.cs Source/WPF/MyMoney.Business/StockQuotes/
+</code></pre>
+<p>(Run <code>ls Source/WPF/MyMoney/StockQuotes/</code> first to confirm the exact 9 filenames match what's expected: <code>ExchangeRateService.cs</code>, <code>IOnlineService.cs</code>, <code>MarketStack.cs</code>, <code>Polygon.cs</code>, <code>StockQuoteManager.cs</code>, <code>StockQuoteThrottle.cs</code>, <code>ThrottledStockQuoteService.cs</code>, <code>TwelveData.cs</code>, <code>Yahoo.cs</code>.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Move the <code>Design.dgml</code> csproj entry</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, remove:</p>
+<pre><code class="language-xml">    &lt;None Include=&quot;StockQuotes\Design.dgml&quot; /&gt;
+</code></pre>
+<p>In <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>, add it to the <code>&lt;ItemGroup&gt;</code> created in Task 3 (or a new one):</p>
+<pre><code class="language-xml">    &lt;None Include=&quot;StockQuotes\Design.dgml&quot; /&gt;
+</code></pre>
+<p>Also <code>git mv Source/WPF/MyMoney/StockQuotes/Design.dgml Source/WPF/MyMoney.Business/StockQuotes/Design.dgml</code> if it wasn't already swept up by the wildcard move in Step 1 (it's a <code>.dgml</code>, not <code>.cs</code>, so it wasn't).</p>
+<ul>
+<li>[ ] <strong>Step 3: Remove the unused WPF usings from <code>ExchangeRateService.cs</code> and <code>TwelveData.cs</code></strong></li>
+</ul>
+<p>In <code>ExchangeRateService.cs</code>, delete:</p>
+<pre><code class="language-csharp">using System.Windows.Documents;
+using System.Windows.Forms;
+</code></pre>
+<p>In <code>TwelveData.cs</code>, delete:</p>
+<pre><code class="language-csharp">using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Interop;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+</code></pre>
+<p>(Verified during research: neither file has any real symbol usage from these namespaces — only <code>UiDispatcher.Invoke</code>/<code>BeginInvoke</code> calls remain in <code>ExchangeRateService.cs</code>, and <code>UiDispatcher</code> is already a portable <code>SynchronizationContext</code>-based utility from the #7 rewrite, not a WPF type.)</p>
+<ul>
+<li>[ ] <strong>Step 4: Wire <code>StockQuoteManager</code>'s <code>MessageBoxEx.Show</code> call through the new interface</strong></li>
+</ul>
+<p>In <code>StockQuoteManager.cs</code>, remove <code>using System.Windows;</code> (and any other now-unused WPF usings from that file) and add a settable callback property near the top of the class:</p>
+<pre><code class="language-csharp">public IBusinessLayerUiCallback UiCallback { get; set; }
+</code></pre>
+<p>Replace (originally at line 639, verified):</p>
+<pre><code class="language-csharp">MessageBoxEx.Show(e.ToString(), Walkabout.Properties.Resources.StockQuotesException, MessageBoxButton.OK, MessageBoxImage.Error);
+</code></pre>
+<p>with:</p>
+<pre><code class="language-csharp">this.UiCallback?.ShowError(e.ToString(), Walkabout.Properties.Resources.StockQuotesException);
+</code></pre>
+<p>(<code>Walkabout.Properties.Resources</code> is generated from <code>MyMoney.Business/Properties/Resources.resx</code>, already <code>public</code> per the existing <code>PublicResXFileCodeGenerator</code> setting in <code>MyMoney.Business.csproj</code> — confirmed usable from this file already.)</p>
+<ul>
+<li>[ ] <strong>Step 5: Wire the real implementation from <code>MainWindow.xaml.cs</code></strong></li>
+</ul>
+<p>Find <code>StockQuoteManager</code>'s construction site(s) in <code>MainWindow.xaml.cs</code> (search for <code>new StockQuoteManager(</code>) and set the callback immediately after construction:</p>
+<pre><code class="language-csharp">this.stockQuotes = new StockQuoteManager(provider, serviceSettings, logPath)
+{
+    UiCallback = new WpfBusinessLayerUiCallback()
+};
+</code></pre>
+<p>(Adjust variable names to match whatever the actual local/field assignment looks like at that call site — do not guess the surrounding code without opening the file at the real line.)</p>
+<ul>
+<li>[ ] <strong>Step 6: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors. If <code>internal</code> members of moved <code>StockQuotes</code> types fail to resolve from WPF-project-only call sites (e.g. <code>ExchangeRateService.IsMySettings</code>, called from <code>MainWindow.xaml.cs:836</code>), confirm Task 4's <code>InternalsVisibleTo("MyMoney")</code> was added correctly.</p>
+<ul>
+<li>[ ] <strong>Step 7a: Add independent-of-WPF success/invalid-input tests for <code>StockQuoteThrottle</code></strong></li>
+</ul>
+<p><code>StockQuoteThrottle.GetSleep()</code> (<code>StockQuoteThrottle.cs</code>, verified during plan amendment) is a clean, pure-logic candidate: it genuinely throws <code>StockQuoteThrottledException</code> when a configured limit is exceeded, no mocking or WPF needed, no network I/O. Create <code>Source/WPF/UnitTests/StockQuoteThrottleTests.cs</code>:</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.StockQuotes;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class StockQuoteThrottleTests
+    {
+        [Test]
+        public void GetSleep_UnderAllLimits_ReturnsZero()
+        {
+            var throttle = new StockQuoteThrottle
+            {
+                Settings = new OnlineServiceSettings
+                {
+                    ApiRequestsPerMonthLimit = 1000,
+                    ApiRequestsPerDayLimit = 100,
+                    ApiRequestsPerMinuteLimit = 10
+                }
+            };
+            Assert.That(throttle.GetSleep(), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void GetSleep_MonthlyLimitExceeded_ThrowsWithMonthlyLimitReached()
+        {
+            var throttle = new StockQuoteThrottle
+            {
+                Settings = new OnlineServiceSettings { ApiRequestsPerMonthLimit = 1 }
+            };
+            throttle.RecordCall();
+            var ex = Assert.Throws&lt;StockQuoteThrottledException&gt;(() =&gt; throttle.GetSleep());
+            Assert.That(ex.MonthlyLimitReached, Is.True);
+        }
+    }
+}
+</code></pre>
+<p>Before finalizing: confirm <code>OnlineServiceSettings</code>'s exact property names against <code>Source/WPF/MyMoney.Business/StockQuotes/IOnlineService.cs</code> (they were read during earlier plan research as <code>ApiRequestsPerMonthLimit</code> etc. via the <code>_requestsPerMonth</code>-backed properties — verify the public property name matches, since the backing field name and public property name may differ), and confirm <code>RecordCall()</code>'s exact effect on <code>_callsThisMonth</code> actually reaches the throw threshold with a single call given <code>ApiRequestsPerMonthLimit = 1</code>. <code>StockQuoteThrottledException</code>'s constructor/<code>MonthlyLimitReached</code> property are visible in <code>ThrottledStockQuoteService.cs:17</code> per earlier research — confirm its accessibility (the class itself is <code>internal class StockQuoteThrottledException</code>, verified earlier; <code>UnitTests</code> already has <code>InternalsVisibleTo</code> access via <code>MyMoney.Business</code>'s <code>AssemblyInfo.cs</code> grant from Task 4, so this should compile, but confirm before assuming).</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~StockQuoteThrottleTests"</code> in isolation — no other fixture, no WPF — to prove independent testability.</p>
+<ul>
+<li>[ ] <strong>Step 7b: Run the safety net</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~StockQuoteThrottleTests"</code>
+Expected: all PASS.</p>
+<ul>
+<li>[ ] <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/StockQuotes Source/WPF/MyMoney.Business/StockQuotes Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/StockQuoteThrottleTests.cs
+git commit -m &quot;refactor: move StockQuotes into MyMoney.Business, add independent throttle tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-6-migrate-importers-mainwindows-import-dispatch">Task 6: Migrate Importers + MainWindow's import dispatch<a class="headerlink" href="#task-6-migrate-importers-mainwindows-import-dispatch" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Move: all 7 files in <code>Source/WPF/MyMoney/Importers/</code> → <code>Source/WPF/MyMoney.Business/Importers/</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Importers/CsvImportController.cs</code> (wire <code>IBusinessLayerUiCallback</code> + <code>IImportProgressReporter</code>, remove <code>System.Windows</code>/<code>System.Windows.Input</code> usings)
+- Modify: <code>Source/WPF/MyMoney.Business/Importers/CsvImporter.cs</code> (remove the <code>Application.Current.MainWindow</code> owner assignment — see Step 3)
+- Modify: <code>Source/WPF/MyMoney.Business/Importers/QifImporter.cs</code> (wire <code>IBusinessLayerUiCallback</code> + <code>IImportProgressReporter</code>, remove <code>using System.Windows;</code>)
+- Modify: <code>Source/WPF/MyMoney.Business/Importers/Exporters.cs</code> (wire <code>IBusinessLayerUiCallback</code>, remove <code>using System.Windows;</code>)
+- Modify: <code>Source/WPF/MyMoney.Business/Importers/DownloadData.cs</code> (remove <code>using System.Windows;</code> if unused — verify first, <code>UiDispatcher</code> call was the only real hit found)
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs:1828,2510-2546,4169-4293</code> (<code>ImportQif</code>/<code>ImportOfx</code>/<code>ImportXml</code>/<code>ImportMoneyFile</code>/<code>ImportCsv</code>/<code>OnCommandFileImport</code>: wire the new callbacks when constructing importers)
+- Test: reuse <code>SampleDataRegressionTests</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IBusinessLayerUiCallback</code>, <code>IImportProgressReporter</code> (Task 4).</p>
+<ul>
+<li>[ ] <strong>Step 1: Move the 7 files</strong></li>
+</ul>
+<pre><code class="language-bash">git mv Source/WPF/MyMoney/Importers/*.cs Source/WPF/MyMoney.Business/Importers/
+</code></pre>
+<p>(<code>CsvImportController.cs</code>, <code>CsvImporter.cs</code>, <code>DownloadData.cs</code>, <code>Exporters.cs</code>, <code>Importer.cs</code>, <code>QifImporter.cs</code>, <code>XmlImporter.cs</code>.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Check <code>DownloadData.cs</code>'s <code>System.Windows</code> using is actually needed</strong></li>
+</ul>
+<p>Open <code>DownloadData.cs</code>; the only WPF-flagged line found during research was <code>using System.Windows;</code> at the top. If no <code>System.Windows</code>-namespace symbol is used in the file body (check for <code>Dispatcher</code>/<code>UiDispatcher</code> usage — if it's <code>UiDispatcher</code>, that's already portable per the Task 5 precedent), delete the using. If genuine WPF usage exists that wasn't caught, treat it the same way as the other files (route through <code>IBusinessLayerUiCallback</code> or leave the file's WPF-touching method as a thin partial left in <code>MyMoney.csproj</code> — do not silently skip building this file).</p>
+<ul>
+<li>[ ] <strong>Step 3: Fix <code>CsvImporter.cs</code>'s dialog-owner assignment</strong></li>
+</ul>
+<p>At the original line 311 (verified): <code>cd.Owner = System.Windows.Application.Current.MainWindow;</code> — this sets a <code>System.Windows.Forms.ColorDialog</code>'s (or similar) owner window. Since <code>MyMoney.Business</code> can't reference <code>System.Windows.Application</code>, this single line needs to move to the WPF-project-only caller. Find where this method (containing <code>cd</code>) is invoked from <code>MyMoney.csproj</code>, and either:
+  - pass the owner <code>Window</code> in as a parameter from the WPF-project call site, or
+  - if <code>cd</code> (the dialog) is itself only ever shown from a WPF-project call site already, move just that dialog-showing sub-method (not the whole file) to stay in <code>MyMoney.csproj</code> as a small partial helper.</p>
+<p>Open the actual method containing line 311 before deciding — this plan can't specify the exact split without seeing the surrounding method body, which wasn't part of the research pass. Flag this as the one sub-step in this task needing an in-context read before editing.</p>
+<ul>
+<li>[ ] <strong>Step 4: Wire <code>CsvImportController</code>'s <code>MessageBoxEx.Show</code> and <code>DownloadControl</code> coupling</strong></li>
+</ul>
+<p>Add to <code>CsvImportController.cs</code> (constructor currently <code>public CsvImportController(DownloadControl control, MyMoney money, string databaseDir, StockQuoteCache cache)</code>):</p>
+<p>Change the constructor signature to take the two new interfaces instead of the concrete <code>DownloadControl</code>:</p>
+<pre><code class="language-csharp">public CsvImportController(IImportProgressReporter progressReporter, IBusinessLayerUiCallback uiCallback, MyMoney money, string databaseDir, StockQuoteCache cache)
+{
+    this.progressReporter = progressReporter;
+    this.uiCallback = uiCallback;
+    // ... existing assignments for money, databaseDir, cache
+}
+</code></pre>
+<p>Replace (originally at line 39, verified): <code>this.control.DownloadEventTree.ItemsSource = entries;</code> with <code>this.progressReporter.SetEntries(entries);</code></p>
+<p>Replace (originally at line 86, verified): <code>this.control.SelectEntry(last);</code> with <code>this.progressReporter.SelectEntry(last);</code></p>
+<p>Replace (originally at line 96, verified): <code>MessageBoxEx.Show(ex.Message, "Import Error", MessageBoxButton.OK, MessageBoxImage.Exclamation);</code> with <code>this.uiCallback?.ShowError(ex.Message, "Import Error");</code></p>
+<ul>
+<li>[ ] <strong>Step 5: Wire <code>QifImporter</code>'s coupling the same way</strong></li>
+</ul>
+<p>Change the constructor (currently <code>public QifImporter(DownloadControl control, MyMoney myMoney)</code>) to:</p>
+<pre><code class="language-csharp">public QifImporter(IImportProgressReporter progressReporter, IBusinessLayerUiCallback uiCallback, MyMoney myMoney)
+    : base(myMoney)
+{
+    this.progressReporter = progressReporter;
+    this.uiCallback = uiCallback;
+}
+</code></pre>
+<p>Replace (line 31, verified): <code>this.control.DownloadEventTree.ItemsSource = entries;</code> with <code>this.progressReporter.SetEntries(entries);</code></p>
+<p>Replace the 3 <code>MessageBoxEx.Show</code> calls (lines 45, 56, 66, verified) with <code>this.uiCallback?.Confirm(...)</code> (for the two Yes/No prompts) and <code>this.uiCallback?.ShowError(...)</code> (for the "You must first select an account" acknowledgment-only one) — open the file to match each call's exact message string when substituting, since this plan's research captured the calls' presence and button type but not their full message text.</p>
+<ul>
+<li>[ ] <strong>Step 6: Wire <code>Exporters</code>'s single <code>MessageBoxEx.Show</code> call</strong></li>
+</ul>
+<p>Add an <code>IBusinessLayerUiCallback</code> dependency to <code>Exporters</code> (constructor injection, matching the pattern above) and replace (line 69, verified):</p>
+<pre><code class="language-csharp">MessageBoxEx.Show(&quot;Error exporting rows\n&quot; + e.Message, &quot;Export Error&quot;, MessageBoxButton.OK, MessageBoxImage.Error);
+</code></pre>
+<p>with:</p>
+<pre><code class="language-csharp">this.uiCallback?.ShowError(&quot;Error exporting rows\n&quot; + e.Message, &quot;Export Error&quot;);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Update <code>MainWindow.xaml.cs</code>'s construction sites</strong></li>
+</ul>
+<p><code>ImportQif</code> (line 1828), <code>ImportCsv</code> (called from <code>OnCommandFileImport</code>, line 4169 area) construct <code>QifImporter</code>/<code>CsvImportController</code> today with a <code>DownloadControl</code> argument. Update each construction site to pass <code>new DownloadControlProgressReporter(&lt;the control&gt;)</code> and <code>new WpfBusinessLayerUiCallback()</code> instead:</p>
+<pre><code class="language-csharp">var importer = new QifImporter(new DownloadControlProgressReporter(this.downloadControl), new WpfBusinessLayerUiCallback(), this.myMoney);
+</code></pre>
+<p>(Substitute the real local/field name for the <code>DownloadControl</code> instance at each call site — open <code>MainWindow.xaml.cs</code> at the noted line ranges to confirm it before editing.)</p>
+<ul>
+<li>[ ] <strong>Step 8: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors.</p>
+<ul>
+<li>[ ] <strong>Step 8a: Add independent-of-WPF success/invalid-input tests for Importers</strong></li>
+</ul>
+<p>Two candidates, verified during plan amendment:</p>
+<ol>
+<li><strong><code>XmlImporter.Import(string file)</code></strong> (<code>Importer.cs</code>'s override, verified in <code>XmlImporter.cs</code>) needs no fake at all — no <code>MessageBoxEx</code>/<code>DownloadControl</code> coupling in this class. It throws <code>NotSupportedException</code> for an unrecognized file extension:</li>
+</ol>
+<pre><code class="language-csharp">using System;
+using NUnit.Framework;
+using Walkabout.Data;
+using Walkabout.Importers;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class XmlImporterTests
+    {
+        [Test]
+        public void Import_UnsupportedExtension_ThrowsNotSupportedException()
+        {
+            var importer = new XmlImporter(new MyMoney(), null);
+            Assert.Throws&lt;NotSupportedException&gt;(() =&gt; importer.Import(&quot;statement.qfx&quot;));
+        }
+    }
+}
+</code></pre>
+<p>Confirm <code>XmlImporter</code>'s constructor signature (<code>MyMoney money, IServiceProvider site</code>) still matches after the move — <code>site</code> being <code>null</code> here is fine since this path never reaches code that dereferences it (verify that's still true after moving the file; if <code>Import</code>'s extension check runs before any <code>site</code> usage, this holds).</p>
+<ol>
+<li><strong><code>QifImporter</code>'s new <code>IImportProgressReporter</code>/<code>IBusinessLayerUiCallback</code> dependency (from Step 5) is now directly testable with simple fakes</strong> — this is new capability this task's own refactor unlocked, not something a WPF-coupled <code>QifImporter</code> could ever have had before. Add a small test-only fake in the same test file (not a new shared infrastructure class — YAGNI, this is the only place it's needed so far):</li>
+</ol>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+using Walkabout.Importers;
+using Walkabout.Utilities;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class QifImporterTests
+    {
+        private class FakeImportProgressReporter : IImportProgressReporter
+        {
+            public ThreadSafeObservableCollection&lt;DownloadData&gt; Entries { get; private set; }
+            public DownloadData Selected { get; private set; }
+            public void SetEntries(ThreadSafeObservableCollection&lt;DownloadData&gt; entries) =&gt; this.Entries = entries;
+            public void SelectEntry(DownloadData entry) =&gt; this.Selected = entry;
+        }
+
+        private class FakeBusinessLayerUiCallback : IBusinessLayerUiCallback
+        {
+            public string LastErrorMessage { get; private set; }
+            public void ShowError(string message, string title) =&gt; this.LastErrorMessage = message;
+            public bool Confirm(string message, string title) =&gt; true;
+            public bool ConfirmOkCancel(string message, string title) =&gt; true;
+        }
+
+        [Test]
+        public void Import_NoAccountSelected_ReportsErrorViaCallback()
+        {
+            var reporter = new FakeImportProgressReporter();
+            var callback = new FakeBusinessLayerUiCallback();
+            var importer = new QifImporter(reporter, callback, new MyMoney());
+
+            // Open the file to confirm the exact call shape that reports &quot;you must first
+            // select an account&quot; (message text captured loosely in Step 5, not verbatim) —
+            // call whichever method/overload triggers that path with currentlySelectedAccount
+            // null, then assert callback.LastErrorMessage is not null/empty.
+        }
+    }
+}
+</code></pre>
+<p>This second test's body is intentionally left for you to complete once you've read <code>QifImporter.cs</code>'s real method signature and the exact no-account-selected code path during Step 5 — don't guess the call shape here; you'll know it precisely by the time you reach this step.</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~XmlImporterTests|FullyQualifiedName~QifImporterTests"</code> in isolation to confirm independent testability.</p>
+<ul>
+<li>[ ] <strong>Step 9: Run the safety net</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~XmlImporterTests|FullyQualifiedName~QifImporterTests"</code>
+Expected: all PASS.</p>
+<ul>
+<li>[ ] <strong>Step 10: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Importers Source/WPF/MyMoney.Business/Importers Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/UnitTests/XmlImporterTests.cs Source/WPF/UnitTests/QifImporterTests.cs
+git commit -m &quot;refactor: move Importers into MyMoney.Business, cut DownloadControl/MessageBox coupling, add independent tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-7-migrate-mainwindows-filedatabase-lifecycle">Task 7: Migrate MainWindow's file/database lifecycle<a class="headerlink" href="#task-7-migrate-mainwindows-filedatabase-lifecycle" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml.cs</code> (extract <code>LoadDatabase</code>, <code>BeginLoadDatabase</code>, <code>CreateNewDatabase</code>, <code>Save</code>/<code>SaveIfDirty</code>, <code>SaveAsSqlCe</code>/<code>SaveAsSqlite</code>/<code>SaveAsXml</code>/<code>SaveAsBinaryXml</code>, <code>ExportCsv</code> — lines 1917-2547 area, verified)
+- Create: <code>Source/WPF/MyMoney.Business/DatabaseLifecycle.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: whatever public surface <code>DatabaseLifecycle</code> ends up exposing — determined during this task, not pre-specified here.</p>
+<p>This task needs an in-context read of <code>MainWindow.xaml.cs:1913-2547</code> (the "Data" region) before writing concrete steps: the spec's survey identified these methods as decision logic, but the exact split between "genuinely portable" and "needs a WPF callback" (dialogs for <code>Save As</code> file pickers, password prompts via <code>PromptForPassword</code> at line 2348) requires seeing the full method bodies, which this plan's research pass didn't capture line-by-line (only signatures and line numbers, gathered for scoping, not extraction).</p>
+<ul>
+<li>[ ] <strong>Step 1: Read the full "Data" region</strong></li>
+</ul>
+<p>Read <code>Source/WPF/MyMoney/MainWindow.xaml.cs:1913-2547</code> in full.</p>
+<ul>
+<li>[ ] <strong>Step 2: Classify each method</strong></li>
+</ul>
+<p>For each of <code>BeginLoadDatabase</code>, <code>LoadDatabase</code> (both overloads), <code>CreateNewDatabase</code>, <code>SaveIfDirty</code> (both overloads), <code>Save</code>, <code>PromptForPassword</code>, <code>SaveAsSqlCe</code>, <code>SaveNewDatabase</code>, <code>SaveAsSqlite</code>, <code>SaveAsXml</code>, <code>SaveAsBinaryXml</code>, <code>ExportCsv</code>: determine whether it (a) only orchestrates <code>IDatabase</code>/<code>MyMoney.Business</code>/<code>MyMoney.Data</code> calls (portable, move to <code>DatabaseLifecycle.cs</code>), or (b) genuinely shows a WPF dialog/file picker (stays in <code>MainWindow.xaml.cs</code>, calls into the portable piece).</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 3: Extract the portable methods to <code>MyMoney.Business/DatabaseLifecycle.cs</code>, following Task 4/5/6's <code>IBusinessLayerUiCallback</code> pattern for any error/confirm dialogs found</strong></p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Update <code>MainWindow.xaml.cs</code> call sites to delegate to the new class</strong></p>
+</li>
+<li>
+<p>[ ] <strong>Step 4a: Add independent-of-WPF success/invalid-input tests for the extracted <code>DatabaseLifecycle</code> methods</strong></p>
+</li>
+</ul>
+<p>Per the Global Constraints' independent-testability/invalid-input requirement: once you know <code>DatabaseLifecycle</code>'s real public surface (from Steps 2-4), add tests in a new <code>Source/WPF/UnitTests/DatabaseLifecycleTests.cs</code> covering at minimum:
+- One success-path case (e.g. create a database via <code>MyMoney.TestSupport</code>'s <code>MockDatabase</code> or a real temp <code>SqliteDatabase</code>, confirm the load/save round-trips).
+- One invalid-input/failure case for whichever extracted method is easiest to exercise without a WPF dialog — a load from a nonexistent file path, an unsupported/corrupt file, or (if a password-protected engine's opened this way) a wrong password. Pick whichever one of <code>DatabaseLifecycle</code>'s real methods actually has an observable failure mode (throws, returns false/null, calls <code>IBusinessLayerUiCallback.ShowError</code>) — you'll know which by the time you've done Steps 2-4; don't force a test onto a method that doesn't have one.</p>
+<p>Run the new test file's filter in isolation (<code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~DatabaseLifecycleTests"</code>) to confirm it passes without WPF.</p>
+<ul>
+<li>[ ] <strong>Step 5: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors.</p>
+<ul>
+<li>[ ] <strong>Step 6: Run the safety net</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests|FullyQualifiedName~LayerBoundaryTests|FullyQualifiedName~DatabaseLifecycleTests"</code>
+Expected: all PASS.</p>
+<p><strong>Do not run the app interactively (<code>dotnet run</code>) from this dispatch.</strong> This task touches the most operationally sensitive code in the app (data loss risk if <code>Save</code> breaks silently), and a real manual click-through of File &gt; New/Open/Save/Save As/Export is genuinely warranted before this ships — but Task 1 already hit a real hung-process incident when a background agent launched the WPF app in this unattended environment (FlaUI/dialog-driven UI needs an interactive desktop; see the ledger's operational note). If you are an agent dispatched by a controller: stop here, report DONE_WITH_CONCERNS, and name the manual click-through as an outstanding verification step for a human (or an interactive session) to perform — do not attempt to launch the app yourself.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MainWindow.xaml.cs Source/WPF/MyMoney.Business/DatabaseLifecycle.cs Source/WPF/UnitTests/DatabaseLifecycleTests.cs
+git commit -m &quot;refactor: move MainWindow's file/database lifecycle into MyMoney.Business, add independent lifecycle tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-8-migrate-ofx-parsing">Task 8: Migrate Ofx-parsing<a class="headerlink" href="#task-8-migrate-ofx-parsing" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Move: <code>Source/WPF/MyMoney/Ofx/OfxObjectModel.cs</code>, <code>SgmlParser.cs</code>, <code>SgmlReader.cs</code>, <code>OfxInstitutionInfo.cs</code>, <code>HtmlResponseException.cs</code>, <code>OfxStrings.Designer.cs</code>, <code>OfxStrings.resx</code> → <code>Source/WPF/MyMoney.Business/Ofx/</code>
+- Modify: <code>Source/WPF/MyMoney.Business/Ofx/Ofx.cs</code> (wire <code>IBusinessLayerUiCallback</code> for its 3 <code>MessageBoxEx.Show</code> calls, then move it too)
+- Keep in place: <code>Source/WPF/MyMoney/Ofx/OfxDownloadController.cs</code> (genuine UI controller — see rationale below)
+- Modify: <code>Source/WPF/MyMoney/MyMoney.csproj</code> (move the 5 embedded-resource entries: <code>ofx201.dtd</code>, <code>MfaPhrases.xml</code>, <code>ofx160.dtd</code>, <code>OfxProviderList.xml</code>, <code>OfxErrorTemplate.htm</code>; and 2 <code>None</code> entries: <code>OFX 2.1.1.pdf</code>, <code>ofx16.pdf</code>)
+- Modify: <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code> (add the matching entries)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>IBusinessLayerUiCallback</code> (Task 4).</p>
+<p><strong>Rationale for keeping <code>OfxDownloadController.cs</code> in the WPF project:</strong> verified during research that its <code>System.Windows</code> usage isn't a stray dialog call like the others — it's <code>Application.Current.MainWindow</code> used 4 times as a dialog <code>.Owner</code> for what are, per its name, genuine UI flows (login/MFA prompts during a download). This is real UI orchestration, not decision logic wearing a UI costume, so it stays — consistent with the spec's own framing of what counts as "genuinely UI."</p>
+<ul>
+<li>[ ] <strong>Step 1: Move the 5 parsing-related <code>.cs</code>/resource files</strong></li>
+</ul>
+<pre><code class="language-bash">git mv Source/WPF/MyMoney/Ofx/OfxObjectModel.cs Source/WPF/MyMoney.Business/Ofx/OfxObjectModel.cs
+git mv Source/WPF/MyMoney/Ofx/SgmlParser.cs Source/WPF/MyMoney.Business/Ofx/SgmlParser.cs
+git mv Source/WPF/MyMoney/Ofx/SgmlReader.cs Source/WPF/MyMoney.Business/Ofx/SgmlReader.cs
+git mv Source/WPF/MyMoney/Ofx/OfxInstitutionInfo.cs Source/WPF/MyMoney.Business/Ofx/OfxInstitutionInfo.cs
+git mv Source/WPF/MyMoney/Ofx/HtmlResponseException.cs Source/WPF/MyMoney.Business/Ofx/HtmlResponseException.cs
+git mv Source/WPF/MyMoney/Ofx/OfxStrings.Designer.cs Source/WPF/MyMoney.Business/Ofx/OfxStrings.Designer.cs
+git mv Source/WPF/MyMoney/Ofx/OfxStrings.resx Source/WPF/MyMoney.Business/Ofx/OfxStrings.resx
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Move the associated data files and their csproj entries</strong></li>
+</ul>
+<pre><code class="language-bash">git mv &quot;Source/WPF/MyMoney/Ofx/ofx201.dtd&quot; &quot;Source/WPF/MyMoney.Business/Ofx/ofx201.dtd&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/MfaPhrases.xml&quot; &quot;Source/WPF/MyMoney.Business/Ofx/MfaPhrases.xml&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/ofx160.dtd&quot; &quot;Source/WPF/MyMoney.Business/Ofx/ofx160.dtd&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/OfxProviderList.xml&quot; &quot;Source/WPF/MyMoney.Business/Ofx/OfxProviderList.xml&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/OfxErrorTemplate.htm&quot; &quot;Source/WPF/MyMoney.Business/Ofx/OfxErrorTemplate.htm&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/OFX 2.1.1.pdf&quot; &quot;Source/WPF/MyMoney.Business/Ofx/OFX 2.1.1.pdf&quot;
+git mv &quot;Source/WPF/MyMoney/Ofx/ofx16.pdf&quot; &quot;Source/WPF/MyMoney.Business/Ofx/ofx16.pdf&quot;
+</code></pre>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, remove these 7 lines (verified at lines 325, 329, 617, 622, 623, 628, 629):</p>
+<pre><code class="language-xml">    &lt;EmbeddedResource Include=&quot;Ofx\ofx201.dtd&quot; /&gt;
+    &lt;EmbeddedResource Include=&quot;Ofx\MfaPhrases.xml&quot; /&gt;
+    &lt;EmbeddedResource Include=&quot;Ofx\ofx160.dtd&quot; /&gt;
+    &lt;EmbeddedResource Include=&quot;Ofx\OfxProviderList.xml&quot; /&gt;
+    &lt;EmbeddedResource Include=&quot;Ofx\OfxErrorTemplate.htm&quot; /&gt;
+    &lt;None Include=&quot;Ofx\OFX 2.1.1.pdf&quot; /&gt;
+    &lt;None Include=&quot;Ofx\ofx16.pdf&quot; /&gt;
+</code></pre>
+<p>In <code>Source/WPF/MyMoney.Business/MyMoney.Business.csproj</code>, add the same 7 lines to an <code>&lt;ItemGroup&gt;</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Wire <code>Ofx.cs</code>'s <code>MessageBoxEx.Show</code> calls through <code>IBusinessLayerUiCallback</code></strong></li>
+</ul>
+<p><code>Ofx.cs</code>'s <code>MessageBoxEx.Show</code> calls are on <code>OfxRequest</code> (constructed from 10+ call sites across <code>Dialogs/</code> and <code>Ofx/OfxDownloadController.cs</code>, verified). Rather than change <code>OfxRequest</code>'s constructor (which would touch all 10+ callers), add a settable property matching the <code>StockQuoteManager</code> pattern from Task 5:</p>
+<pre><code class="language-csharp">public IBusinessLayerUiCallback UiCallback { get; set; }
+</code></pre>
+<p>Replace the 3 calls (originally lines 169, 1715-1716, 1725-1726, verified):</p>
+<pre><code class="language-csharp">MessageBoxEx.Show(&quot;Error opening import file&quot;, null, ex.Message, MessageBoxButton.OK, MessageBoxImage.Error);
+</code></pre>
+<p>→</p>
+<pre><code class="language-csharp">this.UiCallback?.ShowError($&quot;Error opening import file\n{ex.Message}&quot;, &quot;Error&quot;);
+</code></pre>
+<pre><code class="language-csharp">if (MessageBoxEx.Show(string.Format(@&quot;Unexpected CHALLENGERQ or CHALLENGERS element, not implemented.
+Please save the log file '{0}' so we can implement this&quot;, GetLogFileLocation(doc)), &quot;CHALLENGERQ&quot;, MessageBoxButton.OKCancel, MessageBoxImage.Exclamation) == MessageBoxResult.Cancel)
+</code></pre>
+<p>→</p>
+<pre><code class="language-csharp">if (!(this.UiCallback?.ConfirmOkCancel(string.Format(@&quot;Unexpected CHALLENGERQ or CHALLENGERS element, not implemented.
+Please save the log file '{0}' so we can implement this&quot;, GetLogFileLocation(doc)), &quot;CHALLENGERQ&quot;) ?? true))
+</code></pre>
+<p>(Same substitution shape for the PINCHRQ/PINCHRS case at the other line.) Note the <code>?? true</code> default: if no callback is wired, preserve the original "OK" (continue) path rather than silently cancelling — pick whichever default is actually safer once you see how the caller handles the <code>if</code> branch's consequences; don't assume <code>true</code> is correct without checking what happens on each path.</p>
+<p>Remove <code>using System.Windows;</code> and <code>using Dispatcher = System.Windows.Threading.Dispatcher;</code> from <code>Ofx.cs</code> once the <code>MessageBoxEx</code> calls are gone — confirm the <code>Dispatcher</code> alias isn't used anywhere else in the file first (the <code>UiDispatcher.Invoke</code>/<code>BeginInvoke</code> calls found during research use the already-portable <code>UiDispatcher</code>, not a raw <code>Dispatcher</code>, so this alias is likely unused, but verify before deleting).</p>
+<ul>
+<li>[ ] <strong>Step 4: Move <code>Ofx.cs</code> itself</strong></li>
+</ul>
+<pre><code class="language-bash">git mv Source/WPF/MyMoney/Ofx/Ofx.cs Source/WPF/MyMoney.Business/Ofx/Ofx.cs
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Wire the real implementation from callers</strong></li>
+</ul>
+<p><code>OfxRequest</code>'s 10+ construction sites (in <code>Dialogs/*.cs</code> and <code>Ofx/OfxDownloadController.cs</code>, all staying in <code>MyMoney.csproj</code>) need <code>req.UiCallback = new WpfBusinessLayerUiCallback();</code> added after each <code>new OfxRequest(...)</code> call. Search for <code>new OfxRequest(</code> across <code>Source/WPF/MyMoney/Dialogs/*.cs</code> and <code>Source/WPF/MyMoney/Ofx/OfxDownloadController.cs</code> and add the assignment at each site.</p>
+<ul>
+<li>[ ] <strong>Step 6: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code>
+Expected: 0 errors. <code>OfxDownloadController.cs</code> staying in <code>MyMoney.csproj</code> still needs a reference to the moved <code>Ofx.cs</code>/<code>OfxObjectModel.cs</code> types — confirm <code>MyMoney.csproj</code>'s existing <code>ProjectReference</code> to <code>MyMoney.Business.csproj</code> covers this (it does; no new reference needed).</p>
+<ul>
+<li>[ ] <strong>Step 6a: Add independent-of-WPF success/invalid-input tests for OFX parsing</strong></li>
+</ul>
+<p><code>OFX.Deserialize(XDocument doc)</code> (<code>OfxObjectModel.cs:120</code>, verified) is a clean, no-WPF, no-fake-needed candidate — pure XML-in, object-out. Create <code>Source/WPF/UnitTests/OfxObjectModelTests.cs</code>:</p>
+<pre><code class="language-csharp">using System.Xml.Linq;
+using NUnit.Framework;
+using Walkabout.Ofx;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class OfxObjectModelTests
+    {
+        [Test]
+        public void Deserialize_ValidMinimalDocument_ReturnsOfx()
+        {
+            // Replace with a minimal-but-real OFX response body — check an existing
+            // fixture file (search Source/WPF for sample .ofx/.qfx test data, or
+            // Ofx.cs's own log files under docs/dev if any are checked in) rather
+            // than hand-writing one from scratch if a real sample already exists.
+            var doc = XDocument.Parse(&quot;&lt;OFX&gt;&lt;/OFX&gt;&quot;);
+            var result = OFX.Deserialize(doc);
+            Assert.That(result, Is.Not.Null);
+        }
+
+        [Test]
+        public void Deserialize_MalformedDocument_HandlesGracefully()
+        {
+            var doc = XDocument.Parse(&quot;&lt;NotOfx&gt;&lt;Garbage/&gt;&lt;/NotOfx&gt;&quot;);
+            // Read Deserialize's actual behavior for unrecognized structure before writing
+            // this assertion — it may throw (assert the specific exception type), return
+            // null, or return an OFX with empty/default fields. Don't guess; verify, then
+            // assert the real, observed, correct-per-the-code behavior.
+        }
+    }
+}
+</code></pre>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~OfxObjectModelTests"</code> in isolation to confirm independent testability.</p>
+<ul>
+<li>[ ] <strong>Step 7: Run the full scoped test suite (final check for phase 1)</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code> and <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj</code> — <strong>never <code>dotnet test Source/WPF/MyMoney.sln</code></strong> (the whole-solution target pulls in <code>UITests</code>/<code>ScenarioTest</code>, which launch the real app via FlaUI and hang in an unattended session — see the ledger's Task 1 operational note).
+Expected: all green.</p>
+<ul>
+<li>[ ] <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Ofx Source/WPF/MyMoney.Business/Ofx Source/WPF/MyMoney/Dialogs Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney.Business/MyMoney.Business.csproj Source/WPF/UnitTests/OfxObjectModelTests.cs
+git commit -m &quot;refactor: move Ofx parsing into MyMoney.Business, keep OfxDownloadController's UI orchestration in place, add independent parsing tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-9-final-validation-and-formal-closure-of-1">Task 9: Final validation and formal closure of #1<a class="headerlink" href="#task-9-final-validation-and-formal-closure-of-1" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong> None modified — verification only.</p>
+<ul>
+<li>[ ] <strong>Step 1: Run the complete safety net</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SampleDataRegressionTests"</code>
+Expected: all 4 tests (3 invariants + canary) still PASS after all 4 subsystem migrations — this is the cross-subsystem check the per-task runs couldn't catch individually.</p>
+<ul>
+<li>[ ] <strong>Step 2: Full build and test suite</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> (Debug and <code>-c Release</code>), then <code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: 0 errors both configs; tests green (excluding the pre-existing, documented <code>ScenarioTest</code> gap that needs the DGML Test Monitor tooling).</p>
+<ul>
+<li>[ ] <strong>Step 3: Re-verify the layer boundary</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~LayerBoundaryTests"</code>
+Expected: PASS — <code>MyMoney.Business</code> still has zero WPF-family assembly references despite absorbing 4 subsystems' worth of code.</p>
+<ul>
+<li>[ ] <strong>Step 4: Interactive FlaUI smoke check</strong></li>
+</ul>
+<p>Run <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~PayeeSelectionTests"</code> from an interactive desktop session (not a background/headless job — see <code>docs/dev/index.md</code> and this repo's FlaUI skill notes on why).
+Expected: PASS, confirming the moved import/lifecycle code didn't regress real end-to-end behavior.</p>
+<ul>
+<li>[ ] <strong>Step 5: Close issue #1</strong></li>
+</ul>
+<pre><code class="language-bash">gh issue close 1 --repo markabrandjord/MyMoney.Net --reason completed --comment &quot;Item #3's remaining slices (SQL Server contract-test flavor, UiDispatcher portability) closed via #24/#13. This migration (see docs/superpowers/specs/2026-09-18-business-layer-subsystem-migration-design.md) completed the layer-extraction goal by moving Taxes/StockQuotes/Importers/Ofx-parsing/MainWindow-lifecycle into MyMoney.Business. Closing as complete.&quot;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Update #5 with phase-1 completion status</strong></li>
+</ul>
+<pre><code class="language-bash">gh issue comment 5 --repo markabrandjord/MyMoney.Net --body &quot;Phase 1 (Taxes, StockQuotes, Importers, Ofx-parsing, MainWindow file/database lifecycle) is complete — see docs/superpowers/specs/2026-09-18-business-layer-subsystem-migration-design.md and docs/superpowers/plans/2026-09-18-business-layer-subsystem-migration.md. Remaining scope per that spec: Reports (needs a new business-layer query/aggregation API), MainWindow's remaining UI-only orchestration (not committed to), dual-engine parity and FlaUI-level testing (deferred from #4). Next up, if picked up: Reports redesign as its own spec.&quot;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Final commit (if any doc updates were made)</strong></li>
+</ul>
+<pre><code class="language-bash">git add -A
+git commit -m &quot;docs: mark phase 1 of business-layer subsystem migration complete&quot;
+</code></pre>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

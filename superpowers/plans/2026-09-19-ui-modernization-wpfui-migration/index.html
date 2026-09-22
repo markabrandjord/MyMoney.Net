@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-19-ui-modernization-wpfui-migration/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>UI Modernization: WPF-UI Migration (Phase 0 + Phase 1) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "UI Modernization: WPF-UI Migration (Phase 0 + Phase 1) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Self-Review Notes", url: "#self-review-notes" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="ui-modernization-wpf-ui-migration-phase-0-phase-1-implementation-plan">UI Modernization: WPF-UI Migration (Phase 0 + Phase 1) Implementation Plan<a class="headerlink" href="#ui-modernization-wpf-ui-migration-phase-0-phase-1-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Validate <code>lepoco/wpfui</code> against this app's highest-risk UI pattern (a <code>DataGrid</code> cell's
+edit-mode template swap), then swap the dead <code>ModernWpfUI</code> dependency for <code>WPF-UI</code> and migrate
+<code>MainWindow</code>'s chrome (menu, toolbar, toolbox accordion, status bar, window style) to it.</p>
+<p><strong>Architecture:</strong> Phase 0 is an isolated, reversible spike — a throwaway WPF window that merges
+WPF-UI's theme resources into its own scope (not <code>Application.Resources</code>), so it can be built,
+tested, and deleted without touching the real app at all. Phase 1 is the real migration: remove
+<code>ModernWpfUI</code>, add <code>WPF-UI</code> at the <code>Application</code> level, and convert every <code>ModernWpfUI</code>-specific
+type <code>MainWindow.xaml</code> currently uses to its verified <code>WPF-UI</code> equivalent.</p>
+<p><strong>Tech Stack:</strong> C#/.NET 10, WPF, <code>WPF-UI</code> (NuGet package <code>WPF-UI</code>, version <code>4.3.0</code>, namespace
+<code>http://schemas.lepo.co/wpfui/2022/xaml</code>), NUnit (<code>[Apartment(ApartmentState.STA)]</code> for
+in-process WPF window tests), FlaUI (for the existing Basics regression suite).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-19-ui-modernization-wpfui-migration-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>Target framework stays <code>net10.0-windows7.0</code> (already WPF-UI 4.3.0's supported TFM — no
+  downgrade/upgrade needed).</li>
+<li>Don't touch <code>Source/WPF/MyMoney/Themes/generic.xaml</code>'s <code>TextBoxHelper.IsEnabled</code> setter or any
+  file using <code>ui:AppBarButton</code>/<code>ui:CommandBar</code>/<code>ui:DropDownButton</code>/<code>ui:TextBoxHelper</code> in this
+  plan — <code>WPF-UI</code> has no verified equivalent for <code>AppBarButton</code>/<code>CommandBar</code> (confirmed via
+  research, not found in its public API), and those types don't appear in <code>MainWindow.xaml</code> at
+  all. They're isolated to <code>AttachmentDialog.xaml</code>, <code>CategoryDialog.xaml</code>, <code>QuickFilterControl.
+  xaml</code>, <code>AliasesView.xaml</code>, <code>CurrenciesView.xaml</code>, <code>SecuritiesView.xaml</code>, <code>TransactionsView.xaml</code>,
+  and <code>generic.xaml</code> — all Phase 2/3 territory per the spec, out of scope here, and needing their
+  own design pass (not a guess) before they're touched.</li>
+<li>Every phase ends with the existing Basics FlaUI suite (<code>Source/WPF/UITests/Basics/*</code>, currently
+  14 tests) still green — run it as part of each task's own deliverable, not deferred to the end.</li>
+<li>This plan covers Phase 0 and Phase 1 only, per the spec's own phasing rationale (Phase 0 exists
+  specifically to inform what's realistic for Phase 2 onward). Phase 2-4 get their own follow-up
+  plan once Phase 0/1 findings are in hand.</li>
+</ul>
+<hr />
+<h3 id="task-1-add-the-wpf-ui-package-reference-non-breaking">Task 1: Add the WPF-UI package reference (non-breaking)<a class="headerlink" href="#task-1-add-the-wpf-ui-package-reference-non-breaking" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MyMoney.csproj</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: the <code>WPF-UI</code> NuGet package (namespace <code>Wpf.Ui</code>, XAML namespace
+  <code>http://schemas.lepo.co/wpfui/2022/xaml</code>) available to the <code>MyMoney</code> project. Nothing
+  references it yet, so this step is risk-free — it cannot conflict with the still-installed
+  <code>ModernWpfUI</code> 0.9.7-preview.2 package until XAML actually imports its namespace.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the package reference</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, in the <code>&lt;ItemGroup&gt;</code> containing the existing
+<code>&lt;PackageReference Include="ModernWpfUI" Version="0.9.7-preview.2" /&gt;</code> (around line 608), add:</p>
+<pre><code class="language-xml">&lt;PackageReference Include=&quot;WPF-UI&quot; Version=&quot;4.3.0&quot; /&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Restore and build</strong></li>
+</ul>
+<p>Run: <code>dotnet restore Source/WPF/MyMoney/MyMoney.csproj</code>
+Run: <code>dotnet build Source/WPF/MyMoney/MyMoney.csproj</code>
+Expected: Build succeeds, 0 errors. (Both packages are now referenced but only <code>ModernWpfUI</code>'s
+types are actually used anywhere yet, so there's nothing for them to conflict over.)</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MyMoney.csproj
+git commit -m &quot;build: add WPF-UI 4.3.0 package reference alongside ModernWpfUI&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-build-the-isolated-edit-mode-spike-window">Task 2: Build the isolated edit-mode spike window<a class="headerlink" href="#task-2-build-the-isolated-edit-mode-spike-window" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml</code>
+- Create: <code>Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>Walkabout.Dialogs.WpfUiGridEditSpike</code>, a public <code>Window</code> subclass with a public
+  parameterless constructor, containing a <code>DataGrid</code> named <code>SpikeGrid</code> with one
+  <code>DataGridTemplateColumn</code> (<code>CellTemplate</code> = read-only <code>TextBlock</code>, <code>CellEditingTemplate</code> =
+  editable <code>ComboBox</code>) bound to a small in-memory list — this directly mirrors the real
+  edit-mode-template-swap pattern already used by <code>CurrenciesView.xaml</code>'s Symbol column
+  (<code>myTemplateSymbol</code>/<code>myTemplateSymbolEdit</code>, <code>Source/WPF/MyMoney/Views/CurrenciesView.xaml</code>
+  lines 90-106), which is the highest-risk pattern identified in the design spec.</p>
+<p>This window merges <code>WPF-UI</code>'s theme resources into its <strong>own</strong> <code>Window.Resources</code>, not
+<code>Application.Resources</code> — this keeps the spike fully isolated from the real app (which still has
+<code>ModernWpfUI</code> merged at the <code>Application</code> level) and fully reversible; deleting these two files
+in Task 4 leaves zero trace.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the spike window's XAML</strong></li>
+</ul>
+<pre><code class="language-xml">&lt;Window x:Class=&quot;Walkabout.Dialogs.WpfUiGridEditSpike&quot;
+        xmlns=&quot;http://schemas.microsoft.com/winfx/2006/xaml/presentation&quot;
+        xmlns:x=&quot;http://schemas.microsoft.com/winfx/2006/xaml&quot;
+        xmlns:ui=&quot;http://schemas.lepo.co/wpfui/2022/xaml&quot;
+        Title=&quot;WPF-UI Grid Edit Spike&quot; Width=&quot;400&quot; Height=&quot;300&quot;&gt;
+    &lt;Window.Resources&gt;
+        &lt;ResourceDictionary&gt;
+            &lt;ResourceDictionary.MergedDictionaries&gt;
+                &lt;ui:ThemesDictionary Theme=&quot;Light&quot; /&gt;
+                &lt;ui:ControlsDictionary /&gt;
+            &lt;/ResourceDictionary.MergedDictionaries&gt;
+
+            &lt;DataTemplate x:Key=&quot;SpikeCellDisplay&quot;&gt;
+                &lt;TextBlock Text=&quot;{Binding Code}&quot; Padding=&quot;4&quot; /&gt;
+            &lt;/DataTemplate&gt;
+
+            &lt;DataTemplate x:Key=&quot;SpikeCellEdit&quot;&gt;
+                &lt;ComboBox x:Name=&quot;SpikeEditCombo&quot;
+                          ItemsSource=&quot;{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext.Choices}&quot;
+                          SelectedItem=&quot;{Binding Code, Mode=TwoWay}&quot; /&gt;
+            &lt;/DataTemplate&gt;
+        &lt;/ResourceDictionary&gt;
+    &lt;/Window.Resources&gt;
+
+    &lt;Grid Margin=&quot;10&quot;&gt;
+        &lt;DataGrid x:Name=&quot;SpikeGrid&quot; AutoGenerateColumns=&quot;False&quot; CanUserAddRows=&quot;False&quot;&gt;
+            &lt;DataGrid.Columns&gt;
+                &lt;DataGridTemplateColumn Header=&quot;Code&quot;
+                                        CellTemplate=&quot;{StaticResource SpikeCellDisplay}&quot;
+                                        CellEditingTemplate=&quot;{StaticResource SpikeCellEdit}&quot; /&gt;
+            &lt;/DataGrid.Columns&gt;
+        &lt;/DataGrid&gt;
+    &lt;/Grid&gt;
+&lt;/Window&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write the spike window's code-behind</strong></li>
+</ul>
+<pre><code class="language-csharp">using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows;
+
+namespace Walkabout.Dialogs
+{
+    public class SpikeRow : INotifyPropertyChanged
+    {
+        private string code;
+        public string Code
+        {
+            get =&gt; this.code;
+            set { this.code = value; this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Code))); }
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+    }
+
+    public partial class WpfUiGridEditSpike : Window
+    {
+        public ObservableCollection&lt;SpikeRow&gt; Rows { get; } = new ObservableCollection&lt;SpikeRow&gt;
+        {
+            new SpikeRow { Code = &quot;USD&quot; },
+            new SpikeRow { Code = &quot;EUR&quot; },
+        };
+
+        public ObservableCollection&lt;string&gt; Choices { get; } = new ObservableCollection&lt;string&gt; { &quot;USD&quot;, &quot;EUR&quot;, &quot;GBP&quot; };
+
+        public WpfUiGridEditSpike()
+        {
+            this.InitializeComponent();
+            this.DataContext = this;
+            this.SpikeGrid.ItemsSource = this.Rows;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney/MyMoney.csproj</code>
+Expected: Build succeeds, 0 errors.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml.cs
+git commit -m &quot;spike: add isolated WPF-UI edit-mode DataGrid spike window (throwaway, see Task 4)&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-write-an-in-process-test-that-exercises-the-spikes-edit-mode-swap">Task 3: Write an in-process test that exercises the spike's edit-mode swap<a class="headerlink" href="#task-3-write-an-in-process-test-that-exercises-the-spikes-edit-mode-swap" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/WpfUiGridEditSpikeTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Walkabout.Dialogs.WpfUiGridEditSpike</code> (Task 2).
+- Produces: nothing further consumes this — it's the spike's own verification, deleted in Task 4.</p>
+<p>This runs <strong>in-process</strong> (not via FlaUI/<code>Application.Launch</code>) because the question — "does a
+<code>DataGridCell</code>'s <code>CellTemplate</code>→<code>CellEditingTemplate</code> swap render and function correctly when
+<code>WPF-UI</code>'s theme resources are in scope" — is answerable directly by constructing the real
+<code>Window</code>, forcing layout, and walking the visual tree; it doesn't need a second OS process or UI
+Automation. <code>UnitTests.csproj</code> already references <code>MyMoney.csproj</code> directly (see <code>CLAUDE.md</code>'s
+note on <code>TransactionCollection</code> for precedent), so it can construct WPF types.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using NUnit.Framework;
+using Walkabout.Dialogs;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    [Apartment(ApartmentState.STA)]
+    public class WpfUiGridEditSpikeTests
+    {
+        [Test]
+        public void EnteringEditModeOnTemplateColumn_SwapsInThemedComboBox_AndItRendersWithNonZeroSize()
+        {
+            var window = new WpfUiGridEditSpike();
+            window.Show();
+            window.UpdateLayout();
+
+            DataGrid grid = window.SpikeGrid;
+            grid.UpdateLayout();
+
+            // Select and begin editing the first row's single template column.
+            grid.SelectedIndex = 0;
+            grid.CurrentCell = new DataGridCellInfo(grid.Items[0], grid.Columns[0]);
+            bool enteredEditMode = grid.BeginEdit();
+            grid.UpdateLayout();
+
+            Assert.That(enteredEditMode, Is.True, &quot;DataGrid.BeginEdit() should succeed on the template column.&quot;);
+
+            DataGridCell cell = FindCell(grid, 0, 0);
+            Assert.That(cell, Is.Not.Null, &quot;Expected to find the DataGridCell for row 0, column 0.&quot;);
+
+            ComboBox editCombo = FindVisualChild&lt;ComboBox&gt;(cell);
+            Assert.That(editCombo, Is.Not.Null,
+                &quot;Expected the CellEditingTemplate's ComboBox to be present in the visual tree after BeginEdit().&quot;);
+            Assert.That(editCombo.ActualWidth, Is.GreaterThan(0),
+                &quot;The themed ComboBox should have a real rendered width, not collapse to zero (the 'big white box'/broken-template failure mode).&quot;);
+            Assert.That(editCombo.ActualHeight, Is.GreaterThan(0),
+                &quot;The themed ComboBox should have a real rendered height.&quot;);
+
+            window.Close();
+        }
+
+        private static DataGridCell FindCell(DataGrid grid, int row, int column)
+        {
+            DataGridRow dataGridRow = (DataGridRow)grid.ItemContainerGenerator.ContainerFromIndex(row);
+            if (dataGridRow == null)
+            {
+                return null;
+            }
+            DataGridCellsPresenter presenter = FindVisualChild&lt;DataGridCellsPresenter&gt;(dataGridRow);
+            return (DataGridCell)presenter?.ItemContainerGenerator.ContainerFromIndex(column);
+        }
+
+        private static T FindVisualChild&lt;T&gt;(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null)
+            {
+                return null;
+            }
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i &lt; count; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T typed)
+                {
+                    return typed;
+                }
+                T found = FindVisualChild&lt;T&gt;(child);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+            return null;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run it and record the result</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~WpfUiGridEditSpikeTests"</code></p>
+<p>Expected: one of two outcomes, both are valid findings to record in Task 4 — this is a spike, not
+a pass/fail gate on its own:
+- <strong>PASS</strong> — the themed <code>ComboBox</code> rendered with a real size inside the swapped-in edit template.
+  This is the "WPF-UI is compatible with the edit-mode-template-swap pattern" finding.
+- <strong>FAIL</strong> on the <code>ActualWidth</code>/<code>ActualHeight</code> assertions specifically (not a crash) — this is the
+  "big white box"-class failure predicted by the design spec's research. Also a valid, useful
+  finding: it means Phase 1+ needs either a style override for <code>DataGridCell</code>/<code>ComboBox</code> or a
+  fallback plan, decided in Task 4, not guessed here.</p>
+<p>Do not "fix" the spike code to force a pass — the whole point is an honest answer.</p>
+<hr />
+<h3 id="task-4-record-the-spike-finding-and-clean-up">Task 4: Record the spike finding and clean up<a class="headerlink" href="#task-4-record-the-spike-finding-and-clean-up" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-09-19-ui-modernization-wpfui-migration-design.md</code>
+- Delete: <code>Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml</code>
+- Delete: <code>Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml.cs</code>
+- Delete: <code>Source/WPF/UnitTests/WpfUiGridEditSpikeTests.cs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Add a "Phase 0 finding" section to the design spec</strong></li>
+</ul>
+<p>Append a new section to <code>docs/superpowers/specs/2026-09-19-ui-modernization-wpfui-migration-design.md</code>,
+directly below "## Phased plan", recording:
+- The exact test result from Task 3 (pass or fail, with the actual <code>ActualWidth</code>/<code>ActualHeight</code>
+  values observed if it failed).
+- If it passed: confirmation that Phase 1 can proceed as planned.
+- If it failed: what specifically broke (e.g., the <code>ComboBox</code> never received a <code>Style</code> at all, or
+  received one but with a zero-size template part), and whether a targeted style override is a
+  reasonable Phase 1 follow-up task or whether this should escalate back to a design discussion
+  (per the original design spec's own "if this spike reveals a dead end... stop and reconsider").</p>
+<ul>
+<li>[ ] <strong>Step 2: Delete the throwaway spike files</strong></li>
+</ul>
+<pre><code class="language-bash">git rm Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml Source/WPF/MyMoney/Dialogs/WpfUiGridEditSpike.xaml.cs Source/WPF/UnitTests/WpfUiGridEditSpikeTests.cs
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build and run the full existing suites to confirm the deletion is clean</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln --no-incremental -t:Rebuild</code>
+Expected: 0 errors.</p>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj</code>
+Expected: same pass count as before Task 2 (188, per the last confirmed baseline) — the spike
+test is gone, nothing else changed.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add docs/superpowers/specs/2026-09-19-ui-modernization-wpfui-migration-design.md
+git commit -m &quot;docs: record Phase 0 spike finding, remove throwaway WPF-UI edit-mode spike&quot;
+</code></pre>
+<p><strong>STOP HERE if Task 3's finding was a failure that isn't a reasonable style-override fix.</strong> Do
+not proceed to Task 5 — return to the design/brainstorming step instead, per the spec's own
+"if this spike reveals a dead end... stop and reconsider before Phase 1" instruction.</p>
+<hr />
+<h3 id="task-5-remove-modernwpfui-add-wpf-ui-at-the-application-level">Task 5: Remove ModernWpfUI, add WPF-UI at the application level<a class="headerlink" href="#task-5-remove-modernwpfui-add-wpf-ui-at-the-application-level" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MyMoney.csproj</code>
+- Modify: <code>Source/WPF/MyMoney/App.xaml</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>WPF-UI</code>'s <code>ThemesDictionary</code>/<code>ControlsDictionary</code> merged into
+  <code>Application.Resources</code>, and <code>App.xaml</code>'s own <code>xmlns:ui=</code> repointed to <code>WPF-UI</code>'s schema
+  (<code>http://schemas.lepo.co/wpfui/2022/xaml</code>). Each of the other 19 <code>ui:</code>-using files declares its
+  own independent <code>xmlns:ui=</code> and is unaffected by <code>App.xaml</code>'s change (XAML namespace prefixes
+  are per-file, not inherited). What <em>does</em> affect all 19 of them is Step 1's removal of the
+  <code>ModernWpfUI</code> package reference — its assembly becomes unavailable, so every file still
+  declaring <code>xmlns:ui="http://schemas.modernwpf.com/2019"</code> (which, until Task 6 repoints
+  <code>MainWindow.xaml</code> specifically, is all 19 remaining files) fails to compile, temporarily. This
+  is expected and resolved within this same task (Step 4) by restoring the package reference and
+  re-merging <code>ModernWpfUI</code>'s resources under a second, distinct prefix — this task does not
+  attempt a <code>WPF-UI</code> replacement for <code>AppBarButton</code>/<code>CommandBar</code>/<code>TextBoxHelper</code>/<code>DropDownButton</code>
+  (see Global Constraints); those 8 files keep working exactly as before, unmigrated.</p>
+<ul>
+<li>[ ] <strong>Step 1: Remove the ModernWpfUI package reference</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, delete the line:</p>
+<pre><code class="language-xml">&lt;PackageReference Include=&quot;ModernWpfUI&quot; Version=&quot;0.9.7-preview.2&quot; /&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Update App.xaml's resource merge</strong></li>
+</ul>
+<p><code>Source/WPF/MyMoney/App.xaml</code>'s root <code>&lt;Application&gt;</code> element declares
+<code>xmlns:ui="http://schemas.modernwpf.com/2019"</code> (confirmed by reading the file - this is
+<code>ModernWpfUI</code>'s real schema URI, not a guess). Since every other file in the app declares its own
+independent <code>xmlns:ui=</code> (XAML namespace prefixes are scoped per-file, not inherited from
+<code>App.xaml</code>), changing this one declaration only affects type/resource resolution <em>within
+<code>App.xaml</code> itself</em> - it does not affect the 8 out-of-scope files' own <code>ui:</code> usage, which keeps
+resolving against <code>ModernWpfUI</code> exactly as before, unaffected by this step.</p>
+<p>Change line 6 from:</p>
+<pre><code class="language-xml">xmlns:ui=&quot;http://schemas.modernwpf.com/2019&quot;&gt;
+</code></pre>
+<p>to:</p>
+<pre><code class="language-xml">xmlns:ui=&quot;http://schemas.lepo.co/wpfui/2022/xaml&quot;&gt;
+</code></pre>
+<p>Then replace the <code>&lt;ResourceDictionary.MergedDictionaries&gt;</code> block's first three entries:</p>
+<pre><code class="language-xml">&lt;ui:ThemeResources /&gt;
+&lt;ui:XamlControlsResources /&gt;
+&lt;ui:IntellisenseResources/&gt;
+</code></pre>
+<p>with:</p>
+<pre><code class="language-xml">&lt;ui:ThemesDictionary Theme=&quot;Light&quot; /&gt;
+&lt;ui:ControlsDictionary /&gt;
+</code></pre>
+<p>Leave the fourth entry, <code>&lt;ResourceDictionary Source="Themes/generic.xaml"/&gt;</code>, untouched -
+<code>generic.xaml</code> is one of the 8 out-of-scope files (it has its own <code>TextBoxHelper.IsEnabled</code>
+usage) and stays merged as-is.</p>
+<ul>
+<li>[ ] <strong>Step 3: Attempt a build and record every resulting error</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney/MyMoney.csproj</code></p>
+<p>Expected: build errors in <strong>every</strong> file that uses a <code>ui:</code> type — that's all 20 files from the
+design spec's inventory, not just the 8 listed in "Global Constraints". Removing the
+<code>ModernWpfUI</code> package reference in Step 1 makes its assembly unavailable to every file still
+declaring <code>xmlns:ui="http://schemas.modernwpf.com/2019"</code> (which, at this point, is all 20 files —
+<code>MainWindow.xaml</code>'s own repoint doesn't happen until Task 6). This is expected and temporary,
+resolved by Step 4 below.</p>
+<p>If the error list includes any file <strong>not</strong> in the design spec's 20-file inventory, stop and
+investigate before continuing — that means the inventory itself is incomplete.</p>
+<ul>
+<li>[ ] <strong>Step 4: Temporarily re-add ModernWpfUI so the solution builds while Task 6 is in progress</strong></li>
+</ul>
+<p>Removing <code>ModernWpfUI</code>'s <code>PackageReference</code> in Step 1 makes its assembly unavailable entirely, so
+the 8 out-of-scope files (whose own <code>xmlns:ui=</code> still points at <code>http://schemas.modernwpf.com/2019</code>,
+untouched) will fail to compile - not because of anything in <code>App.xaml</code>, but because the type
+<code>AppBarButton</code>/<code>CommandBar</code>/etc. no longer resolves to any assembly at all. Fix this by restoring
+the package reference and re-merging <code>ModernWpfUI</code>'s resources under a <strong>second, distinct xmlns
+prefix</strong> in <code>App.xaml</code> - <code>ui:</code> in this file now means <code>WPF-UI</code> (Step 2), so <code>ModernWpfUI</code>'s
+resources need their own prefix here to be referenced by name in this file's own markup:</p>
+<p>In <code>Source/WPF/MyMoney/App.xaml</code>, add a second namespace declaration to the root <code>&lt;Application&gt;</code>
+element:</p>
+<pre><code class="language-xml">xmlns:mwpf=&quot;http://schemas.modernwpf.com/2019&quot;
+</code></pre>
+<p>Then add <code>ModernWpfUI</code>'s three resource entries back into <code>&lt;ResourceDictionary.MergedDictionaries&gt;</code>,
+under the new <code>mwpf:</code> prefix, placed <strong>before</strong> the <code>WPF-UI</code> entries (last-merged wins for a
+given implicit style key at the <code>Application</code> scope, and <code>WPF-UI</code>'s styles should win for any
+overlapping base-control style since that's the direction this migration is heading):</p>
+<pre><code class="language-xml">&lt;mwpf:ThemeResources /&gt;
+&lt;mwpf:XamlControlsResources /&gt;
+&lt;mwpf:IntellisenseResources/&gt;
+&lt;ui:ThemesDictionary Theme=&quot;Light&quot; /&gt;
+&lt;ui:ControlsDictionary /&gt;
+&lt;ResourceDictionary Source=&quot;Themes/generic.xaml&quot;/&gt;
+</code></pre>
+<p>(This only changes what <code>App.xaml</code> itself calls the prefix - <code>generic.xaml</code> and the 8 other
+out-of-scope files keep their own independent <code>xmlns:ui="http://schemas.modernwpf.com/2019"</code>
+declarations and are completely unaffected by what <code>App.xaml</code> names its prefix.)</p>
+<p>In <code>Source/WPF/MyMoney/MyMoney.csproj</code>, add back:</p>
+<pre><code class="language-xml">&lt;PackageReference Include=&quot;ModernWpfUI&quot; Version=&quot;0.9.7-preview.2&quot; /&gt;
+</code></pre>
+<p>Run: <code>dotnet build Source/WPF/MyMoney/MyMoney.csproj</code>
+Expected: build succeeds now. All 20 <code>ui:</code>-using files resolve again, since the <code>ModernWpfUI</code>
+assembly is back and every file except <code>App.xaml</code> still declares its own unchanged
+<code>xmlns:ui="http://schemas.modernwpf.com/2019"</code>. At this point <code>MainWindow.xaml</code> is still using
+its <em>old</em> <code>ModernWpfUI</code> window-style/theme/icon markup, unmigrated — Task 6 is what actually
+repoints <code>MainWindow.xaml</code>'s own <code>xmlns:ui=</code> to <code>WPF-UI</code> and converts its icons. This is a
+deliberate, temporary, two-library-coexistence state at the <code>App.xaml</code>/package level, not yet
+reflected in any individual screen's visuals — expected to look visually inconsistent between
+migrated and unmigrated screens once Task 6 lands, until the deferred follow-up plan finishes
+Phase 2/3. Record this explicitly as a known, intentional transitional state, not a bug.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MyMoney.csproj Source/WPF/MyMoney/App.xaml
+git commit -m &quot;build: add WPF-UI application-level resources; keep ModernWpfUI temporarily for the 8 files not yet migrated&quot;
+</code></pre>
+<hr />
+<h3 id="task-6-migrate-mainwindows-chrome-to-wpf-ui">Task 6: Migrate MainWindow's chrome to WPF-UI<a class="headerlink" href="#task-6-migrate-mainwindows-chrome-to-wpf-ui" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney/MainWindow.xaml</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>WPF-UI</code>'s <code>SymbolIcon</code> (<code>Wpf.Ui.Controls.SymbolIcon</code>, <code>Symbol</code> property of type
+  <code>Wpf.Ui.Controls.SymbolRegular</code>), <code>SplitButton</code> (<code>Wpf.Ui.Controls.SplitButton</code>, has a <code>Flyout</code>
+  property), <code>Flyout</code> (<code>Wpf.Ui.Controls.Flyout</code>) — all confirmed present in <code>WPF-UI</code> 4.3.0's
+  public API (Task 5 landed the package that provides these).</p>
+<p><code>MainWindow.xaml</code>'s current <code>ModernWpfUI</code> usage (confirmed via <code>grep</code>, nothing else) is:</p>
+<pre><code>ui:WindowHelper.UseModernWindowStyle=&quot;True&quot;    (line 13)
+ui:ThemeManager.IsThemeAware=&quot;True&quot;            (line 14)
+ui:SymbolIcon Symbol=&quot;Download&quot;                (line 249)
+ui:SplitButton ... Click=&quot;PendingChangeClicked&quot; (line 256)
+ui:SymbolIcon Symbol=&quot;Save&quot;                    (line 259)
+ui:SplitButton.Flyout / ui:Flyout ...           (lines 263-276)
+ui:SymbolIcon Symbol=&quot;AllApps&quot;                 (line 283)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 1: Repoint MainWindow.xaml's own <code>xmlns:ui=</code> declaration</strong></li>
+</ul>
+<p><code>MainWindow.xaml</code> declares its own <code>xmlns:ui="http://schemas.modernwpf.com/2019"</code> at line 12,
+independent of <code>App.xaml</code>'s declaration (confirmed by reading the file - each XAML file's
+namespace prefixes are its own, not inherited from <code>App.xaml</code>). Change line 12 to:</p>
+<pre><code class="language-xml">xmlns:ui=&quot;http://schemas.lepo.co/wpfui/2022/xaml&quot;
+</code></pre>
+<p><code>WPF-UI</code> doesn't have a direct <code>WindowHelper.UseModernWindowStyle</code> equivalent for a plain
+<code>Window</code> — its modern-window experience is <code>Wpf.Ui.Controls.FluentWindow</code>, a different base
+class. Converting <code>MainWindow</code>'s base class is a larger change than this task's scope (it's a
+4800+ line code-behind file; changing its base type has ripple effects worth its own task). For
+this task, remove the two <code>ModernWpfUI</code>-specific attributes without replacing them yet - they'd
+no longer resolve to anything after the namespace repoint above anyway:</p>
+<p>In <code>Source/WPF/MyMoney/MainWindow.xaml</code>, delete lines 13-14:</p>
+<pre><code class="language-xml">ui:WindowHelper.UseModernWindowStyle=&quot;True&quot;
+ui:ThemeManager.IsThemeAware=&quot;True&quot;
+</code></pre>
+<p>Record in the design spec (Task 8-equivalent finding in the follow-up plan) that adopting
+<code>FluentWindow</code>/<code>ApplicationThemeManager</code> for <code>MainWindow</code> is a follow-up task, not done here -
+this task only needs the file to compile and render correctly with <code>WPF-UI</code>'s control-level
+theming, not its window-chrome theming.</p>
+<ul>
+<li>[ ] <strong>Step 2: Replace the three SymbolIcon usages</strong></li>
+</ul>
+<p><code>WPF-UI</code>'s <code>SymbolIcon.Symbol</code> takes a <code>Wpf.Ui.Controls.SymbolRegular</code> enum value (Fluent System
+Icons naming, e.g. <code>ArrowDownload24</code>), not <code>ModernWpfUI</code>'s <code>Symbol</code> enum (<code>Download</code>, <code>Save</code>,
+<code>AllApps</code>) — the two enums are unrelated types with different member names. Look up the correct
+<code>SymbolRegular</code> member for each icon using WPF-UI's icon reference
+(https://wpfui.lepo.co/documentation/icons.html, or <code>Wpf.Ui.Controls.SymbolRegular</code>'s XML doc
+comments via IntelliSense) before writing each line — do not guess a member name.</p>
+<p>Replace each of the 3 <code>&lt;ui:SymbolIcon Symbol="..."&gt;</code> elements at lines 249, 259, and 283 with the
+looked-up <code>SymbolRegular</code> equivalent, keeping the surrounding <code>Margin</code> attribute unchanged, e.g.:</p>
+<pre><code class="language-xml">&lt;ui:SymbolIcon Symbol=&quot;{x:Static ui:SymbolRegular.ArrowDownload24}&quot; Margin=&quot;0,0,4,0&quot;/&gt;
+</code></pre>
+<p>(Confirm the exact <code>SymbolRegular</code> member names for the "Download", "Save", and "AllApps"
+concepts before committing this step — this plan intentionally does not hardcode unverified enum
+member names.)</p>
+<ul>
+<li>[ ] <strong>Step 3: Verify SplitButton and Flyout compile as-is</strong></li>
+</ul>
+<p><code>Wpf.Ui.Controls.SplitButton</code> and <code>Wpf.Ui.Controls.Flyout</code> are confirmed to exist with the same
+element names and a compatible <code>SplitButton.Flyout</code> property structure as <code>ModernWpfUI</code>'s. Since
+Step 1 already repointed this file's own <code>xmlns:ui=</code> declaration to <code>WPF-UI</code>'s schema, the
+existing <code>&lt;ui:SplitButton&gt;</code> and <code>&lt;ui:Flyout&gt;</code> markup at lines 256-277 should resolve against
+<code>WPF-UI</code>'s types and compile unchanged - no further edits needed to this block. Verify via the
+build in Step 4.</p>
+<ul>
+<li>[ ] <strong>Step 4: Build</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney/MyMoney.csproj</code>
+Expected: 0 errors. If <code>SplitButton</code>/<code>Flyout</code> markup from Step 3 doesn't compile as-is, that's a
+real finding — record the exact compiler error in the design spec rather than guessing a fix.</p>
+<ul>
+<li>[ ] <strong>Step 5: Visual and functional check</strong></li>
+</ul>
+<p>Run the app (<code>dotnet run --project Source/WPF/MyMoney/MyMoney.csproj</code>), open the main window, and
+confirm:
+- The toolbar's download/save/pending-changes area renders with visible icons (not blank/missing
+  glyphs — a missing <code>SymbolRegular</code> mapping renders as empty space, not a build error).
+- Clicking the pending-changes split button's dropdown arrow opens the flyout correctly.</p>
+<ul>
+<li>[ ] <strong>Step 6: Run the full Basics FlaUI suite</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~Walkabout.UITests.Basics"</code>
+Expected: 14/14 passing (same baseline as before this plan started) - <code>MainWindow</code>'s
+<code>AutomationId</code>s weren't touched, only visual styling, so existing <code>AutomationId</code>/<code>ControlType</code>
+based tests should be unaffected. If any test fails, investigate whether <code>WPF-UI</code>'s <code>SplitButton</code>
+exposes a different <code>ControlType</code>/pattern support than <code>ModernWpfUI</code>'s did (per the tester
+review's specific warning about this risk) before assuming it's unrelated flakiness.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney/MainWindow.xaml
+git commit -m &quot;feat: migrate MainWindow chrome (toolbar icons, split button, flyout) to WPF-UI&quot;
+</code></pre>
+<hr />
+<h2 id="self-review-notes">Self-Review Notes<a class="headerlink" href="#self-review-notes" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Spec coverage</strong>: This plan implements Phase 0 (Tasks 1-4) and the <code>MainWindow</code>-chrome portion
+  of Phase 1 (Tasks 5-6) from the design spec in full. It explicitly does not cover: the rest of
+  Phase 1 (toolbox accordion, status bar — neither uses any <code>ModernWpfUI</code>-specific type per the
+  <code>MainWindow.xaml</code> grep, so they may already be unaffected, but confirm this explicitly as a
+  Task 8-equivalent finding in the follow-up plan), Phase 2 (simple dialogs), Phase 3 (grid
+  views + <code>TransactionConnectorAdorner</code>), and Phase 4 (duplicate-transaction redesign) - these
+  need their own plan once this one's findings (especially Task 4's spike result and the 8
+  out-of-scope files' migration approach) are in hand.</li>
+<li><strong>Placeholder scan</strong>: no TBD/TODO/"handle appropriately" language. The one deliberately
+  open item (exact <code>SymbolRegular</code> enum member names in Task 6 Step 2) is flagged explicitly as
+  "look this up, don't guess" rather than left as an unmarked gap, consistent with this plan's
+  own evidence-gathering standard.</li>
+<li><strong>Type consistency</strong>: <code>WpfUiGridEditSpike</code>/<code>SpikeRow</code>/<code>Rows</code>/<code>Choices</code>/<code>SpikeGrid</code> names are
+  used consistently between Task 2 (definition) and Task 3 (consumption).</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

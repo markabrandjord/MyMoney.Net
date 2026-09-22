@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-14-sql-server-dual-engine-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>SQL Server Dual-Engine Support — Design Spec - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "SQL Server Dual-Engine Support \u2014 Design Spec", url: "#_top", children: [
+              {title: "Status", url: "#status" },
+              {title: "Context", url: "#context" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-Goals", url: "#non-goals" },
+              {title: "Architecture Overview", url: "#architecture-overview" },
+              {title: "Configuration", url: "#configuration" },
+              {title: "sa Handling", url: "#sa-handling" },
+              {title: "Bootstrap Sequence", url: "#bootstrap-sequence" },
+              {title: "SQL Script / Stored Procedure Organization", url: "#sql-script-stored-procedure-organization" },
+              {title: "Runtime Data Layer Changes", url: "#runtime-data-layer-changes" },
+              {title: "Startup / Trigger Flow", url: "#startup-trigger-flow" },
+              {title: "Error Handling", url: "#error-handling" },
+              {title: "Verification", url: "#verification" },
+              {title: "Sequencing / Dependencies", url: "#sequencing-dependencies" },
+              {title: "Open Questions / Future Work", url: "#open-questions-future-work" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="sql-server-dual-engine-support-design-spec">SQL Server Dual-Engine Support — Design Spec<a class="headerlink" href="#sql-server-dual-engine-support-design-spec" title="Permanent link">#</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">#</a></h2>
+<p>Design phase. This is item #2 of a five-item 3-tier architecture
+initiative (see the tracking work item for the full list). Items #1
+(business/data layer extraction), #3 (business-layer test-support
+library), and #4 (FlaUI test harness) each get their own spec; this
+document covers #2 only.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p><code>SqlServerDatabase</code> (<code>Source/WPF/MyMoney/Database/SqlDatabase.cs</code>) is a
+complete, working SQL Server backend behind the app's <code>IDatabase</code>
+abstraction. It has been present but unreachable from the UI since
+<a href="https://github.com/MoneyTools/MyMoney.Net/pull/22">PR #22</a> (2022),
+which removed the <code>MyMoneyAdmin</code> helper tool and the UI paths that
+exposed SQL Server as a selectable engine, on the stated grounds that
+the app had standardized on SQLite. Today's <code>CreateDatabaseDialog</code> and
+Save-As flow only offer SQLite/XML/BinaryXML.</p>
+<p>The motivation for restoring this: the developer wants a debug-time
+option to run against a SQL Server instance on the local dev network,
+primarily so they can author and run their own <code>.sql</code> scripts (e.g. in
+SSMS) to validate data directly, in addition to the existing C#
+(NUnit) test suite. This is a personal development-workflow
+preference, not a shipped end-user feature.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Let a DEBUG build of the WPF app run against either SQLite (today's
+  default, unchanged) or a SQL Server instance, selected via
+  configuration.</li>
+<li>Restore/repurpose the <code>MyMoneyAdmin</code> tool to bootstrap a SQL Server
+  database and a tiered set of SQL logins, without requiring Windows
+  OS-level elevation (the original tool's <code>runas</code> requirement, needed
+  only for filesystem ACL changes, no longer applies).</li>
+<li>Enforce the tiered-trust model at the SQL Server permission level
+  (not just by C# convention): normal app CRUD only ever happens
+  through stored procedures.</li>
+<li>Leave a clean seam (the <code>MyMoneyTest</code> login and its procedures) for
+  the future business-layer test-support library (item #3) to build
+  on.</li>
+<li>Keep Release builds completely unaffected — SQLite only, no new
+  dependencies, no reachable code path to SQL Server.</li>
+</ul>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Migrating the existing XML-based <code>Settings</code>/<code>DatabaseSettings</code>
+  persistence to JSON. Out of scope; tracked as a separate future work
+  item if pursued.</li>
+<li>The business/data-layer extraction into separate assemblies (item
+  #1). This spec's code can be built against today's single-project
+  structure and folded into the extracted layers later; it does not
+  depend on that extraction happening first.</li>
+<li>The business-layer test-support library itself (item #3) and the
+  FlaUI UI-automation harness (item #4). This spec only prepares the
+  data-layer seam (<code>MyMoneyTest</code> login + procs) those will consume.</li>
+<li>Any production/shipped use of SQL Server. This is DEBUG-only,
+  developer-workstation tooling.</li>
+<li>Secure secret management beyond "plain JSON file outside the repo."
+  No Windows Credential Manager, no vault, no encryption at rest for
+  this iteration — acceptable because this targets a disposable dev
+  database on a dev network.</li>
+<li>Password rotation, revocation, or multi-developer credential sharing
+  tooling.</li>
+</ul>
+<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">#</a></h2>
+<pre><code> WPF App (DEBUG)                    MyMoneyAdmin (revived tool)
+ ────────────────                   ───────────────────────────
+ reads dataengine.config.json            (invoked when engine=SqlServer
+   │                                      and target DB is missing)
+   ├─ engine = Sqlite  ──► SqliteDatabase (unchanged, all builds)
+   │
+   └─ engine = SqlServer (DEBUG only)
+        │
+        ├─ DB exists ──► SqlServerDatabase connects as MyMoneyUser,
+        │                 reads creds from dataengine.credentials.json,
+        │                 all CRUD via stored procedure calls
+        │
+        └─ DB missing ──► shell out to MyMoneyAdmin.exe ──► bootstrap
+                                                             (see below)
+</code></pre>
+<p>Three SQL Server logins, created during bootstrap, each scoped to a
+distinct purpose:</p>
+<table>
+<thead>
+<tr>
+<th>Login</th>
+<th>Used by</th>
+<th>Permissions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MyMoneyAdmin</code></td>
+<td><code>MyMoneyAdmin</code> tool only</td>
+<td>Full DDL rights on the <code>MyMoney</code> database (creates/alters tables, indexes, views, procs)</td>
+</tr>
+<tr>
+<td><code>MyMoneyUser</code></td>
+<td>The running WPF app (normal use)</td>
+<td><code>EXECUTE</code> only, on the CRUD access procedures. No direct table grants.</td>
+</tr>
+<tr>
+<td><code>MyMoneyTest</code></td>
+<td>Future test-support library (#3)</td>
+<td><code>EXECUTE</code> on access procedures plus additional test-support procedures too risky to grant <code>MyMoneyUser</code> (e.g. bulk reset/reseed, internal-state inspection)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">#</a></h2>
+<p>Two JSON files, deliberately separated by sensitivity:</p>
+<p><strong><code>dataengine.config.json</code></strong> — non-secret, identifies the engine and
+target server/database. Location: alongside the app's existing config
+(exact path finalized at implementation time; not sensitive, may be
+committed or left per-machine).</p>
+<pre><code class="language-json">{
+  &quot;engine&quot;: &quot;SqlServer&quot;,
+  &quot;server&quot;: &quot;DEVSQL01&quot;,
+  &quot;database&quot;: &quot;MyMoney&quot;
+}
+</code></pre>
+<p><code>"engine"</code> is either <code>"Sqlite"</code> (default if the file or key is absent)
+or <code>"SqlServer"</code>.</p>
+<p><strong><code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code></strong> —
+secret, holds the auto-generated UID/PW for each of the three logins.
+Lives entirely outside the repository (not merely gitignored inside
+it), so it can never be committed and survives a fresh clone.</p>
+<pre><code class="language-json">{
+  &quot;MyMoneyAdmin&quot;: { &quot;userId&quot;: &quot;MyMoneyAdmin&quot;, &quot;password&quot;: &quot;&lt;generated&gt;&quot; },
+  &quot;MyMoneyUser&quot;:  { &quot;userId&quot;: &quot;MyMoneyUser&quot;,  &quot;password&quot;: &quot;&lt;generated&gt;&quot; },
+  &quot;MyMoneyTest&quot;:  { &quot;userId&quot;: &quot;MyMoneyTest&quot;,  &quot;password&quot;: &quot;&lt;generated&gt;&quot; }
+}
+</code></pre>
+<p>Passwords are auto-generated by <code>MyMoneyAdmin</code> at account-creation time
+(strong random values). No human ever types or needs to know them —
+each tool/process reads the entry it needs from this file.</p>
+<h3 id="connecting-to-the-sql-server-instance">Connecting to the SQL Server instance<a class="headerlink" href="#connecting-to-the-sql-server-instance" title="Permanent link">#</a></h3>
+<p><strong><code>TrustServerCertificate</code> must be set on every connection string this
+feature builds</strong> (found via live testing, not anticipated in the
+original design): dev SQL Server instances typically run with a
+self-signed or otherwise untrusted certificate, and without this
+setting every connection attempt fails with an SSL trust error before
+authentication is even evaluated — this blocked all connectivity
+end-to-end until discovered. As implemented, all four SQL connection
+string builders in this feature set it: <code>SaBootstrapConnection</code>,
+<code>BootstrapRunner</code>'s two builders (<code>sa</code> and <code>MyMoneyAdmin</code>), and
+<code>DataEngineStartup</code>'s (<code>MyMoneyUser</code>).</p>
+<h3 id="debug-only-enforcement">DEBUG-only enforcement<a class="headerlink" href="#debug-only-enforcement" title="Permanent link">#</a></h3>
+<p>The <code>"SqlServer"</code> engine option, the <code>MyMoneyAdmin</code>-invocation code
+path, and the <code>DataEngineStartup</code>/<code>SqlServerStoredProcDatabase</code> classes
+are compiled only into DEBUG builds (<code>#if DEBUG</code> guards at the relevant
+call sites, consistent with the existing <code>#if PerformanceBlocks</code>
+pattern already used elsewhere in this codebase). <code>Microsoft.Data.SqlClient</code>
+itself was already a Release-reachable dependency before this feature
+(via the pre-existing <code>SqlServerDatabase</code> class), so this feature adds
+no new Release-time dependency.</p>
+<p><strong>As implemented</strong>, a Release build never encounters <code>"engine":
+"SqlServer"</code> at all in practice: <code>DataEngineStartup</code> (the only code that
+reads <code>dataengine.config.json</code>) is entirely inside <code>#if DEBUG</code>, so the
+config file is simply never read in a Release build — there is no
+runtime fallback-and-log behavior to observe, because there is no
+runtime code path to reach. Release behaves as if this feature doesn't
+exist, which was the actual goal; the original design's "silently falls
+back to SQLite and writes a log entry" framing described a runtime
+check that was never implemented (compile-time exclusion made it
+unnecessary).</p>
+<h2 id="sa-handling"><code>sa</code> Handling<a class="headerlink" href="#sa-handling" title="Permanent link">#</a></h2>
+<p><strong>Revision note (2026-09-14, post-implementation-start):</strong> this section
+originally specified that <code>sa</code> is never persisted and that <code>MyMoneyAdmin</code>
+could detect <em>why</em> a connection failed (disabled vs. bad password) and
+show a targeted "enable sa and retry" prompt. Both of those have changed,
+in two separate corrections made during implementation:</p>
+<ul>
+<li><strong>Disabled-account detection was found to be technically impossible</strong>
+  and removed before Task 8 was built: SQL Server does not expose the
+  specific reason for a login failure to the connecting client by
+  default (this is deliberate server-side security hardening — a
+  non-sysadmin remote connection always sees generic error 18456
+  regardless of cause). <code>MyMoneyAdmin</code> instead shows one generic
+  failure message and a plain <strong>Retry/Cancel</strong> prompt on any connection
+  failure (see <code>RetryLoop</code>/<code>SaBootstrapConnection</code>, Tasks 4 and 8 of
+  the implementation plan).</li>
+<li><strong><code>sa</code> persistence was deliberately reversed</strong> at the developer's
+  explicit request, for this dev-network prototype specifically: <code>sa</code>'s
+  username and password are now stored in the same
+  <code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code> file as
+  the three app-account credentials, under the key <code>"sa"</code>. The
+  developer made this call knowingly, after being told the tradeoff:
+  storing <code>sa</code> widens the credentials file's blast radius from "three
+  scoped, purpose-limited accounts" to "full control of the SQL Server
+  instance" if that file is ever exposed. Acceptable for a throwaway
+  dev-network database; would need revisiting before this pattern is
+  used anywhere with real stakes.</li>
+</ul>
+<p>Current behavior:</p>
+<ol>
+<li>The developer manually enables the <code>sa</code> login on the target SQL
+   Server instance, out of band (SSMS or <code>sp_configure</code>).</li>
+<li><code>MyMoneyAdmin</code> checks the credentials file for a stored <code>"sa"</code>
+   entry first. If present, it uses that password directly — no
+   prompt. If absent, it prompts for the <code>sa</code> password interactively
+   (this path is still supported, e.g. for a fresh machine with no
+   credentials file yet).</li>
+<li><code>MyMoneyAdmin</code> attempts a SQL-authentication connection as <code>sa</code>. On
+   failure (any reason — the client cannot distinguish "disabled" from
+   "wrong password" from "login doesn't exist"), it shows a generic
+   failure message and a Retry/Cancel prompt. Retry re-attempts;
+   Cancel aborts the bootstrap.</li>
+<li>On a successful connection where the password came from an
+   interactive prompt (not already in the credentials file),
+   <code>MyMoneyAdmin</code> saves it to the credentials file under <code>"sa"</code> so
+   subsequent bootstraps on this machine don't need to re-prompt.</li>
+<li>The developer is responsible for disabling <code>sa</code> again afterward,
+   out of band, if they want it disabled between sessions.
+   <code>MyMoneyAdmin</code> does not manage that lifecycle.</li>
+</ol>
+<h2 id="bootstrap-sequence">Bootstrap Sequence<a class="headerlink" href="#bootstrap-sequence" title="Permanent link">#</a></h2>
+<ol>
+<li><code>MyMoneyAdmin.exe</code> runs — either launched directly by the developer,
+   or auto-launched by the WPF app when it reads <code>dataengine.config.json</code>,
+   sees <code>engine: "SqlServer"</code>, and finds the target database missing.</li>
+<li><code>sa</code> authentication succeeds (see above).</li>
+<li>Connected as <code>sa</code>, <code>MyMoneyAdmin</code> sends a script that creates a
+   <strong>temporary stored procedure in <code>master</code></strong>. Wrapping this logic in
+   a procedure (rather than running loose statements) makes it
+   independently inspectable/debuggable in SSMS before it's ever run.
+   The procedure, when executed, performs:</li>
+<li><code>CREATE DATABASE MyMoney</code> (skipped if it already exists — see
+     idempotency note below).</li>
+<li><code>CREATE LOGIN</code> for <code>MyMoneyAdmin</code>, <code>MyMoneyUser</code>, <code>MyMoneyTest</code>,
+     each with a freshly auto-generated strong password.</li>
+<li>Any server-level role/permission setup those logins need (e.g.
+     <code>sysadmin</code>-free, minimal server-level rights — database-level
+     permissions are granted in step 7).</li>
+<li><code>sa</code> executes that procedure.</li>
+<li><code>sa</code> drops the procedure from <code>master</code> immediately after — no
+   privileged object is left behind at the server level.</li>
+<li><code>MyMoneyAdmin</code> writes the three generated UID/PW pairs to
+   <code>%USERPROFILE%\.secrets\MyMoney\dataengine.credentials.json</code>.</li>
+<li><code>MyMoneyAdmin</code> reconnects using the new <code>MyMoneyAdmin</code> login,
+   scoped to the <code>MyMoney</code> database, and runs the hand-authored
+   schema stored procedures: table/index/view creation, the CRUD
+   access procedures (granted <code>EXECUTE</code> to <code>MyMoneyUser</code>), and the
+   test-support procedures (granted <code>EXECUTE</code> to <code>MyMoneyTest</code>).</li>
+</ol>
+<p><strong>Idempotency:</strong> steps 3–7 must be safe to re-run. Each creation step
+checks for existence first (<code>IF NOT EXISTS</code> / catalog view checks)
+rather than assuming a clean slate, so a bootstrap that fails partway
+through (e.g. a crash between steps 5 and 7, leaving the database and
+logins created but schema incomplete) can simply be re-run to
+completion without manual cleanup.</p>
+<h2 id="sql-script-stored-procedure-organization">SQL Script / Stored Procedure Organization<a class="headerlink" href="#sql-script-stored-procedure-organization" title="Permanent link">#</a></h2>
+<p>All schema and access-procedure T-SQL is <strong>hand-authored and checked
+into the repository</strong> as <code>.sql</code> files — not generated at runtime from
+the existing <code>Mapping.cs</code> reflection engine. This is a deliberate
+divergence from how <code>SqliteDatabase</code> builds its schema (via
+<code>SqlServerDatabase.GetCreateTableScript()</code>, inherited unchanged): the
+developer's stated goal is to have real, readable, independently
+runnable SQL Server scripts, not strings assembled by C# attributes at
+runtime.</p>
+<p>Proposed layout (finalized at implementation time):</p>
+<pre><code>Source/WPF/MyMoney/Database/SqlScripts/
+├── Bootstrap/   — the master-db temp procedure (create DB + logins)
+├── Schema/      — CREATE TABLE / INDEX / VIEW procedures
+├── Access/      — CRUD procedures granted to MyMoneyUser
+└── Test/        — test-support procedures granted to MyMoneyTest
+</code></pre>
+<p>Any additional one-off validation scripts the developer writes for
+their own use (e.g. ad hoc data-integrity queries run manually in
+SSMS) are their discretionary choice whether to add to the repository
+— not a deliverable of this spec.</p>
+<p>Stored procedures are the <strong>only</strong> sanctioned interface for
+<code>MyMoneyUser</code>. This is enforced at the SQL Server permission level
+(no <code>SELECT</code>/<code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> grants on tables for that
+login), not merely by convention in the C# code.</p>
+<h2 id="runtime-data-layer-changes">Runtime Data Layer Changes<a class="headerlink" href="#runtime-data-layer-changes" title="Permanent link">#</a></h2>
+<p><code>SqlServerDatabase</code> currently builds and executes direct parameterized
+SQL against tables (see <code>GetConnectionString</code>, <code>Create</code>, and related
+methods in <code>Source/WPF/MyMoney/Database/SqlDatabase.cs</code>). This must
+change: when connected as <code>MyMoneyUser</code>, all CRUD operations are
+issued as calls to the access stored procedures instead, since the
+login has no table-level grants to fall back on. The public <code>IDatabase</code>
+interface surface does not need to change — this is an internal
+implementation change within <code>SqlServerDatabase</code>.</p>
+<p><code>SqliteDatabase</code> is unaffected. It keeps using the current
+reflection-driven, direct-SQL approach via the inherited
+<code>GetCreateTableScript()</code>. No accounts, no stored procedures, no
+behavior change on that path — this spec does not touch the default,
+shipped engine at all.</p>
+<h2 id="startup-trigger-flow">Startup / Trigger Flow<a class="headerlink" href="#startup-trigger-flow" title="Permanent link">#</a></h2>
+<p>On app startup (DEBUG builds only):</p>
+<ol>
+<li>Read <code>dataengine.config.json</code>.</li>
+<li>If <code>engine</code> is absent or <code>"Sqlite"</code> → existing SQLite behavior,
+   completely unchanged.</li>
+<li>If <code>engine</code> is <code>"SqlServer"</code>:</li>
+<li>If a full, successful prior bootstrap is detected → connect
+     directly as <code>MyMoneyUser</code>, reading credentials from
+     <code>dataengine.credentials.json</code>. <strong>As implemented</strong>, this check has
+     no way to query the server itself (no login to check with before
+     <code>MyMoneyUser</code>'s own credentials are known), so it's answered by
+     the credentials file containing a <code>"MyMoneyUser"</code> entry
+     specifically — not by checking whether the database exists on the
+     server, and not by mere file existence (a <code>"sa"</code>-only file, from a
+     bootstrap that started but didn't finish, is deliberately treated
+     as "not yet bootstrapped" rather than as a false positive).</li>
+<li>Otherwise → invoke <code>MyMoneyAdmin.exe</code> to run the full bootstrap
+     sequence above, then connect as <code>MyMoneyUser</code>.</li>
+<li><strong>Known gap:</strong> if the database is dropped on the server but the
+     credentials file is left in place, this still reports "already
+     bootstrapped," the app tries to connect and fails, and falls back
+     to SQLite per the Error Handling section below — it does not
+     detect the drop and re-bootstrap automatically. Deleting the
+     credentials file forces a fresh bootstrap.</li>
+</ol>
+<h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">#</a></h2>
+<ul>
+<li><code>sa</code> authentication fails, for any reason (disabled, wrong password,
+  login doesn't exist -- these are indistinguishable to the client; see
+  the <code>sa</code> Handling section's revision note) → generic failure message
+  plus a Retry/Cancel prompt (<code>RetryLoop</code>/<code>SaBootstrapConnection</code>).
+  Retry re-attempts the connection; Cancel aborts the bootstrap.</li>
+<li><code>dataengine.credentials.json</code> missing or unreadable when the app
+  expects <code>engine: "SqlServer"</code> and the database already exists → this
+  indicates the credentials file was lost/moved after a successful
+  bootstrap (e.g. a new machine, or the file was deleted); the app
+  reports a clear error rather than silently falling back to SQLite,
+  since silently switching engines could confuse the developer about
+  which database they're looking at. It does not attempt to
+  re-bootstrap automatically.</li>
+<li>Bootstrap failure partway through → re-run <code>MyMoneyAdmin</code>; see
+  Idempotency above.</li>
+</ul>
+<h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">#</a></h2>
+<p>This feature has been run end-to-end against a real SQL Server instance
+(not just reviewed statically), across two rounds:</p>
+<p><strong>Round 1</strong> confirmed: the bootstrap sequence completes successfully
+(database, three logins, database users, <code>db_owner</code> role membership,
+schema/access/test procedure deployment) and is idempotent on a second
+run; the tiered-permission model holds under direct testing — <code>MyMoneyUser</code>
+can perform all CRUD through the access procedures, is correctly <em>denied</em>
+direct table access and the test-only procedure, and <code>MyMoneyTest</code> can do
+both; the WPF app launches against a live SQL-Server-backed database
+without crashing. This round also found and fixed a missing
+<code>TrustServerCertificate</code> setting that had been blocking all connectivity
+(see "Connecting to the SQL Server instance" above).</p>
+<p><strong>Round 1 did not exercise</strong> driving the UI into actually selecting a
+payee — it only confirmed the app launched and rendered its default view.
+A second whole-branch review caught that this specific, untested gesture
+crashed (a different <code>DatabasePath</code>-dependent call site than the first
+crash fix covered), and found a narrower residual on the re-bootstrap
+password-handling fix. Both were fixed (synthetic <code>DatabasePath</code> on
+<code>SqlServerStoredProcDatabase</code>; credential reuse on re-bootstrap instead of
+always rotating passwords) and build clean with no test regressions.</p>
+<p><strong>Round 2 (attempted, incomplete):</strong> re-running the live app against the
+bootstrapped database to confirm those two fixes surfaced a separate,
+unrelated problem: <code>Microsoft.Data.SqlClient</code> connections from inside
+<code>MyMoney.exe</code> itself succeed only <em>intermittently</em> (roughly half the
+launches in this session hit <code>PlatformNotSupportedException</code> before ever
+attempting a connection; the rest connected and loaded real data
+correctly, with no crash) — tracked as its own issue, since it's a
+connectivity/hosting problem unrelated to anything this spec's code
+changes. On one of the launches that did connect successfully, the loaded
+payee data was confirmed present in the UI Automation tree (proving the
+data reached the UI), but selecting/clicking the row specifically was not
+completed — repeated attempts at automating that click in this
+environment (simulated mouse input, then UI Automation invoke patterns)
+did not reliably work, and were abandoned rather than continuing
+indefinitely. <strong>The <code>DatabasePath</code> fix's correctness at the specific
+<code>UpdateCaption</code> call site the second review flagged has not been directly
+observed via a live click</strong> — it rests on code review (the fix is the
+same pattern already used successfully elsewhere in the file) plus the
+logical argument that the synthetic path is a valid, non-null, well-formed
+string wherever it's consumed.</p>
+<p>A follow-up whole-branch re-review of these two fixes was intentionally
+<strong>not run</strong> in this session (suspended by the developer) — the fixes are
+committed and build/test clean, but have not received the same review
+scrutiny as the rest of this branch.</p>
+<p><strong>Still not exercised by any live run:</strong> the payee-click gesture
+specifically (see above); a deployment-step failure during an actual
+re-bootstrap (the password-reuse fix's correctness rests on code review,
+not a reproduced failure); multi-user/concurrent access; anything beyond
+the single-table <code>Payees</code> vertical slice, per this spec's own Non-Goals.</p>
+<h2 id="sequencing-dependencies">Sequencing / Dependencies<a class="headerlink" href="#sequencing-dependencies" title="Permanent link">#</a></h2>
+<ul>
+<li>Does not block on item #1 (business/data layer extraction). Can be
+  built and used against today's single-project structure now, and
+  folded into the extracted layers when #1 lands.</li>
+<li>Feeds item #3 (business-layer test-support library): the
+  <code>MyMoneyTest</code> login and its granted procedures are the seam that
+  library will call into. This spec is responsible for that seam
+  existing and being usable; it does not implement the C#-side library
+  that consumes it.</li>
+<li>Independent of item #4 (FlaUI harness).</li>
+</ul>
+<h2 id="open-questions-future-work">Open Questions / Future Work<a class="headerlink" href="#open-questions-future-work" title="Permanent link">#</a></h2>
+<ul>
+<li>Whether the credentials file's containing folder needs filesystem
+  ACL hardening beyond default user-profile permissions. Not required
+  for this dev-only prototype; noted for future consideration if this
+  moves beyond a single developer's workstation. Note this assessment's
+  blast radius is now larger than when originally written: per the <code>sa</code>
+  Handling section's revision, the file holds a fourth entry (<code>sa</code>)
+  alongside the three scoped app accounts, so a compromise of this file
+  now means full SQL Server instance control, not just the three
+  purpose-limited accounts. This doesn't change the "not required for
+  this dev-only prototype" conclusion, but any future revisit of this
+  question should weigh the larger blast radius, not the original
+  three-account one.</li>
+<li>Migrating existing XML <code>Settings</code>/<code>DatabaseSettings</code> persistence to
+  JSON, and unifying it with <code>dataengine.config.json</code>'s format —
+  explicitly deferred as a separate future work item.</li>
+<li>Credential rotation/revocation tooling — not needed while <code>sa</code> stays
+  disabled between bootstraps and the three generated passwords are
+  effectively fixed for the life of a given dev database.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

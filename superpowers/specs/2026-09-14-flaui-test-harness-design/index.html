@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-14-flaui-test-harness-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>FlaUI Test Harness — Design Spec - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "FlaUI Test Harness \u2014 Design Spec", url: "#_top", children: [
+              {title: "Status", url: "#status" },
+              {title: "Context", url: "#context" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-Goals", url: "#non-goals" },
+              {title: "Architecture Overview", url: "#architecture-overview" },
+              {title: "The First Test", url: "#the-first-test" },
+              {title: "Fixture File", url: "#fixture-file" },
+              {title: "Sequencing / Dependencies", url: "#sequencing-dependencies" },
+              {title: "Open Questions / Future Work", url: "#open-questions-future-work" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="flaui-test-harness-design-spec">FlaUI Test Harness — Design Spec<a class="headerlink" href="#flaui-test-harness-design-spec" title="Permanent link">#</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">#</a></h2>
+<p>Design phase. This is item #4 of the five-item 3-tier architecture
+initiative (see the tracking work item, GitHub issue #1, for the full
+list). Items #1 (business/data layer extraction) and #3
+(business-layer test-support library) each get their own spec.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p>Item #2 (SQL Server dual-engine support) needed to verify, against a
+real running instance of the app, that a specific bug fix (a crash when
+selecting a payee, caused by a null <code>DatabasePath</code> on the new SQL
+Server-backed data engine) actually worked. That verification attempt
+used raw Windows UI Automation — <code>System.Windows.Automation</code> directly,
+simulated mouse clicks via <code>mouse_event</code>, <code>PrintWindow</code> for
+screenshots — driven ad hoc via PowerShell scripts written during that
+session. It did not work reliably: simulated clicks on the exact right
+pixel coordinates didn't register, <code>InvokePattern.Invoke()</code> on WPF menu
+items didn't reliably trigger the underlying command, and a native
+File→Open dialog could not be driven open at all across three different
+attempts. The attempt was abandoned rather than continuing to guess at
+a fourth approach.</p>
+<p>This is also exactly the gap the original 3-tier initiative already
+identified: <code>Source/WPF/ScenarioTest</code> (a pre-existing model-based
+integration test driven by <code>TestModel.dgml</code>) uses this same category of
+hand-rolled, raw UI Automation (<code>ScenarioTest/Input.cs</code>) rather than a
+purpose-built automation library. FlaUI wraps the identical underlying
+UI Automation API with a higher-level, purpose-built interface —
+reliable element finding, retry/wait-for-condition helpers, and
+<code>Click()</code>/<code>Invoke()</code> methods that correctly handle focus and command
+routing — specifically designed to solve the class of problem just
+encountered.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Prove that FlaUI can reliably drive the WPF app through a real user
+  scenario — launch, open a database file via the native File→Open
+  dialog, navigate the UI, select an item — where raw UI Automation
+  could not.</li>
+<li>Produce a real, committed, reusable test asset (not more scratch
+  automation scripts), scoped tightly enough to land quickly.</li>
+<li>Establish the pattern (project structure, package choices,
+  DEBUG-only build) that later, broader UI test coverage can build on,
+  without committing to that broader scope now.</li>
+</ul>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Replacing or modifying <code>ScenarioTest</code>/<code>TestModel.dgml</code> in any way.
+  This is a separate, independent project; <code>ScenarioTest</code> is untouched.</li>
+<li>Building a general-purpose test framework, DSL, or reusable
+  page-object abstraction layer on top of FlaUI. This spec is one
+  direct, straightforward test. Generalizing patterns can happen once
+  there's more than one test to generalize from.</li>
+<li>Testing the SQL Server engine path (item #2). GitHub issue #5
+  (intermittent <code>Microsoft.Data.SqlClient</code> connectivity specifically
+  when hosted inside <code>MyMoney.exe</code>) is open and unresolved; running a
+  SQL-Server-backed scenario through this harness now would conflate
+  "does FlaUI work" with "is the connection flaky today," making
+  failures ambiguous to diagnose. Deferred until issue #5 is resolved.</li>
+<li>CI integration or automated build-gate wiring. This is a manually-run
+  DEBUG developer tool for now, the same maturity level item #2 started
+  at.</li>
+<li>Any production/shipped use. DEBUG-only, developer-workstation
+  tooling, consistent with every other item in this initiative.</li>
+</ul>
+<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">#</a></h2>
+<p>A new, independent test project drives the built <code>MyMoney.exe</code> as an
+external process (not in-process — this is how FlaUI works: it
+automates the app from the outside, the same way a human user would,
+rather than linking against its code):</p>
+<pre><code>Source/WPF/UITests/
+├── UITests.csproj              -- net10.0-windows7.0, DEBUG-only
+├── PayeeSelectionTests.cs      -- the one test
+└── Fixtures/
+    └── PayeeSmokeTest.mmdb     -- checked-in SQLite fixture: one
+                                    account, one payee, one transaction
+</code></pre>
+<ul>
+<li><strong>Packages:</strong> <code>FlaUI.Core</code> + <code>FlaUI.UIA3</code> (the UI Automation 3
+  backend — the modern, actively-maintained one). Exact versions
+  pinned at implementation time.</li>
+<li><strong>Test runner:</strong> NUnit, consistent with the existing
+  <code>UnitTests.csproj</code> convention. FlaUI itself is test-runner-agnostic —
+  it only drives the app; NUnit supplies the <code>[Test]</code>/assertion
+  structure around it.</li>
+<li><strong>DEBUG-only:</strong> this project (or its build/execution) is gated the
+  same way <code>MyMoneyAdmin</code>'s Release exclusion works for item #2 — not
+  part of what a Release build produces or needs.</li>
+<li><strong>No in-process coupling:</strong> <code>UITests.csproj</code> does not need a
+  <code>ProjectReference</code> to <code>MyMoney.csproj</code> for anything beyond knowing
+  the built exe's output path (a constant/configured path, not a
+  compile-time dependency) — it automates the compiled application,
+  the same binary a real user runs.</li>
+</ul>
+<h2 id="the-first-test">The First Test<a class="headerlink" href="#the-first-test" title="Permanent link">#</a></h2>
+<p>This is the concrete acceptance criterion for this spec — if FlaUI
+cannot reliably do this, that needs to be known now, before any
+further investment in it:</p>
+<ol>
+<li>Launch <code>MyMoney.exe</code> via <code>FlaUI.Core.Application.Launch(...)</code>,
+   passing whatever arguments are needed to ensure a clean, predictable
+   startup state (no auto-loaded database from a prior session's
+   settings).</li>
+<li>Use FlaUI to drive the <strong>File → Open</strong> menu command, then interact
+   with the resulting native common file dialog to select
+   <code>Fixtures/PayeeSmokeTest.mmdb</code>. This is deliberately the exact
+   interaction raw automation could not complete — FlaUI's dialog and
+   window-handling support is a purpose-built feature, not an
+   afterthought, so this is the first real test of whether it actually
+   solves the problem.</li>
+<li>Assert the database loaded: the main window's title reflects the
+   opened file, and/or the Accounts/Payees tree is populated.</li>
+<li>Expand the Payees section and confirm the fixture's known payee
+   (e.g. "Payee Smoke Test") is present.</li>
+<li>Select that payee row.</li>
+<li>Assert the app is still responsive after selection (FlaUI can query
+   window state / responsiveness), and that no unhandled-exception
+   dialog appeared. This step is the one that failed manually multiple
+   times during item #2's verification (a null-<code>DatabasePath</code> crash in
+   <code>MainWindow.UpdateCaption</code>, on the SQL Server engine specifically —
+   not expected to reproduce here since the fixture is a normal SQLite
+   file with a real <code>DatabasePath</code>, but the <em>mechanism of automating
+   the click itself</em> is exactly what's being proven here, independent
+   of which engine is behind it).</li>
+</ol>
+<h2 id="fixture-file">Fixture File<a class="headerlink" href="#fixture-file" title="Permanent link">#</a></h2>
+<p><code>Fixtures/PayeeSmokeTest.mmdb</code> is a small, checked-in SQLite database —
+generated once (the same way item #2's live-testing scratch script did
+it: construct a <code>MyMoney</code> object with one <code>Account</code>, one <code>Payee</code>, one
+<code>Transaction</code>, then <code>SqliteDatabase.Create()</code> + <code>.Save()</code>) and committed
+as a binary fixture, not regenerated per test run. Deterministic, fast,
+no dependency on any external state.</p>
+<h2 id="sequencing-dependencies">Sequencing / Dependencies<a class="headerlink" href="#sequencing-dependencies" title="Permanent link">#</a></h2>
+<ul>
+<li>Independent of item #1 (business/data layer extraction) and item #3
+  (business-layer test-support library) — no dependency either
+  direction.</li>
+<li>Does not depend on item #2 being fully complete, but its <em>purpose</em>
+  is partly motivated by item #2's verification needs. Once this
+  harness exists and issue #5 (intermittent SQL Server connectivity)
+  is resolved separately, a natural follow-up is a second FlaUI test
+  covering the SQL-Server-backed payee-selection scenario that
+  motivated this work in the first place — not part of this spec's
+  deliverable.</li>
+<li><code>ScenarioTest</code> is unaffected and untouched.</li>
+</ul>
+<h2 id="open-questions-future-work">Open Questions / Future Work<a class="headerlink" href="#open-questions-future-work" title="Permanent link">#</a></h2>
+<ul>
+<li>Whether to eventually fold <code>ScenarioTest</code>'s scenarios onto FlaUI
+  (the original, broader framing of item #4) is explicitly deferred —
+  this spec takes the narrower path by design (see Non-Goals).</li>
+<li>CI/build-gate integration, if ever wanted, is future work.</li>
+<li>Whether the fixture file should be regenerated by a script at test
+  time instead of checked in as a binary — checked-in was chosen for
+  simplicity and determinism; revisit if the fixture needs to grow
+  significantly or if binary-diff noise in the repo becomes a problem.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

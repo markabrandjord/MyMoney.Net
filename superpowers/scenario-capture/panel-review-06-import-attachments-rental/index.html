@@ -1,0 +1,1763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/scenario-capture/panel-review-06-import-attachments-rental/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Panel Review 06 — Import/Export, Attachments &amp; Documents, Rental Property - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Panel Review 06 \u2014 Import/Export, Attachments \u0026amp; Documents, Rental Property", url: "#_top", children: [
+              {title: "D-25 \u2014 What should \"Money File Import\" accept?", url: "#d-25-what-should-money-file-import-accept" },
+              {title: "D-26 \u2014 Is QIF import worth keeping?", url: "#d-26-is-qif-import-worth-keeping" },
+              {title: "D-27 \u2014 What happens when an imported transaction isn\u0027t in the account\u0027s currency?", url: "#d-27-what-happens-when-an-imported-transaction-isnt-in-the-accounts-currency" },
+              {title: "D-44 \u2014 Bring scanning back, or delete it?", url: "#d-44-bring-scanning-back-or-delete-it" },
+              {title: "D-45 \u2014 What happens to paperwork when its transaction is deleted?", url: "#d-45-what-happens-to-paperwork-when-its-transaction-is-deleted" },
+              {title: "D-46 \u2014 File documents by account name or by account id?", url: "#d-46-file-documents-by-account-name-or-by-account-id" },
+              {title: "D-47 \u2014 Finish per-unit rent entry, or delete it?", url: "#d-47-finish-per-unit-rent-entry-or-delete-it" },
+              {title: "D-48 \u2014 What is a rental property in the model, and how much of it is editable?", url: "#d-48-what-is-a-rental-property-in-the-model-and-how-much-of-it-is-editable" },
+              {title: "Cross-cutting findings", url: "#cross-cutting-findings" },
+              {title: "Summary table", url: "#summary-table" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="panel-review-06-importexport-attachments-documents-rental-property">Panel Review 06 — Import/Export, Attachments &amp; Documents, Rental Property<a class="headerlink" href="#panel-review-06-importexport-attachments-documents-rental-property" title="Permanent link">#</a></h1>
+<p>One expert-panel session over eight entries from the
+<a href="../redesign-decision-register/">Redesign Decision Register</a>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Decision</th>
+<th>Cluster</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>D-25</strong></td>
+<td>What should "Money File Import" accept?</td>
+<td><code>import-export</code></td>
+</tr>
+<tr>
+<td><strong>D-26</strong></td>
+<td>Is QIF import worth keeping?</td>
+<td><code>import-export</code></td>
+</tr>
+<tr>
+<td><strong>D-27</strong></td>
+<td>What happens when an imported transaction isn't in the account's currency?</td>
+<td><code>import-export</code></td>
+</tr>
+<tr>
+<td><strong>D-44</strong></td>
+<td>Bring scanning back, or delete it?</td>
+<td><code>attachments-documents</code></td>
+</tr>
+<tr>
+<td><strong>D-45</strong></td>
+<td>What happens to paperwork when its transaction is deleted?</td>
+<td><code>attachments-documents</code></td>
+</tr>
+<tr>
+<td><strong>D-46</strong></td>
+<td>File documents by account name or by account id?</td>
+<td><code>attachments-documents</code></td>
+</tr>
+<tr>
+<td><strong>D-47</strong></td>
+<td>Finish per-unit rent entry, or delete it?</td>
+<td><code>rental-property</code></td>
+</tr>
+<tr>
+<td><strong>D-48</strong></td>
+<td>What is a rental property in the model, and how much of it is editable?</td>
+<td><code>rental-property</code></td>
+</tr>
+</tbody>
+</table>
+<p>The panel: <strong>Architect</strong>, <strong>Developer</strong> (C#/.NET, WPF, WPF-UI/Fluent), <strong>Test Engineer</strong>,
+<strong>Operations Engineer</strong>, <strong>UI/UX Expert</strong>, <strong>Data Engine Expert</strong> (SQLite/SQL Server), and an
+<strong>Adversarial Expert</strong> whose job is to stress-test the emerging consensus before it settles.
+Experts opt out explicitly where a decision is outside their lane.</p>
+<p>Each decision gets: a plain-language explanation, at least two genuinely different design
+directions with pros / cons / unintended consequences, the panel's recommendation, and an
+honest <strong>Needs your decision</strong> flag where the answer really turns on product taste rather
+than engineering judgement.</p>
+<p><strong>Before the sessions began</strong>, the panel re-read the code behind each register entry rather
+than working from the entry alone. Five of the eight turned out to be materially different
+from their register summary. Those corrections are called out in the relevant sections and
+collected at the end.</p>
+<p>Issue <a href="https://github.com/markabrandjord/MyMoney.Net/issues/54">#54</a> sits next to D-44/D-45/D-46
+and is <strong>not re-litigated here</strong> — it is a settled data-loss bug with one correct fix. It is
+referenced only where a decision's shape depends on it.</p>
+<hr />
+<h2 id="d-25-what-should-money-file-import-accept">D-25 — What should "Money File Import" accept?<a class="headerlink" href="#d-25-what-should-money-file-import-accept" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 4 OQ25 · <strong>Cluster:</strong> <code>import-export</code></p>
+<h3 id="eli10">ELI10<a class="headerlink" href="#eli10" title="Permanent link">#</a></h3>
+<p>Imagine you keep your money notebook on your home computer, and you also keep a second copy
+of it on your laptop while you're travelling. When you get home, you want to fold the
+laptop's new pages back into the home notebook — without ending up with two copies of every
+page you'd already written before you left.</p>
+<p>The program has a window for exactly that, called <strong>Money File Import</strong>. It lets you pick
+several files at once. But it only actually understands <em>one</em> kind of file — the program's
+own database file. Hand it anything else and it says <em>"Import only supports sqllite money
+files"</em> (with "sqlite" misspelled) and gives up on the whole batch, including the files it
+could have handled.</p>
+<p>That's odd, because the program can <em>save</em> your notebook in several different shapes: a
+database file, a plain-text file, and a compact file. Three different shapes, all of them
+"your whole notebook" — but the merge window accepts only one.</p>
+<p>Here's the part that isn't obvious, and it's the real heart of the decision. Merging works
+by <strong>serial number</strong>. Every page in your notebook got a serial number the day you first
+wrote it. When the laptop copy comes home, the program matches page #4021 in the laptop copy
+to page #4021 at home, and updates it. That only works if both notebooks <em>started life as
+the same notebook</em> — if one was photocopied from the other. If you handed it a friend's
+notebook, page #4021 would be a completely unrelated page, and the merge would quietly
+overwrite your grocery receipt with their car payment.</p>
+<p>So the question is not really "which file shapes should the window accept". It's "<strong>what
+does this window promise, and how does it tell whether the file in front of it is safe to
+merge?</strong>" Right now it guesses using the file's <em>name ending</em> — which tells you the shape of
+the file and nothing at all about where it came from.</p>
+<p>The real-world consequence: pick the loose answer and a user can silently corrupt their books
+by merging a file that was never a copy of theirs. Pick the narrow answer and a user with a
+perfectly valid backup in a different shape is told, wrongly, that it isn't a money file.</p>
+<h3 id="what-the-code-actually-does-corrections-to-the-register-entry">What the code actually does (corrections to the register entry)<a class="headerlink" href="#what-the-code-actually-does-corrections-to-the-register-entry" title="Permanent link">#</a></h3>
+<p>The register describes <code>ProcessFile</code>'s extension check as the gate. The panel found the gate
+is one layer up and works differently:</p>
+<ul>
+<li><code>MainWindow.OnImport</code> (around <code>MainWindow.xaml.cs:4180</code>) <strong>already dispatches by extension</strong>
+  before <code>MoneyFileImportDialog</code> is constructed. <code>.qif</code> → <code>ImportQif</code>, <code>.ofx</code>/<code>.qfx</code> →
+  <code>ImportOfx</code>, <code>.csv</code> → <code>ImportCsv</code>, <code>.xml</code> → <code>ImportXml</code>, <code>.db</code>/<code>.mmdb</code> → <code>ImportMoneyFile</code>,
+  everything else → <em>"Unrecognized file extension … expecting .qif, .ofx, .csv or .xml"</em>
+  (which itself fails to mention <code>.db</code>/<code>.mmdb</code>).</li>
+<li>Therefore the misspelled <code>ProcessFile</code> message is <strong>effectively unreachable from the menu
+  route</strong> — only <code>.db</code>/<code>.mmdb</code> ever get that far. The message the user actually sees for an
+  <code>.xml</code> money file is the <em>other</em> one, and it does not say "wrong kind of import", it says
+  the extension is recognised and then silently routes to something else.</li>
+<li><strong><code>.xml</code> already means something different on import.</strong> <code>XmlImporter.ImportXml</code> remaps
+  incoming ids (<code>remappedIds</code>) and <em>appends</em>. <code>MoneyFileImportDialog.ImportAccount</code> matches
+  by <code>FindTransactionById(t.Id)</code> and <em>merges</em>. Same extension, opposite semantics. A user who
+  saved their whole book via <strong>Save As → .xml</strong> and then imports it gets a second copy of
+  every transaction, not a merge.</li>
+<li><strong><code>.bxml</code> (binary XML) is a Save As target with no import route at all.</strong> <code>SaveAsBinaryXml</code>
+  exists; nothing reads it back except <code>Open</code>.</li>
+<li><strong><code>.sdf</code> (SQL CE) is likewise a Save As target</strong> with no import route.</li>
+</ul>
+<p>So the true defect surface is larger than "a narrow check and a typo": there are three
+whole-file save formats, one of which imports with the <em>wrong</em> semantics and two of which
+cannot be imported at all.</p>
+<h3 id="alternatives">Alternatives<a class="headerlink" href="#alternatives" title="Permanent link">#</a></h3>
+<h4 id="a-one-merge-entry-point-format-agnostic-gated-on-lineage-rather-than-extension">A. One merge entry point, format-agnostic, gated on lineage rather than extension<a class="headerlink" href="#a-one-merge-entry-point-format-agnostic-gated-on-lineage-rather-than-extension" title="Permanent link">#</a></h4>
+<p>Accept any whole-file format the storage layer can open (<code>.db</code>, <code>.mmdb</code>, <code>.sdf</code>, <code>.xml</code>,
+<code>.bxml</code>), open it through <code>IDatabase</code>, and then decide whether to merge by asking the <em>file</em>,
+not the filename: give every money file a <strong>lineage id</strong> (a GUID stamped at creation and
+carried through every Save As) and compare it to the open file's. Same lineage → merge by id,
+no warning needed. Different lineage → refuse, or offer the append-with-remap path explicitly
+as a different, clearly-labelled operation.</p>
+<p><strong>Pros</strong>
+- Turns the <code>MessageBoxEx</code> "merging only works if both started with the same state — continue?"
+  warning from an unenforceable request into a check the product actually performs. That
+  warning is currently the <em>only</em> thing standing between a user and silent cross-book
+  corruption, and it is a checkbox on the user's memory.
+- Resolves the <code>.xml</code> ambiguity by construction: the <em>file</em> says which operation is legal, so
+  one extension can serve both.
+- Makes <code>.bxml</code> and <code>.sdf</code> importable for free — they route through the same <code>IDatabase.Load</code>.
+- Fits D-35's engine-portfolio decision cleanly: whatever engines survive, they all get import
+  for nothing.</p>
+<p><strong>Cons</strong>
+- Requires a schema addition (one row in the settings/metadata table) in every engine, plus a
+  migration for existing files — which lands squarely on D-39's schema-upgrade machinery.
+- Existing files have no lineage id. Backfilling is guesswork: the honest answer is "unknown
+  lineage", and then the product has to decide what "unknown vs. unknown" means. Most likely
+  it means falling back to today's warn-and-hope for a transition period, which is the thing
+  being fixed.
+- The append-with-remap path has to be designed as a real feature rather than an accident,
+  which is net-new UX (see D-33's power-user surface question for where it would live).</p>
+<p><strong>Unintended consequences</strong>
+- A lineage id is a <strong>fingerprint that travels with the file</strong>. Two users who share a starting
+  file (a template, a sample database, a shared household book that was later split) now have
+  the same lineage and will be <em>permitted</em> to merge books that have genuinely diverged into
+  different people's finances. Lineage proves common ancestry, not that merging is still
+  wise — the warning can be narrowed but not deleted.
+- Backup/restore (D-50) has to decide whether a restored copy keeps or regenerates its
+  lineage. Keep, and "restore to a new file then merge the old one back" works. Regenerate,
+  and it silently stops working.
+- <code>Save As</code> becomes a lineage-preserving operation, which means <strong><code>Save As</code> is no longer a way
+  to fork your books</strong>. Some users deliberately use it that way. A separate "start a new book
+  from this one" would be needed to replace it.</p>
+<h4 id="b-narrow-it-honestly-this-window-merges-database-files-and-says-so">B. Narrow it honestly: this window merges <em>database</em> files, and says so<a class="headerlink" href="#b-narrow-it-honestly-this-window-merges-database-files-and-says-so" title="Permanent link">#</a></h4>
+<p>Rename the feature to something like <strong>"Merge a copy of this book"</strong>, restrict it to the
+engines whose <code>IDatabase</code> can be opened for merge, fix the message text, and make the
+extension check a <em>pre-filter on the file picker</em> rather than a per-file failure inside the
+batch. Fix the batch-abort behaviour so one bad file reports and the rest proceed. Leave
+<code>.xml</code> import where it is, but rename <em>that</em> operation in the UI to "Append transactions from
+an XML export" so the two stop colliding in the user's head.</p>
+<p><strong>Pros</strong>
+- Cheapest by a wide margin. No schema change, no migration, no new concepts. Mostly naming,
+  a file-dialog filter and one loop fix.
+- Honest: the window's name matches what it does, and the two XML meanings stop being
+  indistinguishable.
+- Keeps the risky operation (identity-based merge) on the narrowest possible surface, which is
+  defensible while the warning remains the only safeguard.</p>
+<p><strong>Cons</strong>
+- Does nothing about the actual hazard. A user can still merge someone else's <code>.mmdb</code> and
+  corrupt their books; the only protection stays a modal they will click through.
+- Leaves <code>.bxml</code> and <code>.sdf</code> as write-only formats — a user who chose one as their backup
+  format has no path back in except Open, which replaces rather than merges.
+- Pushes the real decision to whichever future release notices the hazard again.</p>
+<p><strong>Unintended consequences</strong>
+- Renaming a menu item breaks every piece of user muscle memory and every screenshot in the
+  docs (D-51's help question) for a change that improves nothing functionally. The rename is
+  the <em>visible</em> part of a fix that is mostly invisible, which reads to a returning user as
+  churn.
+- A file-dialog filter is a weaker gate than it looks: drag-and-drop and command-line
+  arguments both bypass it (<code>MainWindow.xaml.cs:986</code> accepts <code>.mmdb</code>/<code>.bxml</code> from a dropped
+  path), so the per-file check has to stay anyway and the "pre-filter" is UX polish, not
+  enforcement.</p>
+<h4 id="c-split-the-concept-in-two-merge-a-copy-and-import-transactions-from-a-file">C. Split the concept in two: "Merge a copy" and "Import transactions from a file"<a class="headerlink" href="#c-split-the-concept-in-two-merge-a-copy-and-import-transactions-from-a-file" title="Permanent link">#</a></h4>
+<p>Stop trying to make one window serve both. <strong>Merge a copy</strong> is a rare, high-stakes,
+whole-book, identity-matched operation with its own confirmation, its own per-account progress
+report and its own undo story. <strong>Import transactions</strong> is the routine, low-stakes operation
+that already exists for QIF/OFX/CSV/XML and always appends-and-matches heuristically (date,
+amount, payee) rather than by id. Route every format to one of the two by <em>what the user is
+trying to do</em>, asked up front, not by extension.</p>
+<p><strong>Pros</strong>
+- Matches the user's actual mental model. "I'm bringing my laptop's copy home" and "I'm
+  bringing in my bank's download" are not the same task, and today they share a menu.
+- Makes the dangerous operation <em>feel</em> dangerous and the routine one <em>feel</em> routine —
+  currently both are one click off the same menu.
+- Gives heuristic matching (which the QIF path already has via <code>Transactions.Merge</code>, and which
+  the duplicate-detection work in D-12 touches) one home instead of three.
+- Doesn't foreclose A: lineage checking can be added to "Merge a copy" later, and only there.</p>
+<p><strong>Cons</strong>
+- The most UI work of the three. Two entry points, two flows, two sets of progress reporting,
+  and a decision about what the old menu items become.
+- Some formats genuinely serve both purposes (a <code>.mmdb</code> could be your laptop copy <em>or</em> a
+  friend's book you want to cherry-pick from), so the up-front question has a "it depends"
+  answer for at least one case.
+- Doubles the surface the Test Engineer has to cover at exactly the point where the existing
+  coverage is thinnest.</p>
+<p><strong>Unintended consequences</strong>
+- Two import paths tend to drift. The moment one gains attachment handling (P4-IMPORT-6 /
+  #54) or currency handling (D-27) and the other doesn't, the product has two different
+  answers to the same question again — which is how it got here.
+- "Import transactions from a <code>.mmdb</code>" — cherry-picking from a non-lineage database — is a
+  capability that does not exist today and would have to be <em>built</em>, not just routed. If the
+  panel isn't prepared to build it, option C collapses back into B with extra menus.</p>
+<h3 id="recommendation">Recommendation<a class="headerlink" href="#recommendation" title="Permanent link">#</a></h3>
+<p><strong>B now, A next, and treat C as the naming that makes A legible</strong> — with one genuine
+disagreement recorded below.</p>
+<p>The reasoning that won: the register frames this as a scope question ("how many formats?"),
+and the panel's re-read says the scope question is the <em>less</em> important one. The important
+finding is that <code>.xml</code> silently means two different operations, and that the identity-merge
+hazard is guarded only by a modal. Adding formats to a window whose safety model is "we asked
+the user to be sure" makes the hazard broader, not narrower. So the format expansion should
+<strong>follow</strong> the lineage check, not precede it.</p>
+<ul>
+<li><strong>Architect</strong>: A is the only option that makes the merge contract checkable. Everything else
+  is an improvement to a guess. But A depends on D-39 (schema upgrade) having an answer, and
+  that's a different panel's decision, so it cannot be scheduled first.</li>
+<li><strong>Developer</strong>: B is a day's work and mostly deletion. A is maybe a week once D-39 exists. The
+  <code>IDatabase</code> abstraction already makes the format-agnostic load trivial — <code>SqliteDatabase</code> is
+  hard-coded into <code>ProcessFile</code> purely because nobody generalised it, not because it resists.</li>
+<li><strong>Test Engineer</strong>: A is the first version of this feature that can be tested <em>negatively</em> —
+  today there is no way to assert "refuses to merge an unrelated book", because nothing
+  distinguishes one. Strongly for A. Notes that B's batch-abort fix needs a test that a
+  three-file batch with a bad middle file still imports files one and three, which is a
+  regression waiting to happen.</li>
+<li><strong>Operations Engineer</strong>: A's backfill is the real cost. "Unknown lineage" on every existing
+  file means the check is inert for the entire installed base until they re-save. Suggests
+  stamping lineage on <em>load</em> as well as create, so any file opened once by the new version
+  gets one — which converts the installed base silently and makes the check live within one
+  session for most users.</li>
+<li><strong>UI/UX</strong>: C's split is right regardless of A or B. The current menu presents a
+  potentially-destructive whole-book operation with the same weight as importing a bank
+  download. Would like the merge operation to carry a Fluent <code>InfoBar</code> with the lineage
+  verdict ("This file is a copy of your book, last diverged 12 March") rather than a modal
+  asking the user to confirm something they cannot know.</li>
+<li><strong>Data Engine Expert</strong>: The lineage id belongs in the same metadata/settings table that
+  D-39's schema version lives in — one migration, not two. Warns that <code>XmlStore</code>/<code>CsvStore</code>
+  have no such table and would need the id in a document attribute, which is trivially
+  editable by a user with a text editor. Lineage is a <strong>safety interlock, not a security
+  control</strong>, and the design must not later lean on it as though it were one.</li>
+<li><strong>Adversarial</strong>: "How often does anyone actually merge two copies of their own book?" If the
+  honest answer is 'almost never', then A is a schema migration and a new concept in service
+  of a feature nobody uses, and the <em>right</em> answer might be to delete the merge window
+  entirely and tell people to use one file. Pushed hard on this. The panel's counter: the
+  fork's owner is mid-migration from Quicken and will plausibly be running two books in
+  parallel during the evaluation, which is exactly the merge case — and issue #54's attachment
+  bug is in the merge path, implying someone does use it. Not fully resolved; see the flag.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: the Adversarial Expert does not accept that merge earns a schema
+change, and would ship B and stop. The other six would ship B and schedule A. Nobody argued
+for expanding formats before the lineage check exists — that much was unanimous.</p>
+<p><strong>Panel flags:</strong> would benefit from <strong>product-telemetry / user-research</strong> input that none of
+the seven roles can supply — specifically, whether whole-book merge is a real workflow for
+this product's users or a vestigial one. That single fact decides between "B and stop" and
+"B then A".</p>
+<h3 id="needs-your-decision">Needs your decision?<a class="headerlink" href="#needs-your-decision" title="Permanent link">#</a></h3>
+<p><strong>Partly — yes on scope, no on direction.</strong> The direction (fix the honesty and the batch
+behaviour first; do not broaden formats until merge can verify what it's merging) is a
+confident engineering recommendation. Whether whole-book merge deserves a lineage id and a
+migration — or should be retired — is a product call about how you personally expect to use
+this product during and after the Quicken migration. <strong>Needs your decision.</strong></p>
+<hr />
+<h2 id="d-26-is-qif-import-worth-keeping">D-26 — Is QIF import worth keeping?<a class="headerlink" href="#d-26-is-qif-import-worth-keeping" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 6 OQ20 · <strong>Cluster:</strong> <code>import-export</code></p>
+<h3 id="eli10_1">ELI10<a class="headerlink" href="#eli10_1" title="Permanent link">#</a></h3>
+<p>You're moving house, and you want to bring twenty years of financial records with you. Your
+old program can write those records out as a file. One of the oldest and most common shapes
+for that file is called QIF — think of it as a very plain list, one fact per line, with a
+single letter at the start of each line saying what kind of fact it is. <code>D</code> for date, <code>T</code> for
+amount, <code>P</code> for who you paid.</p>
+<p>This program can read QIF files. But the way it reads them has a problem you'd notice
+immediately if you were doing it by hand: <strong>it writes each record into the new book as it goes,
+and if it hits a line it doesn't understand, it stops dead and leaves everything before that
+point already written.</strong> Import a file with 3,000 transactions and a weird line at number
+2,700, and you now have 2,699 transactions in your book, a message saying "unknown format on
+line 8,412", and no way to tell which ones made it. Run it again and you'll get duplicates.
+There's no undo.</p>
+<p>It's also picky in a way that doesn't match reality. Real exported files often begin with
+sections describing your accounts and your category list. This program doesn't know those
+sections exist and falls over on the very first line of a full export from Microsoft Money.</p>
+<p>So: is this worth repairing, or should the program say "export your data as one of these
+other formats instead"?</p>
+<p>That question matters more here than it normally would, <strong>because this whole fork exists to
+move somebody off Quicken.</strong> If the QIF door is the door they're walking through, it needs to
+work. If it isn't, fixing it is expensive charity.</p>
+<h3 id="what-the-code-actually-does">What the code actually does<a class="headerlink" href="#what-the-code-actually-does" title="Permanent link">#</a></h3>
+<ul>
+<li><code>QifImporter.cs</code> is <strong>451 lines</strong> — small. Six <code>throw</code> sites: unknown account type, account
+  type mismatch, unknown <code>C</code> (cleared) code, illegal self-transfer, split with no amount,
+  unknown field code.</li>
+<li><strong>No <code>BeginUpdate</code>/<code>EndUpdate</code>.</strong> Every other importer wraps its writes (P6-ALL-1). This one
+  writes straight through, so every list in the UI churns row-by-row while it runs, and a
+  throw leaves a partial commit.</li>
+<li>The <code>!Type:</code> header check maps account kinds, and <strong>the same check refuses correct merges and
+  permits wrong ones</strong> (Phase 6 OQ6) — an orthogonal bug, but it lands on the same lines any
+  rewrite would touch.</li>
+<li>A first-time import marks nothing <code>Unaccepted</code> (Phase 6 OQ7), so P6-QIF-8's "review what
+  arrived" promise holds only for merges into a non-empty account.</li>
+<li>P6-QIF-7 is a deliberate, documented design choice — reconciled-in-the-old-product arrives
+  merely <em>cleared</em> — and is genuinely good. Any replacement must keep it.</li>
+</ul>
+<h3 id="alternatives_1">Alternatives<a class="headerlink" href="#alternatives_1" title="Permanent link">#</a></h3>
+<h4 id="a-rewrite-qif-properly-parse-all-then-commit-with-an-error-report">A. Rewrite QIF properly: parse-all-then-commit, with an error report<a class="headerlink" href="#a-rewrite-qif-properly-parse-all-then-commit-with-an-error-report" title="Permanent link">#</a></h4>
+<p>Two passes. Pass one parses the entire file into an in-memory result with a per-line
+diagnostic list and <strong>commits nothing</strong>. Pass two, only if the user accepts, writes inside a
+single <code>BeginUpdate</code>/<code>EndUpdate</code> scope. Unknown field codes and unrecognised sections become
+<em>warnings on a report</em>, not exceptions. Add <code>!Account</code>, <code>!Type:Cat</code>, <code>!Type:Class</code> section
+handling. Show the user a summary before writing: "3,000 transactions, 14 lines not
+understood (listed), 2 accounts will be created".</p>
+<p><strong>Pros</strong>
+- Turns the single worst property of the importer — irrecoverable partial state — into a
+  non-event. This is the fix that matters; the section handling is secondary.
+- A parse-only pass is <strong>trivially unit-testable</strong> with no database at all. The current design
+  is untestable without a live <code>MyMoney</code> graph, which is why it has no tests.
+- 451 lines is small enough that a rewrite is a days-not-weeks task, and the field semantics
+  (the genuinely fiddly, knowledge-heavy part) are already correct and can be lifted wholesale.
+- Fixes Phase 6 OQ5, OQ6 and OQ7 in the same pass, because they all live in the code being
+  restructured.</p>
+<p><strong>Cons</strong>
+- QIF is an <em>under-specified</em> format. "Parse it all first" means deciding what to do with
+  constructs no spec pins down — two-digit years, <code>'</code> vs <code>/</code> date separators, locale-dependent
+  decimal separators, memo lines longer than the format allows. A strict parser rejects real
+  files; a lenient one silently misreads them. The current code sidesteps this by throwing,
+  which is at least loud.
+- Building the diagnostic report is most of the work, and it is UI work (D-15's shared dialog
+  base, D-18's export question) as much as parser work.
+- Investing in a format that is genuinely in decline.</p>
+<p><strong>Unintended consequences</strong>
+- A two-pass design needs the whole file in memory. Fine for 3,000 transactions; a 200 MB
+  twenty-year export from a shared business book is a different matter, and "parse all first"
+  quietly sets a file-size ceiling the streaming version doesn't have.
+- The moment the importer reports "14 lines not understood", users will ask what they were and
+  want to fix them. That's a <em>text-editing</em> affordance nobody planned, and the alternative is
+  a report the user can't act on — which is arguably worse than the current message, because
+  the current message at least gives a line number.
+- Making QIF the good, transactional, well-reported importer makes it <strong>better than the OFX and
+  CSV paths</strong>, which have their own issues. Users will notice and route everything through
+  QIF, which is the format the panel least wants to be the main door.</p>
+<h4 id="b-retire-qif-make-ofxqfx-and-csv-the-supported-migration-routes">B. Retire QIF; make OFX/QFX and CSV the supported migration routes<a class="headerlink" href="#b-retire-qif-make-ofxqfx-and-csv-the-supported-migration-routes" title="Permanent link">#</a></h4>
+<p>Delete <code>QifImporter</code>, remove the menu item and the <code>.qif</code> dispatch, and invest the same effort
+in the CSV mapping importer (which already has column mapping, sign flipping and saved
+mappings — P4-IMPORT-7…10) so that a CSV export from anything becomes a first-class route.
+Document the migration path explicitly.</p>
+<p><strong>Pros</strong>
+- Removes 451 lines of the least-safe code in the product plus four tracked open questions,
+  at a cost of zero.
+- CSV is the format <em>every</em> tool can emit, including modern Quicken, Excel, and every bank's
+  web export. The mapping importer already handles the hard part (columns differ per source).
+- Concentrates import investment where it also serves ongoing use, not just one-time migration.
+  A user imports CSV forever; they import QIF once.
+- Sidesteps D-25's format-sprawl problem instead of adding to it.</p>
+<p><strong>Cons</strong>
+- <strong>CSV loses structure QIF carries.</strong> Splits, transfers, cleared status, cheque numbers,
+  investment actions — QIF encodes all of these and the importer reconnects transfers across
+  accounts (P6-QIF-4), which CSV fundamentally cannot. Telling a user with twenty years of
+  split transactions to export CSV is telling them to lose their splits.
+- Removing the only route in for a format is irreversible in practice — nobody adds it back.
+- If the fork's owner has a QIF file in hand <em>right now</em>, this is the option that blocks them.</p>
+<p><strong>Unintended consequences</strong>
+- QIF's transfer reconnection (<code>Importer.FindMatchingTransfer</code>/<code>FindSplitTransfer</code>) lives on the
+  shared <code>Importer</code> base and is used by the QIF path. Deleting QIF orphans genuinely useful
+  matching logic that the CSV path does not currently call — so "delete QIF" quietly means
+  "delete transfer reconnection" unless someone rewires it, which nobody will notice until a
+  user's transfers come in as 2× unrelated transactions.
+- Opening balances (P6-QIF-5) arrive as real <code>Account.OpeningBalance</code> via QIF. Via CSV they'd
+  arrive as a transaction dated day one, which is a visibly different book.</p>
+<h4 id="c-keep-qif-but-make-it-non-destructive-the-cheap-way-import-into-a-scratch-book">C. Keep QIF, but make it non-destructive the cheap way: import into a scratch book<a class="headerlink" href="#c-keep-qif-but-make-it-non-destructive-the-cheap-way-import-into-a-scratch-book" title="Permanent link">#</a></h4>
+<p>Don't rewrite the parser. Instead, run the <em>existing</em> importer against a <strong>fresh, empty
+in-memory <code>MyMoney</code> graph</strong>, let it throw wherever it likes, and only merge the scratch graph
+into the user's real book if it completed. A throw costs the user nothing but a message.</p>
+<p><strong>Pros</strong>
+- Delivers the single most valuable property of option A — never leave the user's book in a
+  half-written state — for a fraction of the work, and without touching 451 lines of fiddly,
+  correct-today field handling.
+- The merge step already exists (it's the same identity/heuristic merge D-25 is about), so
+  this composes with whatever D-25 decides rather than competing with it.
+- Preserves every behaviour users may already depend on, including the quirks.
+- Reversible: if it turns out QIF is genuinely load-bearing, this is a clean base to then
+  rewrite on. If it turns out nobody uses it, nothing was over-invested.</p>
+<p><strong>Cons</strong>
+- Still throws on the first unknown line, so a file that is 90% valid still imports 0%. That's
+  <em>safer</em> than today but not <em>more capable</em> — the user with a Microsoft Money full export is
+  still stuck at line one.
+- Two <code>MyMoney</code> graphs alive at once has memory and event-wiring implications; the domain model
+  is not obviously reentrant in that way (<code>AttachmentManager</code>, <code>AttachmentWatcher</code> and the
+  settings singletons all assume one graph).
+- Feels like a workaround, because it is one. Someone will have to own the decision not to
+  finish the job.</p>
+<p><strong>Unintended consequences</strong>
+- A scratch graph with no attachment manager and no watcher attached is a <em>different</em>
+  environment from the real one. Any importer behaviour that depends on those (and
+  <code>AttachmentManager</code> subscribes to change events globally) behaves differently in the
+  scratch pass — a class of bug that only shows up in production.
+- If the scratch-graph pattern works, it becomes the obvious answer for OFX and CSV too, which
+  is good — but it also becomes a load-bearing architectural pattern that was adopted as a
+  shortcut, without the design attention a load-bearing pattern deserves.</p>
+<h3 id="recommendation_1">Recommendation<a class="headerlink" href="#recommendation_1" title="Permanent link">#</a></h3>
+<p><strong>C as the immediate move, with A as the target if — and only if — a real QIF file is actually
+on the critical path for this fork's migration.</strong> Not B.</p>
+<p>The argument that won: the panel separated two things the register bundles. "Is QIF <em>safe</em>"
+and "is QIF <em>capable</em>" are different questions with very different price tags. Unsafe is
+unacceptable and cheap to fix (C). Incapable is annoying and expensive to fix (A). Retiring it
+(B) fails on one concrete fact: <strong>CSV cannot carry splits or transfers</strong>, and a Quicken user
+with twenty years of history has both. That makes B a data-losing migration dressed as a
+simplification, and the panel would not recommend it for a product whose entire reason for
+existing in this fork is that migration.</p>
+<ul>
+<li><strong>Developer</strong>: C is maybe 100 lines and a careful look at what subscribes to <code>MyMoney</code>
+  change events. A is a genuine rewrite but a small one — 451 lines, and the field semantics
+  survive. Warns that the scratch-graph approach needs <code>BeginUpdate</code> on the <em>merge</em> step
+  regardless, so P6-ALL-1 gets satisfied either way.</li>
+<li><strong>Test Engineer</strong>: A is the only option that produces a testable unit (a parser with no
+  database). C is testable as an integration property — "throw mid-import leaves the book
+  byte-identical" — which is exactly the regression nobody can currently write. Wants that
+  test either way, and points out it can be written <em>against today's code as a failing test</em>
+  before anything changes.</li>
+<li><strong>Architect</strong>: sceptical of C becoming permanent. Accepts it on the condition that the
+  scratch-graph pattern is either promoted deliberately to all importers or confined
+  explicitly to QIF with a comment saying why. Drifting into it accidentally is how the
+  current mess accumulated.</li>
+<li><strong>UI/UX</strong>: the current failure mode — a message box naming a line number in a file the user
+  has never opened — is the worst possible output. Even without A's full report, C should
+  say <em>"nothing was changed"</em> prominently, because the user's first fear on seeing an import
+  error is "what did it half-do to my data". Answering that is most of the value.</li>
+<li><strong>Operations Engineer</strong>: C has no migration story at all, which is its main virtue. A needs
+  none either. B needs a release note explaining a removed capability, which for a
+  personal-finance app is the kind of note that makes people not upgrade.</li>
+<li><strong>Data Engine Expert</strong>: opts out. <em>"This is an in-memory transactionality question, not a
+  storage one — the writes all funnel through the same persistence layer whichever option
+  wins. Nothing to add."</em></li>
+<li><strong>Adversarial</strong>: "You are all assuming a QIF file exists." Modern Quicken (US, post-2018)
+  restricts QIF export to cash, asset and liability accounts — <strong>it will not export a checking
+  or brokerage account to QIF at all.</strong> If the owner is on current Quicken Classic, the QIF
+  door may already be nailed shut from the other side, and the actual migration route is
+  Quicken's own QXF, or per-account CSV, or the OFX/QFX files the bank provides. In that case
+  all three options are answering a question that isn't being asked. Strong point; the panel
+  could not resolve it without knowing the owner's Quicken version. It also cuts <em>against</em> B:
+  if QIF isn't the migration route, then QIF isn't urgent, and deleting it is equally
+  unurgent — C's cheapness is the right level of investment for something that isn't on the
+  critical path.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: none on direction, once the Adversarial point landed — it actually
+strengthened the case for C by lowering the stakes. The Architect's reservation about C
+becoming a permanent shortcut is recorded rather than resolved.</p>
+<p><strong>Panel flags:</strong> would benefit from <strong>hands-on Quicken-migration expertise</strong> — specifically,
+what the owner's Quicken version can actually export, and whether QIF is reachable at all.
+None of the seven roles can answer that from the codebase, and it materially changes the
+priority (though not the choice) here.</p>
+<h3 id="needs-your-decision_1">Needs your decision?<a class="headerlink" href="#needs-your-decision_1" title="Permanent link">#</a></h3>
+<p><strong>No on the engineering choice — yes on one input.</strong> The panel is confident recommending C
+over A and firmly against B. But <strong>please confirm what your Quicken version will export</strong>: if
+QIF is available and you intend to use it, A moves up the list; if it isn't, C is the whole
+answer and QIF stays a legacy convenience.</p>
+<hr />
+<h2 id="d-27-what-happens-when-an-imported-transaction-isnt-in-the-accounts-currency">D-27 — What happens when an imported transaction isn't in the account's currency?<a class="headerlink" href="#d-27-what-happens-when-an-imported-transaction-isnt-in-the-accounts-currency" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 6 OQ23 · <strong>Cluster:</strong> <code>import-export</code> · <em>Defect instances: #56</em></p>
+<h3 id="eli10_2">ELI10<a class="headerlink" href="#eli10_2" title="Permanent link">#</a></h3>
+<p>Your bank account is in dollars. One day the bank sends the program a record of a purchase
+you made in euros. What should the program do?</p>
+<p>Right now: <strong>nothing at all.</strong> It reads the "this is in euros" note, throws it away, and
+records the number as if it were dollars. Spend €50 and your dollar account goes down by 50
+dollars.</p>
+<p>There are two safety checks in the program written specifically to catch this. Neither one
+runs. One has had its whole body commented out with a note saying <em>"todo: how to support
+multi-currency properly"</em>. The other has its condition backwards in a way that guarantees it
+can never fire — it only complains about a currency if it has already complained about that
+currency before, and it only records "I've complained about this one" <em>inside</em> the complaint
+it can never reach. So the list starts empty and stays empty forever.</p>
+<p>Fixing those two checks is a straightforward bug and is already written down as issue #56.
+The decision isn't <em>whether</em> to fix them. The decision is <strong>what the fixed check should do</strong>,
+and there are four genuinely different answers:</p>
+<ol>
+<li><strong>Refuse.</strong> Don't import it; tell the user.</li>
+<li><strong>Import it, flag it.</strong> Bring it in at face value, but mark it so the user can see it's wrong
+   and fix it by hand.</li>
+<li><strong>Convert it.</strong> Use the exchange rate the program already stores and record the dollar
+   equivalent.</li>
+<li><strong>Remember what it really was.</strong> Store "this was €50, at this rate, on this day" — the truth
+   — and show dollars.</li>
+</ol>
+<p>The real-world consequence is not small. Option 3 without care produces a book that <em>looks</em>
+correct and is quietly wrong, because the rate the program has stored is today's rate, not the
+rate on the day of the purchase. Option 4 is the only one that matches what your bank
+statement actually says — and it's the only one that needs the program's records to grow a new
+field they've never had.</p>
+<h3 id="what-the-code-actually-does-correction-to-the-register-entry">What the code actually does (correction to the register entry)<a class="headerlink" href="#what-the-code-actually-does-correction-to-the-register-entry" title="Permanent link">#</a></h3>
+<p>The register says the fix could "store the transaction in its own currency (which the domain
+model's P1-CUR-<em> scenarios suggest it can represent)". </em><em>The panel's re-read says it cannot.</em>*</p>
+<ul>
+<li><code>Currency</code> lives on <strong><code>Account</code></strong> (<code>Money.cs:3010</code>), not on <code>Transaction</code>. <code>Transaction</code>
+  (<code>Money.cs:10888</code>), <code>Split</code> (<code>13870</code>) and <code>Investment</code> (<code>14433</code>) have no currency member at
+  all.</li>
+<li>P1-CUR-1…5 describe a <em>currency list</em>, <em>rates</em>, a <em>home currency for totals</em> and <em>formatting</em>.
+  They describe <strong>account-level</strong> currency with display-time normalisation
+  (<code>Account.GetNormalizedAmount</code>). They do not describe per-transaction currency.</li>
+<li>So option 4 is <strong>a schema change to the three largest tables in the product</strong>, not a
+  configuration of something already there. That materially changes its cost and moves it
+  into D-39's territory.</li>
+</ul>
+<p>Two further findings the register does not mention, both of which narrow the choice:</p>
+<ul>
+<li><strong><code>CURRATE</code> is never read.</strong> <code>ProcessCurrency</code> reads only <code>CURSYM</code>. The OFX record carries
+  the rate the institution used, right next to the symbol — the single most valuable piece of
+  data for any conversion option — and it is discarded.</li>
+<li><strong><code>ORIGCURRENCY</code> is never read, and it means the opposite of <code>CURRENCY</code>.</strong> In OFX, a
+  <code>&lt;CURRENCY&gt;</code> aggregate means <em>the amount is expressed in that currency</em> (conversion needed).
+  An <code>&lt;ORIGCURRENCY&gt;</code> aggregate means <em>the amount is already in the account's currency</em> and the
+  foreign currency is recorded for information only (no conversion needed, and converting
+  would be a double conversion). The code handles neither, so a fix that treats every currency
+  tag as "needs converting" will <strong>corrupt every <code>ORIGCURRENCY</code> transaction</strong> — which, for a
+  US card used abroad, is the <em>common</em> case. This is a live trap in front of option 3.</li>
+</ul>
+<h3 id="alternatives_2">Alternatives<a class="headerlink" href="#alternatives_2" title="Permanent link">#</a></h3>
+<h4 id="a-refuse-the-statement-name-the-problem">A. Refuse the statement, name the problem<a class="headerlink" href="#a-refuse-the-statement-name-the-problem" title="Permanent link">#</a></h4>
+<p>Restore <code>CheckUSD</code> as a real check against <code>Account.NonNullCurrency</code> (not hard-coded USD),
+wire an equivalent into the bank and card paths, and on mismatch add a real error row and skip
+that statement. Implement <code>ORIGCURRENCY</code> correctly so it is <em>not</em> treated as a mismatch.</p>
+<p><strong>Pros</strong>
+- Cannot produce a wrong number. For a personal-finance product, "I didn't import it" is
+  always recoverable; "I imported it wrong" may never be noticed.
+- Smallest correct change. Mostly restoring code that already exists in comment form.
+- The error-row plumbing (<code>DownloadData.AddError</code>) is already there and already surfaced in the
+  download results panel, so the user-facing half is free.</p>
+<p><strong>Cons</strong>
+- A user with a genuinely multi-currency account (a euro account at a US bank; a UK user whose
+  bank declares GBP against an account the user set up before adding currencies) is simply
+  blocked, with no path forward except editing the account's currency.
+- "Refuse" at <em>statement</em> granularity is coarse: one foreign transaction blocks the whole
+  month's download.</p>
+<p><strong>Unintended consequences</strong>
+- <code>Account.Currency</code> is frequently unset or defaulted on accounts created before the user
+  thought about currency — <code>FindCurrencyOrDefault</code> papers over it. Turning on a strict check
+  will surface that as a wave of "your statement is in USD but your account is in (nothing)"
+  errors on accounts that have worked fine for years. <strong>The check's first release will look
+  like a regression</strong> unless unset-currency accounts are treated as "adopt the statement's
+  currency" rather than "mismatch".
+- Refusing at the statement level interacts with the OFX download's own retry logic: a
+  permanently-refused statement may be re-requested every download, forever.</p>
+<h4 id="b-import-at-face-value-flag-the-transaction-for-the-user">B. Import at face value, flag the transaction for the user<a class="headerlink" href="#b-import-at-face-value-flag-the-transaction-for-the-user" title="Permanent link">#</a></h4>
+<p>Bring the transaction in unconverted, but mark it — a <code>TransactionFlags</code> bit, or reuse
+<code>Unaccepted</code> — and surface it with an explanation. Let the user decide: edit the amount, move
+the transaction, change the account's currency, or accept it.</p>
+<p><strong>Pros</strong>
+- Never blocks. The user's book stays in step with their bank, which is the whole point of
+  downloading.
+- Matches the product's existing philosophy for <em>everything else</em> it's unsure about:
+  <code>Unaccepted</code> already means "I brought this in, you should look at it" (P6-QIF-8, P6-ALL-2).
+  This is the consistent answer, not a new concept.
+- No schema change, no rate dependency, no conversion maths to get wrong.</p>
+<p><strong>Cons</strong>
+- The book is <em>temporarily wrong</em>, and the flag is the only thing saying so. A user who
+  bulk-accepts (which the UI makes easy) silently ratifies a bad number.
+- Account balances and every report are wrong until the user acts, and nothing stops them
+  reconciling in that state.</p>
+<p><strong>Unintended consequences</strong>
+- Flags are per-transaction; the <em>balance</em> is not. A flagged transaction poisons the account
+  balance, the net-worth report (D-21) and the reconciliation (P3-RECON-*) with no flag of
+  their own. The signal is attached to the wrong object for the damage it describes.
+- Reusing <code>Unaccepted</code> for this overloads a bit that already means "newly imported" — after
+  the first accept-all, there is no distinguishable state left. A dedicated flag is really
+  required, which makes this less cheap than it first looks.</p>
+<h4 id="c-convert-on-import-using-the-recorded-rate-and-keep-the-evidence">C. Convert on import using the recorded rate, and keep the evidence<a class="headerlink" href="#c-convert-on-import-using-the-recorded-rate-and-keep-the-evidence" title="Permanent link">#</a></h4>
+<p>Use the OFX's own <code>CURRATE</code> — the institution's rate, on the day, which the code currently
+discards — to convert, store the converted amount as the transaction amount, and record the
+original amount, original currency and rate used in the memo or a <code>TransactionExtra</code>. Fall
+back to B (flag, don't convert) when no <code>CURRATE</code> is present. Implement <code>ORIGCURRENCY</code> as
+"already converted, record only".</p>
+<p><strong>Pros</strong>
+- Produces the number the user's own statement shows, using the rate their own bank used. This
+  is the <em>correct</em> answer, not an approximation — and the data to do it is already in the file
+  being parsed.
+- No dependency on <code>Currency.Ratio</code>, which is the right call: D-4 establishes that <code>Ratio</code> is
+  dollar-anchored, ambiguous and <em>current</em>, so using it to convert a historical transaction is
+  wrong twice over.
+- <code>TransactionExtra</code> already exists (P1-TXN-15, P1-TAX-2/3) as a place to hang per-transaction
+  side data without a schema change to <code>Transaction</code> itself.</p>
+<p><strong>Cons</strong>
+- Only works when the institution supplies <code>CURRATE</code>. Many don't, so the fallback path is
+  mandatory and the behaviour is inconsistent across banks — the hardest kind of behaviour to
+  explain to a user.
+- Getting <code>CURRENCY</code> vs <code>ORIGCURRENCY</code> backwards produces a double conversion that looks
+  plausible and is very hard to spot. This is the highest-risk option to implement correctly.
+- Does nothing for QIF or CSV imports, which carry no rate at all.</p>
+<p><strong>Unintended consequences</strong>
+- A converted transaction is no longer reversible to what the bank said. If the user later
+  fixes their account currency, or the rate is found to be wrong, there is no clean undo —
+  the original is in a memo, which is free text. Storing evidence in a memo means <strong>the
+  evidence is editable and un-queryable</strong>, which will be regretted the first time someone
+  needs to audit it.
+- This quietly establishes that <em>transaction amounts are derived values</em>. Nothing else in the
+  product works that way, and reports that re-derive totals from amounts have no idea.</p>
+<h4 id="d-make-currency-a-property-of-the-transaction-the-real-model-fix">D. Make currency a property of the transaction (the real model fix)<a class="headerlink" href="#d-make-currency-a-property-of-the-transaction-the-real-model-fix" title="Permanent link">#</a></h4>
+<p>Add currency (and rate-at-time) to <code>Transaction</code>/<code>Split</code>/<code>Investment</code>, store what the bank
+actually said, and convert only at display and aggregation time via
+<code>Account.GetNormalizedAmount</code>'s existing normalisation path.</p>
+<p><strong>Pros</strong>
+- The only option that is <em>right</em> rather than <em>good enough</em>. The stored record matches the
+  statement; every derived view is a view.
+- Makes D-4 (what a currency ratio means) answerable rather than perpetually fudged, and makes
+  D-19 (what a mixed-currency total should say) implementable.
+- Every importer benefits, not just OFX.</p>
+<p><strong>Cons</strong>
+- Schema change on the three biggest tables, across SQLite, SQL Server, SQL CE, XML and CSV
+  stores. Lands on D-39 (schema upgrade) and D-35 (which engines survive) before it can start.
+- Every aggregation in the product — balances, reports, charts, reconciliation, tax — has to
+  learn that amounts have currencies. That's a wide blast radius through code the panel has
+  not audited.
+- Historical rates are needed to make it meaningful, and the product has no historical rate
+  store (<code>Currency.Ratio</code>/<code>LastRatio</code> is current-and-previous, nothing more).</p>
+<p><strong>Unintended consequences</strong>
+- Per-transaction currency makes <em>account</em>-level currency ambiguous rather than replacing it,
+  and the two will disagree. Every "what currency is this account in" question in the codebase
+  becomes "what currency is this account's <em>balance</em> in", which is a different and harder
+  question when the transactions disagree.
+- Rebuilding balances under mixed currencies means totals depend on when you ask, which breaks
+  the (currently safe) assumption that a reconciled balance is stable. Reconciliation (D-12,
+  P3-RECON-*) would need rethinking.</p>
+<h3 id="recommendation_2">Recommendation<a class="headerlink" href="#recommendation_2" title="Permanent link">#</a></h3>
+<p><strong>A as the immediate fix, with C's <code>ORIGCURRENCY</code> handling included as part of it, and D
+recorded as the right long-term model but explicitly deferred behind D-39 and D-4.</strong></p>
+<p>The reasoning that won: the panel started leaning toward C, because the rate is right there in
+the file and throwing it away is galling. The Adversarial Expert killed it for now, and the
+Data Engine Expert supplied the decisive detail. The argument:</p>
+<blockquote>
+<p>Option C requires getting <code>CURRENCY</code> vs <code>ORIGCURRENCY</code> exactly right, in a codebase with no
+OFX tests, in a file format where the common case (<code>ORIGCURRENCY</code> — a US card used abroad)
+is the one that must <em>not</em> be converted. Getting it backwards produces a double conversion
+that looks plausible on screen and is invisible in every report. The current bug at least
+produces an obviously wrong number the moment the user compares to their statement. <strong>A fix
+that can silently produce a subtly wrong number is worse than a bug that loudly produces an
+obviously wrong one.</strong></p>
+</blockquote>
+<p>So: fix the guards (that's #56), make them check the account's actual currency rather than
+hard-coded USD, wire them into the bank and card paths as well as investment, implement
+<code>ORIGCURRENCY</code> as "no mismatch, record only" — and on a genuine mismatch, <strong>refuse and
+explain</strong>, rather than guessing.</p>
+<ul>
+<li><strong>Data Engine Expert</strong> (fully in lane here): D is the only model that survives contact with
+  a real multi-currency user, and the panel should say so plainly rather than leave it implied.
+  But it is a three-table schema change plus an aggregation rewrite, and it cannot be scheduled
+  before D-39 has an answer. Also notes that <code>SqlMoney</code> (used for the SQL Server column
+  mappings throughout <code>Money.cs</code>) is a currency-blind fixed-point type — per-transaction
+  currency needs a companion column, not a smarter money type.</li>
+<li><strong>Architect</strong>: the deferral must be <em>written down as a deferral</em>, not left as silence. A
+  refuse-on-mismatch check that nobody records as temporary becomes the permanent answer by
+  default, and then multi-currency is "not supported" forever without anyone deciding it.</li>
+<li><strong>Developer</strong>: A is small — uncomment, generalise USD to <code>account.NonNullCurrency</code>, add the
+  two missing call sites, invert the <code>currencyErrors</code> condition. Half a day. C is two days and
+  a week of nerves.</li>
+<li><strong>Test Engineer</strong>: A is testable today — feed <code>ProcessBankResponse</code> an OFX fragment with a
+  mismatched <code>CURDEF</code> and assert an error row. C needs a test matrix of
+  <code>CURRENCY</code>/<code>ORIGCURRENCY</code> × present/absent <code>CURRATE</code> × bank/card/investment that nobody will
+  write. Strongly prefers the option that can be verified this week.</li>
+<li><strong>Operations Engineer</strong>: flags the unset-currency wave as the real deployment risk of A —
+  accounts with no currency set must be treated as matching, or the first release of this fix
+  will look like a mass import failure. Wants that behaviour explicit in the fix, not emergent.</li>
+<li><strong>UI/UX</strong>: "refuse" must not mean a silent skip. The download results panel already has an
+  error row concept; the message should say <em>which</em> currency, <em>which</em> account, and what the
+  user can do (set the account's currency, or import manually). A refusal the user can't act
+  on is a dead end.</li>
+<li><strong>Adversarial</strong>: asked whether a single-user, US-based, dollar-denominated owner should spend
+  anything here at all. Conceded the answer is yes, but only at option A's price — because the
+  current code doesn't just fail to <em>support</em> foreign currency, it silently produces wrong
+  balances, and that's a correctness bug regardless of whether the feature is wanted.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: the Data Engine Expert would prefer D scheduled rather than merely
+recorded, and considers "deferred behind D-39" a polite way of saying never. Noted rather than
+resolved.</p>
+<h3 id="needs-your-decision_2">Needs your decision?<a class="headerlink" href="#needs-your-decision_2" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> The panel is confident. Fix the guards, refuse on genuine mismatch, handle
+<code>ORIGCURRENCY</code>, treat unset account currency as a match, and write the per-transaction-currency
+model down as a deferred decision rather than an omission. The only thing you might overrule is
+whether to spend anything here at all — and the panel's answer is that this is a
+wrong-numbers bug, not a missing feature, so yes.</p>
+<hr />
+<h2 id="d-44-bring-scanning-back-or-delete-it">D-44 — Bring scanning back, or delete it?<a class="headerlink" href="#d-44-bring-scanning-back-or-delete-it" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 4 OQ22 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<h3 id="eli10_3">ELI10<a class="headerlink" href="#eli10_3" title="Permanent link">#</a></h3>
+<p>There's a window in the program for keeping receipts attached to a purchase. Originally, it
+had a <strong>Scan</strong> button: put a receipt in your scanner, press the button, and the picture
+lands straight on the transaction.</p>
+<p>That button isn't there any more. But it hasn't been <em>removed</em> — it's been <strong>commented out</strong>,
+which means the code is still sitting in the file with a mark in front of every line saying
+"ignore this". The window's own description still calls it "ScanDialog". And the part that
+translates scanner errors into English — <em>"paper jam"</em>, <em>"cover open"</em>, <em>"lamp off"</em> — is
+still live, compiled code that nothing calls.</p>
+<p>So the program is carrying around the remains of a feature. The question is whether to bring
+it back, replace it with something more modern, or finally sweep it out.</p>
+<p>The honest real-world context: almost nobody scans receipts on a flatbed any more. They
+photograph them with a phone, and the photo shows up in a cloud folder. If the program could
+just <em>watch a folder</em> and pick up whatever lands there, that would cover what scanning used
+to do and a lot more besides — and, as it happens, the program <strong>already watches folders</strong>
+for exactly this purpose.</p>
+<h3 id="what-the-code-actually-does_1">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_1" title="Permanent link">#</a></h3>
+<ul>
+<li>The commented block in <code>AttachmentDialog.xaml.cs</code> (lines ~264–345) covers scanner selection
+  (<code>ShowSelectDevice</code>), acquisition (<code>ShowAcquireImage</code>), transfer (<code>ShowTransfer</code>) and error
+  handling. The XAML button is commented out at line 84.</li>
+<li><code>GetWiaErrorMessage</code> (line 352) and <code>enum WiaErrorCode</code> (line 1450) are <strong>live, compiled,
+  uncalled</strong> code.</li>
+<li>All <code>WIA.*</code> references are <em>inside comments only</em>, so the <strong>COM interop reference has already
+  been removed from the project</strong>. Reviving means re-adding a COM dependency, not
+  uncommenting — which is a much bigger job than it looks, and a fussy one under .NET 10.</li>
+<li>The public entry point is still named <strong><code>ScanAttachments</code></strong> (line 720) and is the product's
+  actual "open the attachment window for this transaction" API. The name is the last live
+  trace of the original intent.</li>
+<li><strong><code>AttachmentWatcher</code> already watches the attachment directory</strong> (P8-ATT-7) and picks up
+  files dropped in from outside, in the background, and sets the paperclip. The
+  "watch a folder" capability is not hypothetical here — it is the thing that already works.</li>
+</ul>
+<h3 id="alternatives_3">Alternatives<a class="headerlink" href="#alternatives_3" title="Permanent link">#</a></h3>
+<h4 id="a-revive-wia-scanning">A. Revive WIA scanning<a class="headerlink" href="#a-revive-wia-scanning" title="Permanent link">#</a></h4>
+<p>Re-add the COM interop, uncomment, modernise the async handling, test against real hardware.</p>
+<p><strong>Pros</strong>
+- The intent is fully written down; the flow is understood.
+- For a user who <em>does</em> have a document scanner (and people who keep twenty years of financial
+  records disproportionately do), it is the fastest possible path from paper to filed.
+- Nothing else in the redesign is blocked by it.</p>
+<p><strong>Cons</strong>
+- WIA interop is genuinely unpleasant: COM apartment threading, driver-specific behaviour,
+  <code>ShowSelectDevice</code> blocking the UI thread, and error modes (the very enum still sitting in
+  the file) that only appear with hardware attached.
+- <strong>Untestable in CI.</strong> No scanner, no test. Every FlaUI test in this repo runs unattended
+  (per the project's own standing rule); a feature that requires hardware is a permanent hole
+  in the suite.
+- Re-adds a native dependency to an app that currently has none of consequence, which
+  complicates packaging (ClickOnce, <code>MyMoneyPackage.sln</code>) and platform targeting.</p>
+<p><strong>Unintended consequences</strong>
+- COM interop in a WPF app pins threading assumptions that the redesign's async/MVVM direction
+  (D-2's view-state question) will want to move away from. Reviving it now buys a constraint
+  the redesign is trying to shed.
+- One hardware-dependent feature in the product sets a precedent: the next request is TWAIN
+  support for older scanners, then multi-page feed handling, then OCR. Scanning is a doorway
+  to a scope the product has no business being in.</p>
+<h4 id="b-replace-it-with-a-watch-folder-import-from-folder-flow">B. Replace it with a watch-folder / import-from-folder flow<a class="headerlink" href="#b-replace-it-with-a-watch-folder-import-from-folder-flow" title="Permanent link">#</a></h4>
+<p>Let the user nominate one or more inbox folders (phone-sync folder, scanner's output folder,
+Downloads). New files appearing there show up in the attachment window as "unfiled paperwork"
+that can be dragged onto a transaction — or, better, the product proposes matches by date and
+amount if the file name contains them.</p>
+<p><strong>Pros</strong>
+- Covers scanning (every scanner writes to a folder), phone cameras, email attachments saved
+  to disk, and bank PDFs — with one mechanism.
+- <strong>Mostly already built.</strong> <code>AttachmentWatcher</code> does the watching; <code>AttachmentManager</code> does the
+  filing; the P8-ATT-7 background scan already turns files-on-disk into paperclips. What's
+  missing is the <em>inbox</em> concept and the UI to triage it.
+- Fully testable: a test drops a file in a folder and asserts what happens. No hardware.
+- Aligns perfectly with P8-ATT-2's deliberate "your documents are ordinary files" property.</p>
+<p><strong>Cons</strong>
+- The "unfiled paperwork" inbox is net-new UI, and it's a surface with real design work in it
+  (what does a triage queue look like in Fluent? how does the user dismiss something that
+  isn't paperwork?).
+- Watching arbitrary user folders is more invasive than watching the app's own directory —
+  permissions, network drives, cloud-sync placeholder files that aren't really there yet
+  (OneDrive Files On-Demand will hand you a 0-byte reparse point).
+- Doesn't help the user standing at a scanner who wants one click.</p>
+<p><strong>Unintended consequences</strong>
+- A watch folder outside the product's own tree means the product now reacts to files it
+  doesn't own. If a sync client rewrites a file mid-scan, or an antivirus quarantines one, the
+  product's watcher is the thing that notices — and <code>AttachmentWatcher</code>'s current error
+  handling is a background task with no user-visible failure path (Phase 8 OQ23's "background
+  failures are swallowed completely").
+- Auto-proposing matches by date and amount is duplicate-detection by another name, which
+  collides with D-12's decision about when duplicate detection should run.</p>
+<h4 id="c-delete-the-dead-block-keep-the-entry-point-ship-neither">C. Delete the dead block, keep the entry point, ship neither<a class="headerlink" href="#c-delete-the-dead-block-keep-the-entry-point-ship-neither" title="Permanent link">#</a></h4>
+<p>Remove the commented code, <code>GetWiaErrorMessage</code> and <code>WiaErrorCode</code>; rename <code>ScanAttachments</code>
+to something honest; fix the class comment. Rely on drag-and-drop (which works) and the
+existing background watcher (which works). Revisit only if asked.</p>
+<p><strong>Pros</strong>
+- Free, immediate, and removes a standing source of confusion for anyone reading the file —
+  including whoever fixes #54, which lives in this exact file.
+- The capability gap is genuinely small: drag-and-drop from any folder already works, and the
+  watcher already picks up files copied in.
+- Leaves B available later at no extra cost; deleting dead WIA code does not foreclose a
+  watch-folder feature.</p>
+<p><strong>Cons</strong>
+- Discards a written-down intent that someone once cared about.
+- Does nothing to improve the paperwork workflow, which is the <em>point</em> of the attachments area.</p>
+<p><strong>Unintended consequences</strong>
+- Deleting <code>GetWiaErrorMessage</code> removes the only evidence in the codebase that scanning was
+  ever contemplated. That's mostly good, but it means the decision has to be recorded
+  <em>somewhere</em> (this document) or it will be rediscovered and re-debated.</p>
+<h3 id="recommendation_3">Recommendation<a class="headerlink" href="#recommendation_3" title="Permanent link">#</a></h3>
+<p><strong>C now, B as the actual feature, decisively not A.</strong></p>
+<p>The reasoning that won: the panel's re-read found the decisive fact — <strong>the COM reference is
+already gone</strong>, so "revive it" is not uncommenting, it is re-integrating a native dependency.
+That reframes A from "cheap revival" (as the register understandably reads it) to "new native
+integration, untestable in CI, for a declining use case". Meanwhile B turns out to be <em>mostly
+already implemented</em>: the watcher exists, the filing exists, the paperclip-from-disk path
+exists. The gap between where the product is and where B lands is one inbox concept and one
+triage surface.</p>
+<p>Do C immediately — it costs nothing, it cleans the file that #54's fix has to touch anyway,
+and it removes the misleading class comment. Then treat B as the real attachments feature
+whenever the attachments area is next opened.</p>
+<ul>
+<li><strong>Developer</strong>: A is a week and a permanent CI hole. C is twenty minutes. B is a few days on
+  top of machinery that already exists. The <code>ScanAttachments</code> rename should happen with C —
+  it is the single most misleading identifier in the attachments code.</li>
+<li><strong>Test Engineer</strong>: decisive. A produces a feature no unattended test can exercise, which in
+  this repo (every FlaUI suite runs unattended) means a feature with zero regression coverage
+  in a file that already has a HIGH-priority data-loss bug. Will not endorse A.</li>
+<li><strong>UI/UX</strong>: an "unfiled paperwork" inbox is a better product than a scan button even for
+  users who own scanners — it's where the scan <em>lands</em>. Modern Fluent patterns support this
+  well (a <code>ListView</code> triage pane with drag targets). Notes that phone→cloud→folder is how
+  receipts actually reach a desktop in 2026, and a scan button doesn't participate in that at
+  all.</li>
+<li><strong>Operations Engineer</strong>: A affects packaging (COM registration, bitness) and the ClickOnce
+  story. C reduces the binary. B adds a settings surface for inbox folders and a permissions
+  question on network/cloud paths — manageable, but real. Flags OneDrive Files On-Demand
+  placeholders as a concrete hazard for B: <code>File.Exists</code> is true, the bytes are not local, and
+  reading blocks on network.</li>
+<li><strong>Architect</strong>: B generalises correctly — "paperwork arrives from outside" is the real
+  concept, and scanning is one instance of it. Supports C-then-B. Warns that the inbox must not
+  become a second, parallel attachment store; it is a staging area with a strict lifecycle, or
+  it becomes the place documents go to be forgotten.</li>
+<li><strong>Data Engine Expert</strong>: opts out. <em>"Attachments live on the filesystem beside the data file,
+  by design (P8-ATT-2). Nothing here touches storage. Nothing to add."</em></li>
+<li><strong>Adversarial</strong>: pushed the simplest answer nobody had raised — <em>"drag-and-drop already
+  works. Is an inbox actually better than dragging a file from Explorer onto a transaction?"</em>
+  The panel's answer: for one receipt, no. For the twenty that accumulate between sessions,
+  yes — because the user has to remember which ones they've already filed, and an inbox
+  remembers for them. Accepted, but with the caveat that B should be judged on whether it
+  beats Explorer, and should not be built if it can't.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: none. This was the panel's fastest consensus.</p>
+<h3 id="needs-your-decision_3">Needs your decision?<a class="headerlink" href="#needs-your-decision_3" title="Permanent link">#</a></h3>
+<p><strong>No for C — just do it.</strong> <strong>Mildly yes for B</strong>: whether an unfiled-paperwork inbox is worth
+building depends on how much paperwork you actually intend to keep in this product. If
+attachments are a nice-to-have for you, C alone is the complete answer and B should not be
+built.</p>
+<hr />
+<h2 id="d-45-what-happens-to-paperwork-when-its-transaction-is-deleted">D-45 — What happens to paperwork when its transaction is deleted?<a class="headerlink" href="#d-45-what-happens-to-paperwork-when-its-transaction-is-deleted" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 8 OQ13 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<h3 id="eli10_4">ELI10<a class="headerlink" href="#eli10_4" title="Permanent link">#</a></h3>
+<p>You've got a purchase in your book, and you've attached the receipt to it — a photo, or the
+PDF the shop emailed you. That receipt is the only copy you have.</p>
+<p>Now you delete the purchase. Maybe it was a duplicate. Maybe you fat-fingered a row and hit
+Delete. Maybe you're tidying up.</p>
+<p><strong>The receipt is deleted too. Immediately. Permanently. With no warning, and not even into the
+Recycle Bin.</strong></p>
+<p>The person who wrote that code knew it wasn't right — there's a note in the file that says
+<em>"todo: would be nice to warn the user they are losing them…"</em>. The note appears <strong>twice</strong>,
+in two different places, because the same thing happens in two different code paths.</p>
+<p>Here's what makes it genuinely uncomfortable. Deleting a transaction is one of the easiest,
+lowest-stakes things you can do in the program — one key. And in the program's own internal
+bookkeeping, the deleted transaction isn't <em>really</em> gone yet: it's marked "deleted" and
+cleaned up later, which is how programs usually leave themselves room to change their mind.
+But the <em>file</em> is gone the instant you press the key. The cheap, reversible action has an
+expensive, irreversible side-effect bolted to it.</p>
+<p>So: should deleting a transaction ask first? Should the receipt go somewhere you can get it
+back from? Or should receipts simply stop being deleted at all?</p>
+<h3 id="what-the-code-actually-does_2">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_2" title="Permanent link">#</a></h3>
+<ul>
+<li><code>AttachmentManager.OnMoneyChanged</code> (line ~150) and <code>OnTransactionsChanged</code> (line ~193) both
+  call <code>DeleteAttachments(t)</code> on <code>ChangeType.Deleted</code>, each carrying the same todo comment.
+  <strong>Both handlers are subscribed</strong>, so for a transaction reaching both paths the deletion runs
+  twice (harmless today, because the second pass finds nothing — but it means two places to
+  fix, and one may be missed).</li>
+<li><code>DeleteAttachments</code> → <code>TempFilesManager.DeleteFile</code> → <strong><code>File.Delete</code></strong>. Not <code>Recycle</code>. The
+  only softening is that a <em>locked</em> file is queued for retry (P8-ATT-9) — i.e. the one case
+  where the file survives is the case where Windows wouldn't let it die.</li>
+<li><strong><code>ChangeType.Deleted</code> is a soft delete in this model.</strong> Per the project's own notes,
+  <code>PersistentObject.OnDelete()</code> flips the change type and fires an event; actual removal from
+  the container happens on save. So the domain object is in a recoverable state at exactly the
+  moment the file becomes unrecoverable.</li>
+<li>This fires on <strong>every</strong> <code>Deleted</code> change — including deletions from an import rollback, a
+  merge, or any future bulk operation. Nothing distinguishes "the user pressed Delete on this
+  row" from "the engine removed this during a batch".</li>
+</ul>
+<p>That last point is the one the panel considers most serious, and the register does not raise
+it: <strong>the trigger is a model event, not a user action.</strong> Any code path that deletes
+transactions — now or in future — destroys files as a side effect, whether or not a human
+intended a deletion.</p>
+<h3 id="alternatives_4">Alternatives<a class="headerlink" href="#alternatives_4" title="Permanent link">#</a></h3>
+<h4 id="a-warn-and-confirm">A. Warn and confirm<a class="headerlink" href="#a-warn-and-confirm" title="Permanent link">#</a></h4>
+<p>On deleting a transaction that has attachments, show a confirmation naming the files.</p>
+<p><strong>Pros</strong>
+- Simple, obvious, and directly addresses the asymmetry: an irreversible consequence gets an
+  interception.
+- No storage changes, no lifecycle to manage.</p>
+<p><strong>Cons</strong>
+- <strong>Makes a common action heavier for a rare consequence.</strong> Most deleted transactions have no
+  attachments — but the user who <em>does</em> hit the dialog is mid-cleanup, deleting several rows,
+  and will click through it.
+- Multi-row delete either produces N dialogs or one vague one.
+- Does nothing about the non-user-initiated paths, where there is no one to ask. A confirmation
+  dialog raised from a background merge is worse than no dialog.</p>
+<p><strong>Unintended consequences</strong>
+- A confirmation implies a choice, so the dialog needs a "delete the transaction but keep the
+  files" option — and if you keep them, they are now orphaned files that nothing references
+  and nothing will ever clean up. <strong>The dialog creates the orphan problem that option B is
+  designed to manage</strong>, without any of B's management.
+- Modal dialogs from model-change events are exactly the pattern behind Phase 8 OQ3 ("a
+  question asked from a background thread answers itself"). This would add another instance of
+  a known-broken pattern.</p>
+<h4 id="b-orphan-the-files-into-a-holding-area-with-a-recoverable-window">B. Orphan the files into a holding area with a recoverable window<a class="headerlink" href="#b-orphan-the-files-into-a-holding-area-with-a-recoverable-window" title="Permanent link">#</a></h4>
+<p>Move attachments of deleted transactions into a <code>.Attachments\.deleted\&lt;transaction-id&gt;\</code>
+folder (or similar), with a timestamp. Sweep anything older than N days on startup, the same
+way <code>TempFilesManager</code> already sweeps. Offer no UI at first — the folder <em>is</em> the UI, which is
+consistent with P8-ATT-2's "your documents are ordinary files you can find in Explorer".</p>
+<p><strong>Pros</strong>
+- Zero friction: nothing asks, nothing blocks, nothing changes for the 95% of deletions with
+  no attachments.
+- Genuinely recoverable, by the user, with Explorer, which is the product's stated philosophy
+  for documents.
+- <strong>Works for non-user-initiated deletions too</strong> — the merge path, the import rollback,
+  anything. It is a property of the deletion, not of the UI that triggered it.
+- Nearly free to build: <code>TempFilesManager</code> already owns "files to deal with later, including
+  across restarts". This is a move instead of a delete, plus an age-based sweep.</p>
+<p><strong>Cons</strong>
+- Silent recovery is only discoverable if the user knows the folder exists. Without any UI,
+  a user who deletes a receipt by accident and doesn't know about <code>.deleted</code> experiences it as
+  the current behaviour.
+- Disk grows. For image-heavy users with a retention window, meaningfully.
+- The sweep is a <em>second</em> place that deletes files permanently, and it runs unattended.</p>
+<p><strong>Unintended consequences</strong>
+- A <code>.deleted</code> folder inside the attachments tree will be <strong>picked up by <code>AttachmentWatcher</code>'s
+  directory scan</strong> (P8-ATT-7) unless explicitly excluded — which would set paperclips on
+  transactions from files that were supposed to be gone, and possibly re-associate them by id.
+  This is a real, specific trap, not a hypothetical.
+- Backups (D-50) and the "move my attachments folder" flow (P8-ATT-4) both have to know to
+  include or skip the holding area, and neither currently has a concept of an excluded
+  subtree.
+- It changes the meaning of "delete" from "gone" to "gone for 30 days", which for a user who
+  deleted something <em>because</em> it was sensitive is a privacy surprise. That interacts with D-43
+  (what "password-protect my file" promises) — encrypted book, unencrypted deleted receipts.</p>
+<h4 id="c-stop-deleting-attachments-on-transaction-delete-entirely-sweep-unreferenced-files-on-demand">C. Stop deleting attachments on transaction delete entirely; sweep unreferenced files on demand<a class="headerlink" href="#c-stop-deleting-attachments-on-transaction-delete-entirely-sweep-unreferenced-files-on-demand" title="Permanent link">#</a></h4>
+<p>Decouple the two. Deleting a transaction deletes the transaction. Attachments become garbage
+when nothing references them, and a <em>user-initiated</em> "clean up unreferenced documents" action
+(with a preview of what it will remove) collects them.</p>
+<p><strong>Pros</strong>
+- The clean architectural answer: files have their own lifecycle and are not a side-effect of
+  a domain event. Removes the model-event trigger entirely, which is the root problem.
+- No confirmations, no retention windows, no hidden folders.
+- The cleanup action is a place where the user can <em>see</em> what's unreferenced before agreeing,
+  which is far better information than a confirmation at delete time.</p>
+<p><strong>Cons</strong>
+- Unreferenced files accumulate indefinitely for users who never run the cleanup — and those
+  are the same users who will never find it.
+- Requires a reliable "is this file referenced" answer. Today, association is by
+  <strong>filename-encoded transaction id</strong> in a per-account folder, so an orphan is detectable —
+  but only if account folders are unambiguous, which <strong>D-46 says they are not</strong>. Two accounts
+  colliding into one folder means a file may look unreferenced in one account's view and
+  referenced in the other's. <strong>C is not safely implementable until D-46 is resolved.</strong>
+- A cleanup that can delete the wrong file because of a folder collision is worse than never
+  cleaning up.</p>
+<p><strong>Unintended consequences</strong>
+- Re-creating a transaction with the same id (which the merge path can do) would silently
+  re-adopt the old attachments. Sometimes delightful, sometimes very wrong.
+- A "clean up unreferenced documents" command is a destructive bulk action, which is a new
+  category for this product and needs the undo story (D-49) that doesn't exist.</p>
+<h3 id="recommendation_4">Recommendation<a class="headerlink" href="#recommendation_4" title="Permanent link">#</a></h3>
+<p><strong>B, with the <code>.deleted</code> folder explicitly excluded from <code>AttachmentWatcher</code>'s scan, and a
+minimal discoverability affordance.</strong> The panel considered this the clearest call of the eight.</p>
+<p>The reasoning that won: the register frames the choice as warn / orphan / defer-cleanup, and
+the panel's re-read added the fact that settles it — <strong>the deletion is triggered by a model
+change event, not by a user gesture.</strong> That eliminates A as a complete answer, because a
+confirmation can only intercept the paths where a user is present, and the dangerous paths
+(merge, rollback, bulk) are exactly the ones where they aren't. It also weakens C, because C's
+correctness depends on D-46, which is unresolved.</p>
+<p>B is the only option that is a property of the <em>deletion</em> rather than of the <em>UI</em>, and it is
+the cheapest to build because <code>TempFilesManager</code> already implements the hard part (a durable,
+cross-restart list of files to deal with later).</p>
+<p>On discoverability, the panel split the difference: no dialog at delete time, but the
+transaction-delete status message should say <em>"Transaction deleted (2 documents kept for 30
+days)"</em> when attachments were involved. That is a passive, non-blocking mention that costs
+nothing and makes the folder findable — and it fits whatever D-5 decides the status model is.</p>
+<ul>
+<li><strong>Architect</strong>: B is a compromise, and says so. C is the architecturally correct answer and
+  the panel should record that B is a stepping stone to it, not a destination. Once D-46 lands
+  and folder identity is unambiguous, the <code>.deleted</code> sweep and the unreferenced-file collector
+  are the same machinery.</li>
+<li><strong>Developer</strong>: B is a <code>File.Move</code> instead of a <code>File.Delete</code>, plus a startup sweep modelled
+  on the one <code>TempFilesManager</code> already runs. Under a day. Emphasises that the watcher
+  exclusion is <strong>not optional</strong> — without it, the feature actively creates phantom paperclips.</li>
+<li><strong>Test Engineer</strong>: B is the most testable of the three — delete a transaction with an
+  attachment, assert the file moved rather than vanished, assert the watcher ignores it, assert
+  the sweep removes it past the window (with an injectable clock). A is the least testable: a
+  modal raised from a model event is precisely the thing the project's own <code>AppCrashGuard</code>
+  notes were written about. Asks that the "two handlers, same fix" duplication be collapsed
+  into one code path as part of the change, so there is one place to test.</li>
+<li><strong>UI/UX</strong>: strongly against A. A confirmation dialog on the product's cheapest action
+  degrades the whole register's feel, and users learn to dismiss it within a week — at which
+  point it provides no protection and costs a keystroke forever. Supports the passive status
+  message. Would eventually like a "Recently removed documents" view, but not as part of this.</li>
+<li><strong>Operations Engineer</strong>: retention window must be a setting with a sane default (30 days),
+  and the sweep must be resilient to the folder being on a cloud-synced path. Notes B
+  interacts with backup (D-50): a backup taken mid-window contains deleted documents, which
+  is either a feature or a surprise depending on the user.</li>
+<li><strong>Data Engine Expert</strong>: opts out, with one observation. <em>"Worth noting that the domain's
+  delete is soft and the file's delete is hard — the transaction is recoverable at the moment
+  the file isn't. If a future redesign makes the domain delete recoverable in the UI (D-49's
+  undo), option B is the only one of the three that lets the attachment come back with it.
+  Otherwise, nothing to add on storage."</em></li>
+<li><strong>Adversarial</strong>: asked whether anyone deletes transactions that have attachments often enough
+  to justify any of this. Then answered their own question against themselves: the frequency
+  is irrelevant, because the cost is unbounded — a single lost receipt for a tax-deductible
+  expense is a real financial loss, and the product currently offers no recovery at any price.
+  Also raised the privacy angle on B (deleted-but-retained documents in an otherwise-encrypted
+  book) and asked that it be recorded as a known trade-off rather than discovered later.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: the Architect regards B as a compromise rather than the answer, and
+wants C's direction recorded as the target. Not a dispute about what to build now.</p>
+<h3 id="needs-your-decision_4">Needs your decision?<a class="headerlink" href="#needs-your-decision_4" title="Permanent link">#</a></h3>
+<p><strong>No.</strong> The panel is confident recommending B. The one thing you might want to set is the
+retention window's default (30 days proposed) and whether deleted-document retention is
+acceptable in a book you may password-protect (D-43).</p>
+<hr />
+<h2 id="d-46-file-documents-by-account-name-or-by-account-id">D-46 — File documents by account name or by account id?<a class="headerlink" href="#d-46-file-documents-by-account-name-or-by-account-id" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 8 OQ14 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<h3 id="eli10_5">ELI10<a class="headerlink" href="#eli10_5" title="Permanent link">#</a></h3>
+<p>Your receipts and bank statements aren't stored <em>inside</em> the program's file — they're kept in
+ordinary folders sitting next to it, one folder per account. That's deliberate and genuinely
+useful: you can open Explorer, click into "Visa", and see your paperwork like any other
+files.</p>
+<p>The folders are named after the accounts. And there's the problem, in two parts.</p>
+<p><strong>Part one:</strong> Windows won't allow certain characters in folder names — <code>:</code>, <code>/</code>, <code>\</code> and a
+few others. So the program strips them out. That means an account called <code>Visa: Joint</code> and an
+account called <code>Visa / Joint</code> both become a folder called <code>Visa Joint</code>. Two different accounts,
+one folder, everything mixed together. And because documents inside a folder are matched to
+transactions by number, and both accounts have their own numbering, paperwork from one account
+can attach itself to a transaction in the other.</p>
+<p><strong>Part two:</strong> the program lets you have two accounts with <em>exactly</em> the same name. For bank
+statements, it doesn't even use the folder — it keeps a list in memory filed under the raw
+name — so two identically-named accounts share one list outright.</p>
+<p>The obvious fix is to name folders after the account's internal number instead — <code>17</code> instead
+of <code>Visa Joint</code>. Collisions become impossible. But then you open Explorer and see a row of
+numbered folders, and the "you can find your own documents" promise is gone.</p>
+<p>So it's a straight trade: <strong>a name a human can read</strong>, or <strong>a name that can't collide</strong>. Or
+some third thing that gets both.</p>
+<h3 id="what-the-code-actually-does_3">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_3" title="Permanent link">#</a></h3>
+<ul>
+<li>Both <code>AttachmentManager</code> and <code>StatementManager</code> build paths from
+  <code>NativeMethods.GetValidFileName(account.Name)</code>.</li>
+<li>Account renames are handled (<code>AttachmentWatcher.OnRenameAccount</code> with a remembered
+  original-name map; <code>StatementManager.OnRenameAccountFolder</code> plus <code>UpdateBundledPointers</code>).
+  <strong>This machinery exists only because folders are named after a mutable property</strong>, and it is
+  a meaningful fraction of the complexity in both managers.</li>
+<li><code>StatementManager</code> additionally keys its in-memory index by the raw (unsanitised) account
+  name — so its collision surface is different from, and wider than, the folder's.</li>
+<li>Within a folder, a document is matched to a transaction by <strong>id encoded in the filename</strong>, so
+  a folder collision is not merely cosmetic — it produces cross-account misattribution.</li>
+<li><code>StatementManager</code>'s bundled-statement feature (P8-STMT-4) stores <strong>relative paths from one
+  account's folder into another's</strong>, which means folder names are embedded in stored data, not
+  just used at runtime. Renaming folders has to repair those pointers — and any change to the
+  naming scheme has to migrate them.</li>
+</ul>
+<p>That last point is the migration cost nobody has priced: the folder name is not purely
+derived, it is <em>referenced</em>.</p>
+<h3 id="alternatives_5">Alternatives<a class="headerlink" href="#alternatives_5" title="Permanent link">#</a></h3>
+<h4 id="a-name-folders-by-account-id">A. Name folders by account id<a class="headerlink" href="#a-name-folders-by-account-id" title="Permanent link">#</a></h4>
+<p><code>&lt;database&gt;.Attachments\17\</code>, <code>&lt;database&gt;.Statements\17\</code>.</p>
+<p><strong>Pros</strong>
+- Eliminates the entire collision class — stripped-character collisions, duplicate names,
+  and the statement index's raw-name keying — in one change.
+- <strong>Deletes the rename machinery.</strong> Ids don't change, so <code>OnRenameAccount</code>, the original-name
+  map, <code>OnRenameAccountFolder</code> and <code>UpdateBundledPointers</code> all become unnecessary. That is a
+  real simplification of two of the more intricate classes in the product, and it removes the
+  window during which a rename can be interrupted half-done.
+- Makes bundled-statement relative paths stable forever.
+- Trivially testable.</p>
+<p><strong>Cons</strong>
+- Breaks P8-ATT-3's stated value — <em>"a user looking at the files directly can tell which
+  account a document belongs to"</em> — which the catalog explicitly records as deliberate.
+- A user who loses or corrupts their database file is left with a tree of numbered folders and
+  no way to know what they contain. Today, the folder names <em>are</em> a recovery aid.
+- Migration: every existing user's folders have to be renamed, and every stored bundled-path
+  rewritten, on first run of the new version. That is a filesystem migration with no
+  transaction around it.</p>
+<p><strong>Unintended consequences</strong>
+- <code>Account.Id</code> is an internal surrogate key. Making it a <strong>user-visible filesystem path</strong>
+  promotes it to part of the product's external contract — it can never be renumbered, and any
+  future "rebuild the database" or "merge two books" operation that reassigns ids (which
+  <code>XmlImporter.remappedIds</code> already does) silently detaches every document.
+- Numbered folders are hostile to exactly the user who benefits most from P8-ATT-2: someone
+  restoring from a backup, or looking for a receipt years later on a machine without the app.</p>
+<h4 id="b-readable-names-plus-a-manifest">B. Readable names plus a manifest<a class="headerlink" href="#b-readable-names-plus-a-manifest" title="Permanent link">#</a></h4>
+<p>Keep human-readable folder names, but write a small <code>folders.json</code> / <code>index.xml</code> at the root of
+the attachments tree mapping account id → folder name. The product reads the manifest as
+authority; the name is presentation. Collisions are resolved by disambiguating suffixes
+(<code>Visa Joint</code>, <code>Visa Joint (2)</code>) recorded in the manifest.</p>
+<p><strong>Pros</strong>
+- Keeps both properties: readable in Explorer, unambiguous to the program.
+- The manifest is where a rename gets recorded, so renames become a one-line manifest edit plus
+  an optional cosmetic folder rename — simpler than today's map-and-repair dance.
+- <code>StatementManager</code> already maintains a per-account <code>index.xml</code>, so a manifest is an
+  established pattern here, not a new one.</p>
+<p><strong>Cons</strong>
+- Introduces a file that can get out of sync with reality. A user who renames a folder in
+  Explorer (which the current design positively invites — the folders are <em>meant</em> to be
+  browsed) breaks the mapping, and the product has to detect and heal that.
+- Two sources of truth is exactly the shape of bug the attachments code already suffers from.
+- More code than A, and the recovery logic (manifest missing, manifest stale, folder renamed
+  externally) is where the real work lives.</p>
+<p><strong>Unintended consequences</strong>
+- The manifest becomes a <strong>single point of failure for every document in the product</strong>. Lose it
+  or corrupt it and readable folder names are the fallback — which means the disambiguation
+  suffixes must be reconstructible from account names alone, which partially defeats the
+  manifest's purpose.
+- It creates a file the user must not edit inside a tree the product tells them to browse
+  freely. That's an inherently uncomfortable instruction.</p>
+<h4 id="c-hybrid-id-stamped-readable-names">C. Hybrid — id-stamped readable names<a class="headerlink" href="#c-hybrid-id-stamped-readable-names" title="Permanent link">#</a></h4>
+<p>Folder names of the form <code>&lt;sanitised account name&gt; (&lt;account id&gt;)</code> — <code>Visa Joint (17)\</code>,
+<code>Visa Joint (23)\</code>. The trailing id makes the folder unique; the leading name makes it
+readable. The product resolves a folder by parsing the trailing id and ignores the rest.</p>
+<p><strong>Pros</strong>
+- Gets both properties with <strong>no manifest, no second source of truth, and no recovery logic</strong> —
+  the folder name <em>is</em> the mapping, and the authoritative part of it (the id) is
+  self-describing.
+- A user in Explorer sees <code>Visa Joint (17)</code> and knows exactly what it is. A user restoring from
+  backup sees the same.
+- Renames become optional cosmetics: the product can rename the readable part, and if it fails
+  or is interrupted, <strong>nothing breaks</strong> — the id still resolves. That removes the whole class
+  of half-completed-rename bugs.
+- Tolerates the user renaming folders in Explorer, as long as the <code>(id)</code> survives; and the
+  product can repair a missing one by matching the readable part.</p>
+<p><strong>Cons</strong>
+- Mildly ugly. A folder list with a parenthesised number on every entry looks technical.
+- Still needs a one-time migration of existing folders and stored bundled paths (same cost as
+  A).
+- Parsing an id out of a filename is a small piece of string handling that must be exactly
+  right, including for account names that themselves end in parentheses.</p>
+<p><strong>Unintended consequences</strong>
+- Same id-promotion concern as A: the id becomes externally visible and therefore
+  effectively immutable. Slightly softened, because the readable part gives a fallback if ids
+  are ever reassigned.
+- Encourages the same pattern elsewhere (export filenames, backup naming), which is probably
+  fine but should be a deliberate convention rather than a local trick.</p>
+<h3 id="recommendation_5">Recommendation<a class="headerlink" href="#recommendation_5" title="Permanent link">#</a></h3>
+<p><strong>C — id-stamped readable folder names.</strong> This was close to unanimous, and the panel
+considers it the case where the register's framing (name <em>or</em> id, with manifest as the third
+option) slightly under-serves the obvious fourth answer.</p>
+<p>The reasoning that won: the trade-off the register describes — readable vs. collision-free —
+is only a real trade-off if the folder name must be <em>either</em> a name <em>or</em> an id. It doesn't.
+Embedding the id in the readable name makes the name authoritative and unique simultaneously,
+with no second file to keep in sync and no recovery logic for a manifest that's gone stale.
+And it is the only option that makes rename failures harmless, which is worth as much as the
+collision fix: today an interrupted rename (P8-ATT-6 / P8-STMT-5) leaves documents stranded,
+and that path has no rollback.</p>
+<p>The migration is the real work, and it is the same work for A and C: rename existing folders,
+rewrite <code>StatementManager</code>'s bundled relative paths, and do it idempotently so an interrupted
+migration can resume. C at least leaves a half-migrated tree comprehensible.</p>
+<ul>
+<li><strong>Architect</strong>: C for the reason above — it removes a source of truth rather than adding one.
+  Notes that the id-in-the-name convention should be written down as a product-wide rule, since
+  the same question recurs for exports and backups.</li>
+<li><strong>Developer</strong>: parsing is a trailing-<code>(\d+)</code> match on the folder name; the fiddly case is an
+  account genuinely named <code>Visa (2)</code>, which the sanitiser doesn't currently touch. Resolvable
+  (match only at the very end, and always write the id) but must be tested.</li>
+<li><strong>Test Engineer</strong>: C is the only option where the collision scenarios become writable tests
+  without a filesystem manifest fixture — create two accounts whose sanitised names collide,
+  assert two folders. Also wants a test for the migration's idempotency: run it twice, assert
+  no change the second time. Flags that the migration is the highest-risk piece and deserves a
+  dry-run mode that logs what it would do.</li>
+<li><strong>Operations Engineer</strong>: the migration is the whole story. It touches user data outside the
+  database, it cannot be wrapped in a transaction, and it runs on first launch of a new
+  version. Wants it to (a) log every move, (b) be resumable, (c) never delete, only move, and
+  (d) leave a breadcrumb file recording what the old names were. Without (d), a user who has to
+  roll back to the previous version finds their documents invisible.</li>
+<li><strong>UI/UX</strong>: P8-ATT-3's readability property is worth defending and C defends it. Warns against
+  A on a specific scenario — the user who has lost their database and is trying to reconstruct
+  from documents. That user exists, and numbered folders abandon them completely.</li>
+<li><strong>Data Engine Expert</strong> (partly in lane): <code>Account.Id</code> is an integer surrogate. The panel
+  should confirm whether ids are stable across the SQLite↔SQL Server↔XML round trip and across
+  <code>Save As</code> — <strong>if <code>Save As</code> to a different engine renumbers accounts, C and A both break
+  silently</strong>, and B would too. Recommends this be verified before committing to any of the
+  three, and notes <code>XmlImporter.remappedIds</code> proves at least one code path <em>does</em> renumber.
+  This is the one genuine blocker the panel identified.</li>
+<li><strong>Adversarial</strong>: "Two accounts named <code>Visa: Joint</code> and <code>Visa / Joint</code> — has anyone ever had
+  those?" Conceded the <em>specific</em> example is contrived, but the <em>duplicate account name</em> case
+  (which the model permits outright, and which <code>StatementManager</code> handles worst) is entirely
+  ordinary — two people in a household each with a "Checking" account. Also pushed on doing
+  nothing: the collision is rare, the migration is risky, and a risky migration for a rare bug
+  is a bad trade. The panel's counter: the rename machinery being deleted is worth the
+  migration on its own, independent of the collision fix. Partially accepted.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: the Adversarial Expert's "the migration risk exceeds the bug's cost"
+position was not fully answered. Everyone agreed C is the right <em>destination</em>; there was
+residual doubt about whether the journey is worth taking now rather than at the next
+already-planned filesystem change.</p>
+<p><strong>Panel flags:</strong> the Data Engine Expert's question — <strong>are account ids stable across engines,
+<code>Save As</code> and merge?</strong> — must be answered before implementing. If they are not, this decision
+changes entirely and option B (manifest) becomes the only viable one.</p>
+<h3 id="needs-your-decision_5">Needs your decision?<a class="headerlink" href="#needs-your-decision_5" title="Permanent link">#</a></h3>
+<p><strong>No on direction, yes on timing.</strong> C is the panel's confident recommendation for what the
+scheme should be. Whether to run the migration now or defer it to the next occasion that
+already touches the attachments tree (D-45's holding area would be one) is a scheduling call
+on risk appetite — <strong>your decision</strong>, and the panel would find either answer defensible.</p>
+<hr />
+<h2 id="d-47-finish-per-unit-rent-entry-or-delete-it">D-47 — Finish per-unit rent entry, or delete it?<a class="headerlink" href="#d-47-finish-per-unit-rent-entry-or-delete-it" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 3 OQ1 · <strong>Cluster:</strong> <code>rental-property</code> · <em>Tracked as <a href="https://github.com/markabrandjord/MyMoney.Net/issues/53">#53</a></em></p>
+<h3 id="eli10_6">ELI10<a class="headerlink" href="#eli10_6" title="Permanent link">#</a></h3>
+<p>The program can track rental properties. You can describe a building, say who owns it, list
+its individual flats, and nominate which of your spending categories count as that building's
+income, repairs, taxes and so on. Then it shows you, year by year, whether the building made
+money.</p>
+<p>What it <em>cannot</em> do is record what each tenant actually paid. There's no screen for it.</p>
+<p>Except — there sort of is. There's a screen file in the program called <code>RentPayementsView</code>
+(the misspelling is in the original) that looks exactly like what you'd want: a grid of flats
+down the side, months across, an amount and a note for each. It's just that nothing in the
+program can open it. There's no menu item, no button, nothing.</p>
+<p>So the obvious reading is: <em>someone built this screen and forgot to hook it up.</em> Plug it in
+and you get the missing half of the feature for almost nothing.</p>
+<p><strong>That reading is wrong, and the panel thinks this is the most important correction in this
+whole review.</strong></p>
+<p>The screen is a picture frame with no picture behind it. It's laid out to show a flat's name,
+a month, an amount and a note — <strong>but the program has no such thing anywhere.</strong> There is no
+"rent payment" in its records. Nothing stores one, nothing loads one, nothing saves one. The
+screen asks for data from a filing cabinet that was never built. Even if you added a menu item
+tomorrow, the grid would come up empty, forever, because the part that's missing isn't the
+wiring — it's the entire filing cabinet.</p>
+<p>So the real question isn't "finish this screen or delete it". It's: <strong>do you want the program
+to track rent payments at all?</strong> Because that's building something new, not finishing
+something old.</p>
+<h3 id="what-the-code-actually-does-major-correction-to-the-register-entry">What the code actually does (major correction to the register entry)<a class="headerlink" href="#what-the-code-actually-does-major-correction-to-the-register-entry" title="Permanent link">#</a></h3>
+<p>The register (and #53, and Phase 3 OQ1) describe <code>RentPayementsView.xaml</code> as <em>"a complete,
+working surface … never constructed anywhere in the product"</em>. The panel's re-read found:</p>
+<ul>
+<li>The grid's columns bind to <strong><code>Unit.Name</code></strong>, <strong><code>Unit.Renter</code></strong>, <strong><code>Amount</code></strong>, <strong><code>Note</code></strong>, and
+  the group header binds to <strong><code>Items[0].Month</code></strong>.</li>
+<li><strong>No type in the codebase has that shape.</strong> Searches across <code>MyMoney</code>, <code>MyMoney.Business</code> and
+  <code>MyMoney.Data</code> for a member of type <code>RentUnit</code> named <code>Unit</code>, for any <code>Month</code> property, and for
+  a rent-payment-like class return nothing. <code>RentUnit</code> itself has <code>Name</code>, <code>Renter</code>, <code>Note</code>,
+  <code>Building</code> — it is the <em>unit</em>, not a payment against one.</li>
+<li><code>RentalBuildingSingleYear</code> (the type the view's constructor accepts) exposes <code>Departments</code>,
+  <code>YearStart</code>, <code>YearEnd</code> — <strong>not</strong> a collection of per-unit monthly payments.</li>
+<li>The constructor stores its argument in a field (<code>this.yearMonth</code>) and <strong>never assigns
+  <code>DataContext</code></strong>. The <code>CollectionViewSource</code> binds to <code>{Binding}</code>, i.e. the DataContext that
+  is never set. <strong>Even if constructed and shown, the grid renders empty.</strong></li>
+<li>There is <strong>no persisted rent-payment entity</strong>: no table in <code>SqliteDatabase</code>/<code>SqlDatabase</code>, no
+  <code>PersistentContainer</code>, no column mappings.</li>
+</ul>
+<p>So this is a <strong>UI shell over a data model that was never built</strong>, not a finished feature
+awaiting a menu item. Completing it means: a new persisted entity, tables in every surviving
+storage engine, a schema migration, XML/CSV serialisation, change tracking, the view model,
+<em>and</em> the view — of which the view is the only part that exists, and it is the cheapest part.</p>
+<p>One further fact that materially changes the "delete it?" half of the question:</p>
+<ul>
+<li><strong>Rental support is already an opt-in per-database feature flag.</strong>
+  <code>DatabaseSettings.RentalManagement</code>, surfaced as a checkbox in <code>AppSettings</code> and honoured by
+  <code>MainWindow.UpdateRentalManagement</code>, removes the entire rental area from navigation when off
+  (P2-PREF-5). So rental already costs the non-rental user nothing in the UI.</li>
+</ul>
+<h3 id="alternatives_6">Alternatives<a class="headerlink" href="#alternatives_6" title="Permanent link">#</a></h3>
+<h4 id="a-build-rent-payment-tracking-properly">A. Build rent-payment tracking properly<a class="headerlink" href="#a-build-rent-payment-tracking-properly" title="Permanent link">#</a></h4>
+<p>New <code>RentPayment</code> entity (unit, period, amount, date received, note), container, tables across
+the surviving engines, migration, serialisation — then the view model and the existing view
+rewritten to bind to it.</p>
+<p><strong>Pros</strong>
+- Delivers the genuinely missing half of rental tracking. Today a landlord can see what a
+  building <em>earned in aggregate</em> (derived from categorised transactions) but not <em>who paid
+  what</em> — which is the question a landlord actually has.
+- Enables arrears tracking, which is the real value: "unit 3 is two months behind" is
+  information the product cannot express at all today.
+- The domain model's patterns (<code>PersistentObject</code>/<code>PersistentContainer</code>) make adding an entity
+  mechanical, if tedious.</p>
+<p><strong>Cons</strong>
+- <strong>It is a from-scratch feature</strong>, priced as one: entity + 3–5 storage engines + migration +
+  serialisation + change tracking + view model + view. The existing view saves maybe 10% of it,
+  and only if its shape survives contact with a real view model.
+- Rent payments <em>also</em> arrive as bank transactions. The product would now have two
+  representations of the same money — a <code>RentPayment</code> record and a categorised <code>Transaction</code> —
+  and reconciling them is a genuinely hard design problem that nobody has started.
+- It is the largest net-new build in this entire review, for the product's narrowest feature.</p>
+<p><strong>Unintended consequences</strong>
+- <strong>Double-counting is near-certain.</strong> <code>RentBuildings.AggregateBuildingInformation</code> derives
+  income from categorised transactions. If rent payments are also recorded separately, either
+  the aggregation ignores them (and they're decorative) or it includes them (and every rent
+  payment counts twice). Resolving this means rent payments must <em>link to</em> transactions — which
+  turns a simple entity into a relationship with all the transfer-like edge cases
+  (<code>RemoveTransfer</code>'s asymmetry, split handling) that already make transfers the hardest part
+  of the model.
+- A rental sub-ledger invites the next requests: leases, deposits, tenant contact details,
+  late fees. That is property-management software, and this is a personal-finance app.</p>
+<h4 id="b-delete-the-orphaned-view-keep-rental-tracking-as-it-is">B. Delete the orphaned view; keep rental tracking as it is<a class="headerlink" href="#b-delete-the-orphaned-view-keep-rental-tracking-as-it-is" title="Permanent link">#</a></h4>
+<p>Remove <code>RentPayementsView.xaml</code>/<code>.xaml.cs</code>, close #53 with the finding that there was never a
+data model behind it, and leave rental as the aggregate-reporting feature it actually is.</p>
+<p><strong>Pros</strong>
+- Free, and removes a file that has actively misled two rounds of analysis (the catalog, the
+  register) into believing a feature was nearly done.
+- Rental tracking as it exists is <em>coherent</em>: nominate categories, get year-by-year
+  profitability. It answers a real question (is this property making money?) completely.
+- The feature flag means rental costs non-landlords nothing already.</p>
+<p><strong>Cons</strong>
+- Closes the door on per-tenant tracking without deciding whether it's wanted — though the
+  door was never as open as it looked.
+- A landlord user is left with a genuine gap.</p>
+<p><strong>Unintended consequences</strong>
+- Deleting the view also deletes the only written-down record of what the per-unit screen was
+  meant to look like. If it's ever built, that design restarts from nothing. (Mitigated by this
+  document and by #53's history.)</p>
+<h4 id="c-get-per-tenant-visibility-from-data-that-already-exists">C. Get per-tenant visibility from data that already exists<a class="headerlink" href="#c-get-per-tenant-visibility-from-data-that-already-exists" title="Permanent link">#</a></h4>
+<p>Don't build a new entity. Instead, let a <code>RentUnit</code> be nominated as a <strong>payee or a category</strong>
+(or let units map to payees), so that rent received from unit 3 is already identifiable in the
+transaction register. Then add a per-unit breakdown to the existing rental summary, derived the
+same way the building-level numbers are derived today.</p>
+<p><strong>Pros</strong>
+- <strong>No new entity, no schema change, no double-counting</strong> — there is exactly one record of each
+  payment, and it is the bank transaction, which is where the money actually is.
+- Fits the product's existing grain: <code>RentBuilding</code> already works by nominating existing
+  categories (<code>CategoryForIncome</code> etc.). Extending that pattern to units is consistent rather
+  than novel.
+- Reconciles automatically, because the rent payment <em>is</em> the transaction.
+- Arrears become answerable ("no payment from unit 3 this month") without a second ledger.</p>
+<p><strong>Cons</strong>
+- Requires the user to categorise or attribute rent income per unit, which is manual discipline.
+  A landlord receiving one bank transfer covering two units has to split it.
+- A category-per-unit or payee-per-unit scheme pollutes the user's category/payee lists with
+  entries that aren't really categories or payees.
+- Expected-rent (what the unit <em>should</em> pay) still has nowhere to live, so "two months behind"
+  needs at least a per-unit expected amount — a small addition to <code>RentUnit</code>, not a new entity.</p>
+<p><strong>Unintended consequences</strong>
+- Overloading categories or payees for unit identity is the same category of mistake as
+  <code>AccountType.CategoryFund</code> (D-1) — using an existing concept for something it isn't, which
+  the product already has a history of. If done, the linkage should be an explicit field on
+  <code>RentUnit</code> (<code>CategoryForRent</code>, mirroring <code>RentBuilding</code>'s existing fields), not a naming
+  convention.
+- Per-unit derivation runs into the same split-handling subtleties as P1-RENT-5
+  (<code>GetTotalAmountMatchingThisCategoryId</code>), which already exist and already work — so this is
+  reusing tested logic rather than writing new logic, which is a point in its favour.</p>
+<h3 id="recommendation_6">Recommendation<a class="headerlink" href="#recommendation_6" title="Permanent link">#</a></h3>
+<p><strong>B immediately, C as the feature if rental matters to you, firmly not A.</strong></p>
+<p>The reasoning that won: once the panel established that the view has no data model behind it,
+A stopped being "finish the feature" and became "build a feature", and it did not survive being
+priced as one. And when priced as a new feature, C is plainly better than A for this product —
+because C has one record of each payment (the bank transaction) instead of two, and the
+double-counting problem that sinks A doesn't exist in C at all.</p>
+<p>Delete the orphaned view now regardless of which way you go on the feature: it is actively
+misinformation, it has already cost two analysis passes, and it saves nothing if C is chosen
+(C doesn't need that grid shape).</p>
+<ul>
+<li><strong>Developer</strong>: the correction is decisive. A is measured in weeks across five storage
+  engines; the existing <code>.xaml</code> contributes a layout, and layouts are the cheap part. C is a
+  field on <code>RentUnit</code> plus a grouping in the existing summary — days.</li>
+<li><strong>Architect</strong>: A introduces a second ledger for money that is already in the primary ledger.
+  That is the single worst thing you can do to a double-entry-ish model, and the product has
+  already been burned by parallel representations (transfers). C keeps one source of truth.
+  Unambiguous.</li>
+<li><strong>Data Engine Expert</strong> (in lane, because A is a schema change): A means a new table in
+  SQLite, SQL Server, SQL CE, plus XML and CSV serialisation, plus a migration — and per D-39
+  the schema-upgrade path is itself an open question. Adding a table to a product that hasn't
+  decided how it upgrades schemas is backwards. C requires one nullable column on <code>RentUnits</code>,
+  which is the smallest possible migration and still needs D-39 to exist.</li>
+<li><strong>Test Engineer</strong>: C reuses <code>GetTotalAmountMatchingThisCategoryId</code> and <code>MatchAnyCategories</code>,
+  which already have the split-handling behaviour (P1-RENT-5) and are testable headlessly today.
+  A requires round-trip persistence tests across every engine for a brand-new entity, which is
+  the most expensive kind of test this codebase has.</li>
+<li><strong>UI/UX</strong>: notes that the orphaned grid's design is <em>fine</em> — flats down, months across is
+  the right shape — but that C can present the same shape from derived data, so nothing is
+  lost by deleting the file. Also notes the feature flag means rental UI can be as specialised
+  as it likes without burdening anyone else.</li>
+<li><strong>Operations Engineer</strong>: B has no migration. C has a trivial one. A has a real one. Given the
+  installed base is essentially one user mid-evaluation, migration risk is low right now —
+  which is an argument for doing schema changes <em>now</em> if they're going to happen at all. The
+  only argument the panel heard in A's favour, and it argues for timing, not for A.</li>
+<li><strong>Adversarial</strong>: asked the blunt question — <em>"does the owner of this fork actually own rental
+  property?"</em> If not, this is all theoretical and B is the entire answer. Also challenged C:
+  <em>"a landlord with two units and one bank transfer has to split every deposit by hand — will
+  they?"</em> Fair, and unresolved; C's value depends on the user's willingness to attribute
+  income per unit. If they won't, C delivers nothing and B is again the whole answer.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: none on A. The C-vs-B choice is entirely contingent on facts only
+the owner has.</p>
+<p><strong>Panel flags:</strong> would benefit from <strong>actual landlord / property-accounting domain expertise</strong>
+to judge whether per-unit tracking without leases, deposits and expected-rent schedules is
+useful at all, or whether it's the first 10% of a feature that is only valuable at 80%. None of
+the seven roles can answer that.</p>
+<h3 id="needs-your-decision_6">Needs your decision?<a class="headerlink" href="#needs-your-decision_6" title="Permanent link">#</a></h3>
+<p><strong>No for the deletion — delete the orphaned view, the finding is unambiguous and #53 should be
+closed with it.</strong></p>
+<p><strong>Yes for the feature.</strong> Whether to build per-unit rent tracking at all depends on whether you
+own rental property and would use it. If yes, the panel recommends C over A. If no, B is the
+complete answer. <strong>Needs your decision.</strong></p>
+<hr />
+<h2 id="d-48-what-is-a-rental-property-in-the-model-and-how-much-of-it-is-editable">D-48 — What is a rental property in the model, and how much of it is editable?<a class="headerlink" href="#d-48-what-is-a-rental-property-in-the-model-and-how-much-of-it-is-editable" title="Permanent link">#</a></h2>
+<p><strong>From:</strong> Phase 4 OQ23 · <strong>Cluster:</strong> <code>rental-property</code></p>
+<h3 id="eli10_7">ELI10<a class="headerlink" href="#eli10_7" title="Permanent link">#</a></h3>
+<p>When the program stores a rental property, it keeps: a name, an address, some notes, who owns
+it and in what shares, which spending categories belong to it — <strong>and four more things: the
+date you bought it, what you paid, how much of that was the land, and what you think it's worth
+now.</strong></p>
+<p>Those last four are real. They're in the storage file. They get saved and loaded every time.</p>
+<p>But there is <strong>no way to type them in.</strong> The property window doesn't show them. Nothing else
+shows them. Nothing reads them either — they don't appear in any report, they don't feed into
+your net worth, they don't do anything at all. They're like four labelled boxes in a filing
+cabinet that nobody can open and nobody has ever put anything in.</p>
+<p>The interesting part is <em>which</em> four. "What you paid" and "how much of that was the land" is a
+very specific pair. There's only one reason to separate them: <strong>for tax.</strong> When you rent out a
+property, you can deduct a bit of the building's value every year as it wears out — but not
+the land, because land doesn't wear out. So you need to know the two numbers separately. Those
+two fields are, unmistakably, the start of a tax calculation nobody finished.</p>
+<p>And "what you think it's worth now" is equally clearly a net-worth number — it's the only way a
+program that tracks your total wealth would know your house is part of it.</p>
+<p>So somebody designed a rental property to be a thing that <em>depreciates for tax</em> and <em>counts
+toward your net worth</em>. Then they built the window and left all four out.</p>
+<p>The decision: are these four fields the ghost of a feature nobody wants, or the outline of two
+features that were half-designed and should now either be finished or formally abandoned?</p>
+<h3 id="what-the-code-actually-does_4">What the code actually does<a class="headerlink" href="#what-the-code-actually-does_4" title="Permanent link">#</a></h3>
+<ul>
+<li><code>RentBuilding.PurchasedDate</code>, <code>PurchasedPrice</code>, <code>LandValue</code>, <code>EstimatedValue</code>
+  (<code>Money.cs:6201–6256</code>) — all four have <code>ColumnMapping</code> attributes, all four round-trip
+  through <code>SqliteDatabase</code> and <code>SqlDatabase</code> (INSERT, UPDATE and SELECT all name them).</li>
+<li><code>RentalDialog.xaml</code> binds <strong><code>Name</code>, <code>Address</code>, <code>Note</code>, <code>OwnershipName1/2</code>,
+  <code>OwnershipPercentage1/2</code>, the units grid, and the six category pickers</strong>. None of the four.</li>
+<li>A codebase-wide search finds <strong>no reader</strong> outside <code>Money.cs</code> and the storage layer. Not in
+  <code>NetWorthReport</code>, not in <code>Taxes/</code>, not in any rental view or report.</li>
+<li>So: <strong>fully persisted, never written by the UI, never read by anything.</strong> The only way a value
+  can get in is an import from a file that already has one — i.e. a database written by a
+  build that once had a UI for them, or hand-edited data.</li>
+<li><code>SqlDatabase</code>'s <code>UPDATE RentBuildings</code> notably <strong>omits <code>PurchasedDate</code></strong> while including the
+  other three — so even the storage layer's support is inconsistent. An imported purchase date
+  survives the initial insert and is lost on the next update.</li>
+</ul>
+<p>That last detail is new and worth recording: the fields are not merely unused, one of them is
+actively <em>dropped</em> on update.</p>
+<h3 id="alternatives_7">Alternatives<a class="headerlink" href="#alternatives_7" title="Permanent link">#</a></h3>
+<h4 id="a-finish-the-property-record-add-the-four-fields-to-the-editor-and-make-them-mean-something">A. Finish the property record: add the four fields to the editor, and make them mean something<a class="headerlink" href="#a-finish-the-property-record-add-the-four-fields-to-the-editor-and-make-them-mean-something" title="Permanent link">#</a></h4>
+<p>Add purchase date, purchase price, land value and estimated value to <code>RentalDialog</code>
+(a "Property" tab alongside Owners / Units / Categories). Feed <code>EstimatedValue</code> into the
+net-worth report as an asset. Fix the <code>UPDATE</code> omission. Leave depreciation out.</p>
+<p><strong>Pros</strong>
+- Makes four persisted fields honest at low cost — a tab of four inputs and one report line.
+- <code>EstimatedValue</code> in net worth is genuinely useful and self-contained: for most people a
+  property is their largest asset, and a net-worth figure that omits it is badly wrong. This is
+  the highest value-per-effort item in the rental cluster.
+- Purchase price and date are useful as plain record-keeping even without depreciation — "what
+  did I pay for this, and when" is a question people ask.</p>
+<p><strong>Cons</strong>
+- <code>EstimatedValue</code> is a number nothing updates. A net-worth report anchored on a value the user
+  typed in 2019 is confidently wrong, and <em>more</em> misleading than omitting it — because it looks
+  maintained.
+- Land value with no depreciation calculation is a field with no purpose. Including it invites
+  "so where's the depreciation?"
+- Touches D-21 (does net worth include what you owe / what you own) and should not be decided
+  independently of it.</p>
+<p><strong>Unintended consequences</strong>
+- Adding a property to net worth makes the net-worth report <strong>partly manual</strong> for the first
+  time — every other input is derived from transactions and downloaded prices. That is a
+  change in the report's character, and once one manual asset is allowed, "let me add my car"
+  follows immediately, which is a whole manual-assets feature.
+- An estimated value with no "as of" date is worse than useless for a trend chart: the
+  net-worth-over-time graph would apply today's estimate to every historical point, silently
+  rewriting the user's past net worth. <strong><code>PurchasedDate</code> exists but <code>EstimatedValueDate</code> does
+  not</strong> — so doing this correctly needs a fifth field.</p>
+<h4 id="b-delete-the-four-fields-a-rental-property-is-a-name-an-address-owners-units-and-categories">B. Delete the four fields; a rental property is a name, an address, owners, units and categories<a class="headerlink" href="#b-delete-the-four-fields-a-rental-property-is-a-name-an-address-owners-units-and-categories" title="Permanent link">#</a></h4>
+<p>Drop the columns (or leave them dormant and stop pretending), and define the rental feature as
+what it demonstrably is: a lens over categorised transactions that answers "did this building
+make money this year".</p>
+<p><strong>Pros</strong>
+- Honest and coherent. The feature that exists is complete and answers a real question well.
+- Removes an implied tax capability the product does not have and, per D-29/D-30, is
+  already struggling to keep current for the capabilities it <em>does</em> have.
+- No new UI, no manual-asset can of worms, no stale-value problem.</p>
+<p><strong>Cons</strong>
+- Column removal is a destructive migration for any user who has values in them (via import).
+  Probably nobody — but "probably" is doing work.
+- Forecloses depreciation and property-in-net-worth without really debating them.</p>
+<p><strong>Unintended consequences</strong>
+- Deleting <code>PurchasedPrice</code>/<code>LandValue</code> deletes the only evidence that depreciation was ever
+  contemplated, which — as with D-44's WIA code — means the decision must be recorded or it
+  will be rediscovered.
+- A rental feature that <em>cannot</em> represent the property as an asset is a rental feature that
+  can never answer "what's my return on this investment", which is arguably the landlord's
+  central question and which the current year-by-year profit view only half answers.</p>
+<h4 id="c-model-the-property-as-an-account">C. Model the property as an account<a class="headerlink" href="#c-model-the-property-as-an-account" title="Permanent link">#</a></h4>
+<p>Stop treating a rental property as a special entity with bolted-on value fields, and represent
+it as an <strong>asset account</strong> (the model already has <code>AccountType</code> values for assets) with the
+building as its balance. Purchase price becomes an opening balance; estimated value becomes a
+revaluation transaction; the property's cash flows are already ordinary categorised
+transactions. <code>RentBuilding</code> keeps only what is genuinely property-specific: address, units,
+owners, the category nominations.</p>
+<p><strong>Pros</strong>
+- Net worth includes the property <strong>for free</strong>, via the mechanism that already exists, with no
+  manual-asset special case and no report changes.
+- Revaluations get a date automatically, because transactions have dates — solving the stale-
+  value and historical-net-worth problems that sink A.
+- Purchase price + date land naturally as an opening balance, and a sale becomes a transaction
+  rather than a deletion.
+- Consistent with how the product already handles loans (P1-LOAN-1: a loan is an account with a
+  shrinking balance), so the pattern is established and understood here.</p>
+<p><strong>Cons</strong>
+- Largest conceptual change of the three, and it partially dissolves <code>RentBuilding</code> into the
+  account model — which is a bigger refactor than the rental feature's user base justifies.
+- Land value still has nowhere natural to live (it's a <em>component</em> of a balance, not a balance).
+- An asset account that the user must revalue by hand is still manual; C makes the manual step
+  dated and auditable, not absent.</p>
+<p><strong>Unintended consequences</strong>
+- Rental properties appearing in the accounts list changes the navigation for every user who
+  has one, and interacts with the rental feature flag (a property-as-account would presumably
+  remain visible even with rental tracking off, which may be right or may be confusing).
+- Depreciation as a scheduled transaction series is then <em>natural</em> — which is a feature the
+  panel is otherwise recommending against, made easy by the back door.</p>
+<h3 id="recommendation_7">Recommendation<a class="headerlink" href="#recommendation_7" title="Permanent link">#</a></h3>
+<p><strong>A's net-worth half, B's tax half — and record the split explicitly.</strong></p>
+<p>Concretely: <strong>add purchase date, purchase price and estimated value to the property editor,
+add an "estimated as of" date, feed estimated value into net worth, fix the <code>UPDATE</code>
+omission — and delete <code>LandValue</code></strong>, on the explicit finding that its only purpose is a
+depreciation calculation the product does not have, is not going to have, and would be
+irresponsible to half-implement given D-29's finding that the tax data is already of uncertain
+vintage.</p>
+<p>The reasoning that won: the four fields aren't one feature, they're two half-features, and they
+deserve opposite answers. Net worth is cheap, valuable and self-contained. Depreciation is a
+tax capability requiring a depreciation schedule, a method (MACRS, straight-line), a recovery
+period, a basis adjustment and a recapture-on-sale calculation — none of which exist, all of
+which must be right, and all of which go stale annually. <code>LandValue</code> is the visible tip of that,
+and keeping it implies an intent the panel does not think the product should have.</p>
+<p>C is architecturally attractive and the panel spent real time on it, but it dissolves a working
+feature into a larger refactor for a narrow user base. Recorded as the direction to take <em>if</em>
+manual assets are ever wanted generally — because at that point the account model is the right
+home and the rental case comes along for free.</p>
+<ul>
+<li><strong>Architect</strong>: prefers C on the merits and would choose it if manual assets were being built
+  anyway. Accepts A-minus-LandValue as the proportionate answer for the rental feature alone.
+  Insists the <code>LandValue</code> deletion be recorded as a deliberate no-to-depreciation.</li>
+<li><strong>UI/UX</strong>: the "estimated as of" date is not optional. Without it the net-worth trend chart
+  silently rewrites history, and a user comparing this year to five years ago gets a number
+  that never existed. Would show the estimate with its date inline ("$420,000 as of Mar 2024")
+  and grey it when stale.</li>
+<li><strong>Developer</strong>: a fourth tab on <code>RentalDialog</code> is trivial; the report change is one line in
+  <code>NetWorthReport</code>; the <code>UPDATE</code> omission is a one-word fix. Half a day total. Notes
+  <code>RentBuilding.ShallowCopy</code> (Phase 4 OQ13 — unit edits survive Cancel) is in the same dialog
+  and should be fixed in the same pass, since the new fields would inherit the same defect.</li>
+<li><strong>Data Engine Expert</strong>: the <code>UPDATE</code> omission means a <code>PurchasedDate</code> imported today is lost
+  on the next save — so the field isn't dormant, it's <em>lossy</em>. Fix it or drop it; leaving it is
+  the worst state. Dropping <code>LandValue</code> should be a nullable-column deprecation (stop reading
+  and writing it) before a physical drop, so a rollback to a previous version still works —
+  which is D-39's problem and another reason D-39 should land first.</li>
+<li><strong>Test Engineer</strong>: net worth including a manual asset needs a test that pins the "as of" date
+  semantics, because that is where the silent-history-rewrite bug would live. Straightforward
+  once the semantics are decided.</li>
+<li><strong>Operations Engineer</strong>: dropping a column is the only migration here and it should be a
+  soft deprecation. Everything else is additive.</li>
+<li><strong>Adversarial</strong>: two challenges. First — <em>"an estimated value the user types once and never
+  updates makes the net-worth report worse, not better. You're adding a number that will be
+  wrong within a year."</em> Partly answered by the "as of" date and the stale indicator; not fully,
+  because a stale number still anchors the total. Second — <em>"why is a rental property the only
+  thing in this product you can manually value? What about the house you live in?"</em> This one
+  landed: the recommendation gives rental properties a capability (manual asset valuation)
+  that the far more common case — an owner-occupied home — doesn't get. That is an odd product
+  shape, and it is the strongest argument for C, which would give both the same mechanism.</li>
+</ul>
+<p><strong>Genuine disagreement</strong>: the Adversarial Expert's second point is not resolved. Giving rental
+properties manual valuation while a primary residence has none is genuinely lopsided, and the
+panel acknowledges the recommendation is the <em>proportionate</em> answer rather than the <em>coherent</em>
+one. Two members (Architect, Adversarial) would rather see manual assets done properly once, in
+the account model, than done narrowly for rental properties.</p>
+<h3 id="needs-your-decision_7">Needs your decision?<a class="headerlink" href="#needs-your-decision_7" title="Permanent link">#</a></h3>
+<p><strong>Yes.</strong> Two product-taste questions the panel cannot settle for you:</p>
+<ol>
+<li><strong>Should net worth include manually-valued assets at all?</strong> If yes, the coherent answer is a
+   general manual-asset capability (option C's direction) covering your home as well as any
+   rental property — and the rental fields then fall out of that. If no, <code>EstimatedValue</code> should
+   go the way of <code>LandValue</code> and the rental record shrinks to name, address, owners, units and
+   categories.</li>
+<li><strong>Is depreciation ever in scope?</strong> The panel recommends no, firmly, and recommends deleting
+   <code>LandValue</code> to say so. If you disagree, say so before it's removed.</li>
+</ol>
+<p>The parts that don't need you: fixing the <code>UPDATE</code> omission (do it either way), and fixing
+<code>ShallowCopy</code>'s Cancel behaviour while in that dialog.</p>
+<hr />
+<h2 id="cross-cutting-findings">Cross-cutting findings<a class="headerlink" href="#cross-cutting-findings" title="Permanent link">#</a></h2>
+<p>Five corrections to the register surfaced during the re-read, collected here because they
+matter beyond their own decision:</p>
+<ol>
+<li><strong>D-47 — <code>RentPayementsView</code> has no data model behind it.</strong> The register, the catalog
+   (Phase 3 OQ1) and issue <a href="https://github.com/markabrandjord/MyMoney.Net/issues/53">#53</a> all
+   describe it as a complete, working surface that was never wired up. It binds to <code>Unit</code>,
+   <code>Month</code>, <code>Amount</code>, <code>Note</code> — a shape no type in the codebase has — and never sets its own
+   <code>DataContext</code>. Completing it is a from-scratch feature, not a wiring job. <strong>#53's framing
+   should be corrected.</strong></li>
+<li><strong>D-27 — <code>Transaction</code> has no currency.</strong> The register suggests per-transaction currency is
+   representable today. It is not: currency lives only on <code>Account</code>. Option "store it in its own
+   currency" is a three-table schema change.</li>
+<li><strong>D-27 — OFX's <code>CURRATE</code> and <code>ORIGCURRENCY</code> are both unread</strong>, and <code>ORIGCURRENCY</code> means the
+   <em>opposite</em> of <code>CURRENCY</code>. Any conversion-on-import fix that ignores this corrupts the common
+   case (a domestic card used abroad).</li>
+<li><strong>D-44 — the WIA COM reference is already gone</strong>; all <code>WIA.*</code> usages are inside comments.
+   "Revive scanning" is a new native integration, not an uncommenting.</li>
+<li><strong>D-48 — <code>SqlDatabase</code>'s <code>UPDATE RentBuildings</code> omits <code>PurchasedDate</code></strong> while including the
+   other three value fields. The field is not dormant, it is lossy on update. This is a small
+   untracked defect worth filing regardless of which way D-48 goes.</li>
+</ol>
+<p>Two further items worth filing independently of any decision here:</p>
+<ul>
+<li><strong>D-45</strong> — <code>DeleteAttachments</code> is invoked from two separately-subscribed handlers
+  (<code>OnMoneyChanged</code> and <code>OnTransactionsChanged</code>), each carrying the same todo. Whatever is
+  decided, these should collapse to one code path.</li>
+<li><strong>D-46</strong> — the Data Engine Expert's blocking question: <strong>are <code>Account.Id</code> values stable
+  across engines, <code>Save As</code>, and merge?</strong> <code>XmlImporter.remappedIds</code> proves at least one path
+  renumbers. This must be answered before any id-based document filing scheme is implemented.</li>
+</ul>
+<h2 id="summary-table">Summary table<a class="headerlink" href="#summary-table" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Decision</th>
+<th>Recommended</th>
+<th>Needs your decision?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>D-25</strong></td>
+<td>Money File Import scope</td>
+<td>Fix honesty + batch behaviour now (B); lineage-id verification next (A); do <strong>not</strong> broaden formats first</td>
+<td><strong>Partly</strong> — is whole-book merge a real workflow for you?</td>
+</tr>
+<tr>
+<td><strong>D-26</strong></td>
+<td>QIF import</td>
+<td>Scratch-graph import so a failure changes nothing (C); full rewrite (A) only if QIF is genuinely your migration route; <strong>not</strong> deletion</td>
+<td><strong>No</strong> on direction — but confirm what your Quicken can export</td>
+</tr>
+<tr>
+<td><strong>D-27</strong></td>
+<td>Imported foreign currency</td>
+<td>Fix the guards, check against the account's real currency, handle <code>ORIGCURRENCY</code>, <strong>refuse</strong> on genuine mismatch; record per-transaction currency as deferred</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td><strong>D-44</strong></td>
+<td>Scanning</td>
+<td>Delete the dead WIA block now (C); build a watch-folder/inbox (B) if paperwork matters; <strong>not</strong> WIA revival</td>
+<td><strong>No</strong> for the deletion; <strong>mildly</strong> for the inbox</td>
+</tr>
+<tr>
+<td><strong>D-45</strong></td>
+<td>Attachments on transaction delete</td>
+<td>Move to a <code>.deleted</code> holding area with a retention window (B), excluded from the watcher, with a passive status mention</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td><strong>D-46</strong></td>
+<td>Document folder naming</td>
+<td>Id-stamped readable names — <code>Visa Joint (17)</code> (C)</td>
+<td><strong>No</strong> on direction; <strong>yes</strong> on timing (migration risk)</td>
+</tr>
+<tr>
+<td><strong>D-47</strong></td>
+<td>Per-unit rent entry</td>
+<td>Delete the orphaned view now (B); if rental matters, derive per-unit from transactions (C); <strong>not</strong> a new rent-payment ledger (A)</td>
+<td><strong>Yes</strong> — do you own rental property and would you use it?</td>
+</tr>
+<tr>
+<td><strong>D-48</strong></td>
+<td>Rental property fields</td>
+<td>Add purchase date/price + estimated value with an "as of" date to the editor and to net worth; <strong>delete <code>LandValue</code></strong> (no depreciation); fix the <code>UPDATE</code> omission</td>
+<td><strong>Yes</strong> — manual assets in net worth at all? depreciation ever in scope?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="expert-opt-outs">Expert opt-outs<a class="headerlink" href="#expert-opt-outs" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>Data Engine Expert</strong> opted out of <strong>D-26</strong> (in-memory transactionality, not storage) and
+  <strong>D-44</strong> (attachments are filesystem-side by design), and contributed only an observation on
+  <strong>D-45</strong>. In lane and substantive on D-25, D-27, D-46, D-47 and D-48.</li>
+<li>No other expert opted out of any decision.</li>
+</ul>
+<h3 id="would-benefit-from-additional-expertise-flags">"Would benefit from additional expertise" flags<a class="headerlink" href="#would-benefit-from-additional-expertise-flags" title="Permanent link">#</a></h3>
+<ul>
+<li><strong>D-25</strong> — product-telemetry / user-research: is whole-book merge actually used?</li>
+<li><strong>D-26</strong> — hands-on Quicken-migration expertise: what can current Quicken Classic actually
+  export, and is QIF reachable at all?</li>
+<li><strong>D-47</strong> — landlord / property-accounting domain expertise: is per-unit rent tracking useful
+  without leases, deposits and expected-rent schedules?</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

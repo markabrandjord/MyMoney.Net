@@ -1,0 +1,2344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>FlaUI / business-layer test scenarios - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "FlaUI / business-layer test scenarios", url: "#_top", children: [
+              {title: "Purpose and scope \u2014 read this before adding a scenario", url: "#purpose-and-scope-read-this-before-adding-a-scenario" },
+              {title: "Conventions to follow when implementing a scenario", url: "#conventions-to-follow-when-implementing-a-scenario" },
+              {title: "Status legend", url: "#status-legend" },
+              {title: "Home", url: "#home" },
+              {title: "Basics", url: "#basics" },
+              {title: "Accounts", url: "#accounts" },
+              {title: "Charts", url: "#charts" },
+              {title: "Reports", url: "#reports" },
+              {title: "Development", url: "#development" },
+              {title: "Undocumented in help file \u2014 Menu \u0026amp; API audit", url: "#undocumented-in-help-file-menu-api-audit" },
+              {title: "Documentation gaps found", url: "#documentation-gaps-found" },
+              {title: "Adding a new scenario", url: "#adding-a-new-scenario" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="flaui-business-layer-test-scenarios">FlaUI / business-layer test scenarios<a class="headerlink" href="#flaui-business-layer-test-scenarios" title="Permanent link">#</a></h1>
+<h2 id="purpose-and-scope-read-this-before-adding-a-scenario">Purpose and scope — read this before adding a scenario<a class="headerlink" href="#purpose-and-scope-read-this-before-adding-a-scenario" title="Permanent link">#</a></h2>
+<p>This document catalogs end-user scenarios for MyMoney.Net, organized around
+the same 6 functional areas the published help file itself uses (Home,
+Basics, Accounts, Charts, Reports, Development —
+<code>https://moneytools.github.io/MyMoney.Net/</code>, built from this repo's <code>docs/</code>
+via MkDocs), plus one cross-cutting section for real functionality the help
+file doesn't document at all.</p>
+<p>It serves three purposes:</p>
+<ol>
+<li><strong>Business-layer API test scenarios</strong> — for any feature whose logic
+   already lives in (or is portable to) <code>Source/WPF/MyMoney.Business</code>, a
+   direct unit test that calls the API with controlled data (success and
+   invalid-input cases) and needs no UI at all. This is almost always the
+   <em>cheaper</em> and <em>first</em> thing to close for a <code>Business-layer gap</code> row.</li>
+<li><strong>FlaUI UI-wiring test scenarios</strong> — once a scenario's business-layer
+   logic is tested, the <em>thin</em> remaining question is: does the real WPF
+   dialog, when a person interacts with it, correctly collect input and
+   correctly call that API? That's a FlaUI test's job, and it should not
+   re-prove the business logic through the UI.</li>
+<li><strong>Help-file gap/staleness tracking</strong> — building this catalog directly
+   from the help file's own structure surfaced real documentation gaps
+   (features with no help page at all) and at least one stale page (a
+   diagram, not a scenario) along the way. See "Documentation gaps found"
+   near the end. Use this catalog as a standing input to a documentation
+   pass, not just a test-writing one.</li>
+</ol>
+<p><strong>Do not duplicate coverage.</strong> Before writing either kind of test, check
+this document's own "Business-layer API" and "Status" columns — if a
+column already cites an existing test file, that logic is covered; a new
+scenario for the same logic is redundant. <code>Business-layer gap</code> means the
+opposite is true: nothing tests it yet, at any layer.</p>
+<h2 id="conventions-to-follow-when-implementing-a-scenario">Conventions to follow when implementing a scenario<a class="headerlink" href="#conventions-to-follow-when-implementing-a-scenario" title="Permanent link">#</a></h2>
+<p>Based on the existing pattern in <code>Source/WPF/UITests/PayeeSelectionTests.cs</code>:</p>
+<ul>
+<li>Live in <code>Source/WPF/UITests/</code>, use <code>FlaUI.Core</code>/<code>FlaUI.UIA3</code>, NUnit.</li>
+<li>Use a checked-in fixture database (<code>Source/WPF/UITests/Fixtures/</code>) rather
+  than building state through the UI first, where practical.</li>
+<li>If the scenario needs a registered database (post-#32, File|Open is a
+  <code>DatabaseRegistry</code> picker, not a free-text browser), register the
+  fixture against the real default registry path in the test and remove
+  it in a <code>finally</code>/<code>TearDown</code> — there's no per-test registry override.</li>
+<li>Clean up the <code>Application</code>/<code>UIA3Automation</code> in <code>[TearDown]</code>, best-effort,
+  so a cleanup failure doesn't mask the actual test failure.</li>
+<li>Per this repo's established FlaUI gotchas (see the <code>flaui-wpf-testing</code>
+  skill): these tests need a real interactive desktop session to run
+  correctly — they are not run via plain <code>dotnet test</code> in CI or in an
+  unattended/background agent session (launching the real app this way
+  hangs waiting for input that never arrives — confirmed directly during
+  this migration, see the ledger for
+  <code>docs/superpowers/plans/2026-09-18-business-layer-subsystem-migration.md</code>'s
+  Task 1). When verifying facts for this catalog, prefer reading source
+  directly over trying to run FlaUI or the app itself.</li>
+<li>For business-layer unit tests, no new mocking framework — reuse
+  <code>MyMoney.TestSupport</code>'s <code>MockDatabase</code> and the existing fake pattern
+  (<code>FakeBusinessLayerUiCallback</code>/<code>FakeImportProgressReporter</code> in
+  <code>QifImporterTests.cs</code>/<code>DatabaseLifecycleTests.cs</code>).</li>
+</ul>
+<h2 id="status-legend">Status legend<a class="headerlink" href="#status-legend" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>Not started</strong> — no test exists yet.</li>
+<li><strong>Deferred</strong> — considered but deliberately not picked for a given
+  implementation pass (see the row's own note for why); distinct from
+  <strong>Not started</strong> in that someone looked at it and made a scope call,
+  not that it was overlooked.</li>
+<li><strong>Business-layer gap</strong> — the underlying business-layer coverage this
+  scenario would sit on top of doesn't exist yet either (or the logic
+  itself hasn't been extracted from the WPF project); close that first.</li>
+<li><strong>Written</strong> — a test exists; note the file.</li>
+<li><strong>Passing</strong> — last confirmed passing in an interactive session, with date.</li>
+</ul>
+<hr />
+<h2 id="home">Home<a class="headerlink" href="#home" title="Permanent link">#</a></h2>
+<p>No scenarios. <code>docs/index.md</code> is a pure landing/marketing page — every
+concrete claim on it (themes, account types, OFX/CSV import, charts,
+reports, tax export, reconciliation, search, attachments, calculator,
+currencies, install) links straight into one of the other 5 areas below,
+and there's no distinct "Home" view or dialog in the running app to test
+in its own right.</p>
+<hr />
+<h2 id="basics">Basics<a class="headerlink" href="#basics" title="Permanent link">#</a></h2>
+<h3 id="categories">Categories<a class="headerlink" href="#categories" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add new category via transaction grid</td>
+<td>Type <code>Food:Groceries</code> into a transaction's Category cell (not seen before)</td>
+<td><code>CategoryDialog</code> → <code>Categories.GetOrCreateCategory(name, type)</code></td>
+<td>New top-level <code>Food</code> category and child <code>Groceries</code> category created, both attached to the transaction</td>
+<td>Empty fixture DB</td>
+<td>Business layer written — <code>CategoriesTests.cs</code> (<code>GetOrCreateCategory</code>'s colon-splitting parent/child creation, and that calling it twice doesn't duplicate); the transaction-grid UI-wiring path itself is still untested</td>
+</tr>
+<tr>
+<td>Rename category (Categories panel)</td>
+<td>Right-click a category → <strong>Rename</strong>, type an existing category's name</td>
+<td><code>CategoriesControl.OnRenameNode_CommitAndStopEditing</code> (blocks rename onto an existing name per the page's own description)</td>
+<td>Rename rejected/no-ops when name collides with an existing category; succeeds and renames in place otherwise</td>
+<td>Fixture with <code>Fun:Movies</code> and <code>Fun:Videos</code> categories</td>
+<td>Written — <code>CategoriesFlaUiTests.cs</code> (F2 rather than the right-click menu item, but the same <code>CommandRenameCategory</code>/<code>OnRenameNode_CommitAndStopEditing</code> path). Covers rename-onto-existing-name rejection and Escape-cancels-unchanged; found along the way that <code>OnTextEditorForRenaming_Loaded</code> places the caret at the end of the existing text (not select-all), so a real F2 rename needs Ctrl+A before typing or it appends instead of replacing</td>
+</tr>
+<tr>
+<td>Delete category with no transactions</td>
+<td>Right-click a category with zero transactions → <strong>Delete</strong></td>
+<td><code>Category.OnDelete()</code></td>
+<td>Category removed immediately, no dialog</td>
+<td>Fixture with an unused category</td>
+<td>Written — <code>CategoriesTests.cs</code>. Real behavior confirmed by reading the code: <code>OnDelete()</code> is a soft delete (flips <code>ChangeType</code> to <code>Deleted</code>); the raw <code>Categories.Count</code> is unaffected, but <code>GetCategories()</code> (the "live" view) filters deleted categories out immediately - which is what the UI tree binds to</td>
+</tr>
+<tr>
+<td>Delete category with transactions (redirect)</td>
+<td>Right-click a category with transactions → <strong>Delete</strong>, pick a target category in the resulting <code>MergeCategoryDialog</code></td>
+<td><code>MergeCategoryDialog</code> → <code>Transaction.ReCategorize(oldCategory, newCategory)</code> for each affected transaction, then <code>Category.OnDelete()</code></td>
+<td>All transactions previously on the deleted category now show the target category; deleted category gone from the tree</td>
+<td>Fixture with a category that has 2+ transactions</td>
+<td>Business layer written — <code>CategoriesTests.cs</code> covers the real bulk pattern (<code>Transactions.GetTransactionsByCategory</code> + per-transaction <code>ReCategorize</code>, matching <code>CategoriesControl.xaml.cs</code>'s own merge handler); <code>MergeCategoryDialog</code>'s UI wiring itself is still untested</td>
+</tr>
+<tr>
+<td>Move category via drag/drop</td>
+<td>Drag one category node onto another (no Ctrl)</td>
+<td><code>CategoriesControl.OnDragDropSourceOnTarget</code> → re-parents the category (no business-layer call — pure model mutation of <code>ParentCategory</code>)</td>
+<td>Dragged category becomes a child of the drop target in the tree</td>
+<td>Fixture with two sibling top-level categories</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; a pure UI re-parenting mutation with no business-layer call</td>
+</tr>
+<tr>
+<td>Merge category via Ctrl+drag/drop</td>
+<td>Ctrl+drag one category onto another</td>
+<td><code>CategoriesControl.Merge(source, target)</code> → <code>Transaction.ReCategorize</code> per transaction, then <code>source.OnDelete()</code></td>
+<td>All of source's transactions now carry target's category; source category removed</td>
+<td>Fixture with <code>Fun:Videos</code> (has transactions) and <code>Fun:Movies</code></td>
+<td>Business layer written — same <code>ReCategorize</code>/<code>OnDelete</code> coverage as the row above (<code>CategoriesTests.cs</code>); the Ctrl+drag UI wiring itself is still untested</td>
+</tr>
+<tr>
+<td>Merge onto a category that doesn't exist yet (rename to new name under a different parent)</td>
+<td>Drag/drop rename producing a <code>newName</code> not matching any existing category</td>
+<td><code>CategoriesControl.OnRenameNode_CommitAndStopEditing</code> → <code>Categories.GetOrCreateCategory(newName, type)</code> then <code>Merge</code></td>
+<td>New category created under the target parent, source's transactions recategorized onto it, source deleted</td>
+<td>Fixture category with transactions</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; the underlying <code>GetOrCreateCategory</code>/<code>Merge</code> calls are already covered individually, this row is specifically about the drag/drop-rename UI wiring</td>
+</tr>
+</tbody>
+</table>
+<h3 id="payees-aliases">Payees &amp; Aliases<a class="headerlink" href="#payees-aliases" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Simple payee rename (no alias)</td>
+<td>Right-click a transaction → <strong>Rename Payee</strong>, enter new name, leave Auto-Rename unchecked, OK</td>
+<td><code>RenamePayeeDialog</code> → <code>Payees.FindPayee(value, true)</code>, <code>MyMoney.FindAliasMatches</code>, <code>MyMoney.ApplyAlias(alias, transactions)</code></td>
+<td>Renamed transaction(s) now show new payee; no <code>Alias</code> row created</td>
+<td>Fixture with one messy downloaded payee name</td>
+<td>Business layer written — <code>PayeesAndAliasesTests.cs</code> (<code>ApplyAlias</code> renames the matching transaction's payee). Dialog UI wiring itself still untested</td>
+</tr>
+<tr>
+<td>Rename with Auto-Rename (creates an Alias)</td>
+<td>Same, but check <strong>Auto-Rename</strong></td>
+<td><code>RenamePayeeDialog</code> → <code>Aliases.AddAlias(alias)</code> + <code>ApplyAlias</code></td>
+<td>New <code>Alias</code> row persists mapping the raw string to the chosen payee; a later transaction with that exact payee string auto-renames on import/entry</td>
+<td>Same fixture</td>
+<td>Written — UI wiring: <code>PayeesFlaUiTests.RenamePayeeWithAutoRename_CreatesAliasAndRenamesTransaction</code> (real right-click → Rename Payee → Auto-Rename → OK, verified via both the transaction grid and the Aliases view). Found the fixture's pre-seeded "AMC THEATRES 1234" alias means this exercises the <em>re-point an existing alias</em> branch (<code>Aliases.FindAlias</code> finds it, so <code>AddAlias</code> is never called), not the <em>create new</em> branch - <code>Aliases.AddAlias</code> itself is still separately covered in <code>PayeesAndAliasesTests.cs</code>'s <code>FindSubsumedAliases</code> test. Business layer: <code>ApplyAlias</code>/<code>Aliases.AddAlias</code> (<code>PayeesAndAliasesTests.cs</code>)</td>
+</tr>
+<tr>
+<td>Rename with no matching transactions found</td>
+<td>Enter a pattern with Auto-Rename that matches nothing existing</td>
+<td><code>RenamePayeeDialog.OnOkButton_Click</code> → <code>MyMoney.FindAliasMatches</code> returns empty → confirmation prompt ("do you want to save it anyway?")</td>
+<td>Dialog warns; Cancel keeps editing, OK still creates the alias with 0 transactions affected</td>
+<td>Fixture with a pattern guaranteed not to match</td>
+<td>Business layer written — <code>PayeesAndAliasesTests.cs</code>'s <code>FindAliasMatches_NoMatchingTransactions_ReturnsEmpty</code>. The dialog's "save it anyway?" confirmation-prompt wiring itself is still untested</td>
+</tr>
+<tr>
+<td>Regex alias consolidation</td>
+<td>Rename Payee dialog: enter a broader regex pattern (e.g. <code>.*ALASKA[ ]+AIR.*</code>) with Use-Regex + Auto-Rename checked, where several narrower existing aliases would be subsumed</td>
+<td><code>RenamePayeeDialog.CheckConflicts</code> → <code>MyMoney.FindSubsumedAliases(alias)</code>; on OK, <code>Aliases.RemoveAlias</code> for each subsumed alias, <code>Aliases.AddAlias</code> for the new one</td>
+<td>Dialog's "clashing aliases" list shows the subsumed patterns before OK; after OK, those narrower <code>Alias</code> rows are gone and only the new regex alias remains</td>
+<td>Fixture with 3+ narrow aliases (e.g. "ALASKA AIR 123", "ALASKA  AIRLINES") for the same payee</td>
+<td>Written — <code>PayeesAndAliasesTests.cs</code>'s <code>FindSubsumedAliases_BroaderRegexSubsumesNarrowerAliases</code>, confirming the previously-unverified real semantics: <code>FindSubsumedAliases</code> tests each existing alias's own <code>Pattern</code> string as plain text against the broad alias's <code>Matches</code> (i.e. <code>broadAlias.Matches(narrowAlias.Pattern)</code>), not a pattern-vs-pattern string comparison. Dialog UI wiring (the "clashing aliases" list) still untested</td>
+</tr>
+<tr>
+<td>Regex consolidation with conflicting payees</td>
+<td>Same, but the subsumed aliases map to <em>different</em> payees than the new one</td>
+<td><code>RenamePayeeDialog.OnOkButton_Click</code>'s conflict-warning branch (lists conflicting payee names, up to 10 + "...")</td>
+<td>Warning dialog appears before commit; Cancel aborts with no aliases touched</td>
+<td>Fixture with subsumed aliases pointing at 2+ different payees</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; <code>FindSubsumedAliases</code> itself is already covered, this row is specifically about the conflict-warning dialog's own UI wiring</td>
+</tr>
+<tr>
+<td>Delete an alias (View/Aliases)</td>
+<td><code>AliasesView</code> → select a row → Delete</td>
+<td><code>Aliases.RemoveAlias</code></td>
+<td>Alias removed; page's own note confirms this does <em>not</em> undo the original rename, only stops future auto-renames</td>
+<td>Fixture with 1+ aliases</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks</td>
+</tr>
+<tr>
+<td>Alias regex that matches nothing</td>
+<td>Create a regex alias whose pattern never matches any payee string</td>
+<td><code>Alias.Matches(string)</code> returns false for all inputs</td>
+<td>Alias persists but has zero effect; no crash on save</td>
+<td>Fixture DB, arbitrary regex like <code>^ZZZ_NEVER_MATCHES$</code></td>
+<td>Business-layer gap: <code>Alias.Matches</code> untested</td>
+</tr>
+</tbody>
+</table>
+<h3 id="splits-transfers">Splits &amp; Transfers<a class="headerlink" href="#splits-transfers" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create a split with unassigned amount</td>
+<td>Right-click a transaction → <strong>Split</strong>, add 2 split rows that don't sum to the transaction total</td>
+<td><code>Splits.Unassigned</code>/<code>HasUnassigned</code> (computed properties, <code>Money.cs</code> ~13260-13310)</td>
+<td>Unassigned amount shown at bottom of split list; split button shows red outline</td>
+<td>Fixture with a plain transaction</td>
+<td>Written — <code>SplitsAndTransfersTests.cs</code>. Found <code>Unassigned</code> is not auto-recomputed from <code>AddSplit</code>/<code>Split.Amount</code> in a headless scenario (<code>Split.OnAmountChanged</code> is an empty method, and <code>Splits.AddSplit</code>'s <code>InsertItem</code> only fires property-changed notifications) — a direct business-layer caller must call <code>Splits.Rebalance()</code> explicitly; real UI code relies on WPF's grid plumbing to trigger it eventually</td>
+</tr>
+<tr>
+<td>F6 balances a split</td>
+<td>Focus a split's Payment field, press F6</td>
+<td><code>TransactionsView</code> F6 handler reads <code>SelectedTransaction.NonNullSplits.Unassigned</code> and writes it into the focused cell</td>
+<td>Split amount adjusts so total unassigned becomes 0</td>
+<td>Fixture with an out-of-balance split</td>
+<td>Written — <code>SplitsAndTransfersFlaUiTests.cs</code>'s <code>F6OnOutOfBalanceSplit_FillsRemainingAmount</code> (right-click → Splits… → F6 on a fresh empty split row fills it with the full 60.00 unassigned amount)</td>
+</tr>
+<tr>
+<td>Create a transfer by typing "Transfer to:"</td>
+<td>In a transaction's Payee field, type <code>Transfer to: &lt;account name&gt;</code>, enter amount</td>
+<td><code>Transaction.PayeeOrTransferCaption</code> setter → <code>MyMoney.Transfer(t, account)</code> → <code>MyMoney.Rebalance(account)</code></td>
+<td>A matching transaction is auto-created in the target account, linked</td>
+<td>Fixture with 2 accounts</td>
+<td>Business layer written — <code>SplitsAndTransfersTests.cs</code>'s <code>Transfer_CreatesLinkedTransactionInTargetAccount</code> (<code>MyMoney.Transfer</code> directly; the "Transfer to:" text-parsing UI-wiring path itself is still untested)</td>
+</tr>
+<tr>
+<td>Delete one side of an unreconciled transfer</td>
+<td>Delete either transaction of a linked transfer pair</td>
+<td><code>MyMoney.RemoveTransfer(t)</code></td>
+<td>~~Both sides removed~~ <strong>Corrected</strong>: only the <em>other</em> side (the transfer's <code>Transaction</code>/"target") is actually removed via <code>RemoveTransaction</code>; the side <code>RemoveTransfer</code> was called on just has its own <code>Transfer</code> link cleared and survives as an ordinary, non-transfer transaction</td>
+<td>Fixture with a 2-sided transfer, neither side reconciled</td>
+<td>Written — <code>SplitsAndTransfersTests.cs</code>'s <code>RemoveTransfer_UnreconciledBothSides_RemovesTargetSideOnly</code>, which corrects this row's own original "both sides removed" assumption after tracing <code>MyMoney.RemoveTransfer(Transfer)</code>'s real source/target roles</td>
+</tr>
+<tr>
+<td>Delete one side of a reconciled transfer (blocked)</td>
+<td>Delete a transfer transaction where the <em>other</em> side is reconciled</td>
+<td><code>MyMoney.RemoveTransfer</code> should refuse / the delete path should reject it</td>
+<td>Delete is blocked, transaction unchanged, per the page's documented behavior</td>
+<td>Fixture with one side marked reconciled</td>
+<td><strong>Resolved / Written</strong> — <code>SplitsAndTransfersTests.cs</code>'s <code>RemoveTransfer_PartnerIsReconciled_ThrowsAndLeavesBothSidesIntact</code>. Enforcement traced to <code>MyMoney.RemoveTransfer(Transfer t)</code>: when the other side's <code>Status == TransactionStatus.Reconciled</code>, it throws <code>MoneyException("Transfer is reconciled on the other side and cannot be modified outside of balancing the target account.")</code> before touching either side — a real exception, not a bool result or silent no-op</td>
+</tr>
+<tr>
+<td>F12 create a transfer from a non-transfer transaction</td>
+<td>Select a transaction with no transfer, press F12, confirm the prompt to link it to a matching transaction found in another account</td>
+<td>Same <code>MyMoney.Transfer</code> path, entered via a different UI trigger</td>
+<td>Transaction becomes a linked transfer</td>
+<td>Fixture with a same-amount, same-date transaction sitting unlinked in two accounts</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; <code>MyMoney.Transfer</code> itself is already covered (<code>SplitsAndTransfersTests.cs</code>), this row is specifically about the F12 UI trigger</td>
+</tr>
+<tr>
+<td>Split-transfer (transfer inside a Split row)</td>
+<td>In a Split's Payee column, type a transfer target account</td>
+<td><code>Split</code>-level transfer creation (same <code>Transaction</code>/<code>MyMoney.Transfer</code> machinery, invoked per-split)</td>
+<td>Linked transaction created in the target account for just that split's amount</td>
+<td>Fixture with a multi-split deposit</td>
+<td>Business-layer gap: split-level transfer path untested; also worth confirming the page's stated constraint ("can't have a split transfer go to a split on the other side") is actually enforced somewhere</td>
+</tr>
+</tbody>
+</table>
+<h3 id="merging-duplicate-transactions">Merging Duplicate Transactions<a class="headerlink" href="#merging-duplicate-transactions" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Duplicate detected and merged via Merge button</td>
+<td>Select a transaction; a dark-blue connector appears linking a detected duplicate; click <strong>Merge</strong></td>
+<td><code>Transactions.FindPotentialDuplicate(t, tc, range)</code> (detection) → <code>TransactionsView.Merge(t, u, false)</code> (WPF-only survivor-selection logic) → <code>Transaction.Merge(other)</code> (business-layer field-preserving merge)</td>
+<td>The two transactions collapse into one; a Category set on one and a Memo set on the other are both preserved (per the page's stated guarantee); the connector disappears</td>
+<td>Fixture with two near-duplicate transactions (e.g. same $11.73 Target charge, different FID)</td>
+<td>Written — business layer: <code>MergingDuplicateTransactionsTests.cs</code>. Found <code>FindPotentialDuplicate</code> requires the transaction itself to already be an element of the candidate list (<code>tc.IndexOf(t) &gt; 0</code>) and only checks its immediate list-neighbors — it is NOT a scan of the whole list for anything matching <code>t</code>; a candidate list missing <code>t</code> itself returns null unconditionally, even with an exact duplicate present. UI wiring: <code>MergingDuplicateTransactionsFlaUiTests.cs</code> — the connector auto-appears (a <code>DispatcherTimer</code>-delayed <code>ShowPotentialDuplicates</code>) once a selected transaction has a nearby match, with no explicit "select one" step needed beyond opening the account; its "Merge" button is a code-created <code>RoundedButton</code> with no <code>AutomationId</code> (found via <code>ByName("Merge")</code> instead). The survivor-selection rules (reconciled/transfer/investment/unaccepted precedence) still live only in <code>TransactionsView.xaml.cs</code> with no business-layer seam — same pattern as <code>BalanceControl</code>'s embedded logic under Balancing Accounts, below. <strong>UI/UX note</strong>: filed as <a href="https://github.com/markabrandjord/MyMoney.Net/issues/42">markabrandjord/MyMoney.Net#42</a> — this connector-overlay pattern isn't a standard Windows control; a comparison dialog was suggested as a better direction. <strong>Coverage gap found in Task 16's spot-check</strong>: <code>Transaction.Merge</code> itself is only 24% line-covered / 31% branch-covered by the full suite (via <code>dotnet test --collect:"XPlat Code Coverage"</code>) — the tests here exercise the transfer-conflict throw, the deleted-account-placeholder no-op, and one Category+Memo preservation case, but the method has ~15 more independent per-field merge branches (FITID, date, Number, Status, SalesTax, Unaccepted, transfer-creation, and ~10 Investment sub-fields) that no test touches. Not backfilled in this task — flagging for a future pass rather than expanding Task 16's own scope</td>
+</tr>
+<tr>
+<td>Merge preserves attachments from the removed side</td>
+<td>Same, where the non-surviving transaction has an attachment and the survivor doesn't</td>
+<td><code>AttachmentManager.MoveAttachments(u, t)</code> (WPF-project-only, no business-layer counterpart)</td>
+<td>Attachment now appears on the surviving transaction</td>
+<td>Fixture with an attachment on one of the two duplicates</td>
+<td>Business-layer gap: <code>AttachmentManager</code> isn't migrated at all — see Attachments, below</td>
+</tr>
+<tr>
+<td>Mark as not-a-duplicate</td>
+<td>Click the "(x)" button on the duplicate connector instead of Merge</td>
+<td><code>TransactionsView.OnConnectorClosed</code> sets <code>Transaction.NotDuplicate = true</code> on both sides</td>
+<td>Connector dismissed; re-selecting either transaction later does not re-prompt</td>
+<td>Same fixture pair</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks</td>
+</tr>
+<tr>
+<td>Merge two transactions that are not actually duplicates (forced)</td>
+<td>Manually invoke merge (e.g. via drag/drop per the page) on two unrelated transactions</td>
+<td>Same <code>Transaction.Merge</code> path</td>
+<td>Behavior when merging genuinely unrelated transactions (does it silently combine memo/category, does it warn?) — this is the closest thing to a "genuine failure/invalid input" case for this feature and isn't described as blocked anywhere</td>
+<td>Fixture with two clearly-unrelated transactions</td>
+<td>Partially resolved — <code>MergingDuplicateTransactionsTests.cs</code> found and tested two real guards: <code>Merge</code> throws <code>ApplicationException</code> when both sides are transfers to <em>different</em> accounts (an unresolvable conflict, not silently resolved), and returns <code>false</code> without merging any field when the duplicate's category is the synthetic "transfer to/from deleted account" placeholder. There is still no general "these two transactions aren't actually related" rejection — merging two arbitrary unrelated transactions with ordinary categories would still silently combine fields</td>
+</tr>
+</tbody>
+</table>
+<h3 id="currencies-securities">Currencies &amp; Securities<a class="headerlink" href="#currencies-securities" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add a new currency row manually</td>
+<td><code>View/Currencies</code>, add a new row, type a valid 3-letter code and ratio</td>
+<td><code>CurrenciesView</code>'s grid <code>InsertItem</code> → <code>Currencies.AddCurrency(currency)</code></td>
+<td>New <code>Currency</code> persists; <code>CultureCode</code>/<code>Name</code> auto-populate from <code>Currency.GetCultureForCurrency</code> when left blank</td>
+<td>Fixture DB</td>
+<td>Written — business layer: <code>CurrenciesTests.cs</code> (<code>AddCurrency</code> persistence; also <code>MultiCurrencyTransactions_ComputeCorrectUsdEquivalent</code> covering EUR/CAD/GBP/JPY/AUD amount/ratio math). UI wiring: <code>CurrenciesFlaUiTests.cs</code> (<code>AddingNewCurrencyRow_PersistsWithEnteredCode</code>, the other 5 currencies CHF/MXN/INR/BRL/CNY + a fresh "SEK" add) - covers Symbol entry via the <code>FilteringComboBox</code> (F4 to open, type to filter, click match, Enter to commit) and persistence; the <code>CultureCode</code>/<code>Name</code> auto-fill-on-blank behavior specifically is still untested</td>
+</tr>
+<tr>
+<td>Add a currency with an unrecognized/invalid code</td>
+<td>Same, but type a nonsense 3-letter code like <code>ZZZ</code></td>
+<td><code>Currency.GetCultureForCurrency("ZZZ")</code></td>
+<td>No rejection — silently falls back to <code>CultureInfo.CurrentCulture</code>, so Name/CultureCode auto-fill with the <em>wrong</em> locale instead of erroring; genuine "invalid input silently accepted" case</td>
+<td>Fixture DB</td>
+<td>Written — <code>CurrenciesTests.cs</code> confirms and documents the fallback-to-CurrentCulture behavior as intended reality, not a bug</td>
+</tr>
+<tr>
+<td>Remove a currency</td>
+<td>Select a currency row, delete it</td>
+<td><code>Currencies.RemoveCurrency(currency)</code></td>
+<td>Currency removed; any account/report referencing it should be checked for a validation guard or lack thereof</td>
+<td>Fixture with an unused currency</td>
+<td>Written — <code>CurrenciesTests.cs</code> (unused/not-yet-saved currency removed immediately, same <code>IsInserted</code>-gated immediate-removal path as <code>Categories.RemoveCategory</code>)</td>
+</tr>
+<tr>
+<td>Edit stock split history for a security</td>
+<td><code>View/Securities</code>, expand a security's split history, add/edit a split row</td>
+<td><code>StockSplits.AddStockSplit</code>/<code>RemoveStockSplit</code></td>
+<td>Cost-basis calculations for that security update correctly</td>
+<td>Fixture security with buy transactions</td>
+<td>Already covered — <code>CostBasisTests.cs</code> and <code>DatabaseContractTests.SimpleEntities.cs</code> exercise this thoroughly; no new gap</td>
+</tr>
+<tr>
+<td>Enter CUSIP for a new manually-added security</td>
+<td><code>View/Securities</code>, add a security with Type=Private and a CUSIP</td>
+<td><code>Security</code> domain object (plain property setters)</td>
+<td>Security persists with CUSIP; future OFX/CSV import matching by CUSIP succeeds (that matching logic is Importers/Ofx-owned)</td>
+<td>Fixture DB</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; low priority — thin property editor, no branching business logic of its own</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not fully verified</strong>: no distinct UI entry point was found for <code>Security.Merge</code> (CUSIP/symbol dedup) — it's apparently only exercised from import/OFX paths, not a user-invoked "merge two securities" action from <code>Securities.md</code> itself.</p>
+<h3 id="auto-categorization">Auto-Categorization<a class="headerlink" href="#auto-categorization" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Empty category auto-fills from payee history</td>
+<td>Enter an amount on a transaction for a known Payee, tab into the (empty) Category field</td>
+<td><code>AutoCategorization.AutoCategoryMatch(t, payeeOrTransferCaption)</code> (WPF-free, <code>MyMoney.Business/AutoCategorization.cs</code>)</td>
+<td>Category field auto-populates with the statistically-closest category from that payee's transaction history</td>
+<td>Fixture with several past "ARCO → Auto:Fuel" transactions at varying amounts</td>
+<td>Written — <code>AutoCategorizationTests.cs</code></td>
+</tr>
+<tr>
+<td>No matching payee history (nothing to suggest)</td>
+<td>Same, for a brand-new Payee never seen before</td>
+<td>Same API, returns <code>null</code>/no match</td>
+<td>Category field stays empty, no exception</td>
+<td>Fixture with a payee that has no prior transactions</td>
+<td>Written — <code>AutoCategorizationTests.cs</code></td>
+</tr>
+<tr>
+<td>Split-transaction history preferred/avoided per algorithm</td>
+<td>Payee history contains both plain and split transactions at similar amounts</td>
+<td><code>AutoCategorization.AddPossibility</code>/<code>FindPreviousTransactionByPayee</code>'s split-vs-normal count comparison</td>
+<td>Algorithm "avoids picking a matching transaction that contains a Split unless there's no other choice" per the page — verify this branch actually holds</td>
+<td>Fixture with mixed split/non-split history for one payee</td>
+<td>Business-layer gap: this specific documented heuristic is unverified</td>
+</tr>
+<tr>
+<td>Zero-amount transaction falls back to closest-by-date</td>
+<td>Enter a Payee with no Amount yet, then tab into Category</td>
+<td><code>FindPreviousTransactionByPayee</code>'s <code>amount == 0</code> branch (closest-by-date fallback)</td>
+<td>Category from the most recent same-payee transaction is suggested, ignoring amount statistics</td>
+<td>Fixture with payee history at various dates</td>
+<td>Written — <code>AutoCategorizationTests.cs</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="quick-search-advanced-queries">Quick Search &amp; Advanced Queries<a class="headerlink" href="#quick-search-advanced-queries" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Quick Search literal match</td>
+<td>Type <code>costco</code> into the Quick Search box, Enter</td>
+<td><code>QuickFilterParser&lt;T&gt;.Parse</code> → <code>FilterKeyword</code>/<code>FilterLiteral.MatchSubstring</code> (WPF-free, <code>MyMoney.Business/Utilities/QuickFilterParser.cs</code>)</td>
+<td>Only transactions containing "costco" (case-insensitive) shown</td>
+<td>Fixture with Costco and non-Costco transactions</td>
+<td>Written — business layer: <code>QuickFilterParserTests.cs</code>; UI wiring (incl. the Enter-to-commit behavior): <code>QuickSearchFlaUiTests.cs</code></td>
+</tr>
+<tr>
+<td>Quick Search boolean AND/OR/NOT/parens</td>
+<td>Type <code>costco and fuel</code>, <code>costco or fuel</code>, <code>costco and (gas or fuel)</code>, <code>costco !gas</code>, <code>"costco &amp;gas"</code> per the page's own examples</td>
+<td>Same parser</td>
+<td>Each expression's documented result set matches</td>
+<td>Same fixture, richer data</td>
+<td>Partially written — <code>QuickFilterParserTests.cs</code> covers AND, OR, and the quoted-literal-escapes-operators case; NOT (<code>!gas</code>) and parenthesized sub-expressions (<code>costco and (gas or fuel)</code>) still untested</td>
+</tr>
+<tr>
+<td>Advanced Query builder, single-field match</td>
+<td><code>Query</code> menu, build a query row (e.g. Category = "Food:Groceries")</td>
+<td><code>Transactions.ExecuteQuery(QueryRow[])</code> (WPF-free, <code>MyMoney.Business/Query.cs</code> — lives on <code>MyMoney.Transactions</code>, not <code>MyMoney</code> itself, despite this row's original API note)</td>
+<td>Only matching transactions (including matching splits, shown as read-only fake rows per the page) returned</td>
+<td>Fixture with categorized transactions incl. splits</td>
+<td>Written — <code>ExecuteQueryTests.cs</code> (single-field Equals + no-match cases; the split-row fake-Transaction path is still untested)</td>
+</tr>
+<tr>
+<td>Advanced Query builder, multi-row AND/OR</td>
+<td>Build 2+ query rows with a Conjunction of And/Or</td>
+<td><code>Transactions.ExecuteQuery</code> conjunction-combining logic</td>
+<td>Result set matches the documented AND/OR semantics</td>
+<td>Same fixture</td>
+<td>Partially written — <code>ExecuteQueryTests.cs</code> covers a 2-row AND (and found/documented that <code>QueryRow.Matches(decimal)</code>'s <code>GreaterThan</code> is actually <code>&gt;=</code>); multi-row OR still untested</td>
+</tr>
+<tr>
+<td>Advanced Query on a value that matches nothing</td>
+<td>Query for a Payee/Category that doesn't exist in the data</td>
+<td><code>Transactions.ExecuteQuery</code></td>
+<td>Empty result set, no exception</td>
+<td>Fixture DB, deliberately-absent search value</td>
+<td>Written — <code>ExecuteQueryTests.cs</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Also flagged</strong>: <code>Source/WPF/MyMoney/Views/TransactionSelectors.cs</code> (the F5/F6/F7/F8 pivot selectors and the <code>TransactionFilterSelector</code> behind the Filtering dropdown) is pure logic with no WPF dependency but still lives in the WPF project, not <code>MyMoney.Business</code> — low-stakes (thin wrappers over already-tested methods) but a real "hasn't migrated yet" case.</p>
+<h3 id="attachments">Attachments<a class="headerlink" href="#attachments" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add attachment via drag/drop or paste</td>
+<td>Drag a file (or paste an image/rich text) onto a transaction</td>
+<td><code>AttachmentManager</code> (<code>Source/WPF/MyMoney/Attachments/AttachmentManager.cs</code> — filesystem-path/directory logic, <strong>not migrated</strong>, no business-layer counterpart)</td>
+<td>Paperclip icon appears; file stored under <code>*.Attachments/&lt;account&gt;/&lt;transactionId&gt;</code></td>
+<td>Fixture DB + a sample file</td>
+<td>Business-layer gap: <code>AttachmentManager</code> needs a WPF-free extraction (filed as <a href="https://github.com/markabrandjord/MyMoney.Net/issues/44">markabrandjord/MyMoney.Net#44</a>; same precedent as <code>StatementManager</code>, under Statements below) before a meaningful business-layer test can exist. Found the paperclip icon (<code>Transaction.HasAttachment</code>) is driven by <code>AttachmentWatcher</code>'s background scan, dispatched at <code>DispatcherPriority.Background</code> — it did not visibly flip within 10s in this environment, so don't gate a test on it appearing</td>
+</tr>
+<tr>
+<td>Delete an attachment</td>
+<td>Open the attachment dialog, delete the selected item</td>
+<td>Same (<code>AttachmentManager</code>)</td>
+<td>File removed from disk and from the transaction's attachment list</td>
+<td>Fixture with an existing attachment</td>
+<td>UI wiring written — <code>AttachmentsFlaUiTests.cs</code>'s <code>DeletingAttachment_RemovesFileAndListEntry</code>. Found <code>AttachmentDialog.LoadAttachments</code> does its own synchronous <code>Manager.GetAttachments(t)</code> directory scan independent of the (unreliable) <code>HasAttachment</code> flag above, so the dialog finds a pre-seeded file regardless. Also found <code>AttachmentDialog</code> (a non-modal, owned <code>Window.Show()</code>) is invisible to <code>automation.GetDesktop().FindAllChildren()</code> even scoped by <code>ByProcessId</code> — a documented UIA desktop-enumeration gap (FlaUI#57/#239) — worked around with a raw Win32 <code>EnumWindows</code> fallback (<code>Win32WindowFallback.cs</code>, per the flaui-wpf-testing skill's native-dialogs guidance). Business-layer gap (#44) still applies</td>
+</tr>
+<tr>
+<td>Scan and crop a receipt</td>
+<td>Click <strong>Scan</strong>, adjust crop boundary, save</td>
+<td><code>AttachmentDialog.xaml.cs</code> (scanner integration, WPF-only, no meaningful business logic to extract)</td>
+<td>Cropped image saved as the attachment</td>
+<td>Requires physical/virtual scanner hardware — likely impractical to automate</td>
+<td>Business-layer gap (infra, not logic): scanner hardware dependency makes this low priority regardless of the <code>AttachmentManager</code> migration</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sample-data">Sample Data<a class="headerlink" href="#sample-data" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Populate sample data into a new empty database</td>
+<td>Help menu → "Add Sample Data..."</td>
+<td><code>SampleDatabase.Create()</code> (WPF-facing) → <code>SampleDataLoader.LoadEmbeddedSampleData</code> + <code>Walkabout.Data.SampleDataGenerator</code> (both WPF-free)</td>
+<td>Accounts, categories, transactions, and stock trades appear as described</td>
+<td>New empty database</td>
+<td>Written — <code>SampleDataFlaUiTests.cs</code>'s <code>PopulateSampleData_OnEmptyDatabase_AddsAccountsAndTransactions</code>. Predicted results computed by calling the already-tested <code>SampleDataLoader.LoadEmbeddedSampleData</code> directly in the test's arrange step (same embedded resource the app itself extracts), rather than hardcoding expected account names</td>
+</tr>
+<tr>
+<td>Cancel the "Add Sample Data" dialog on an empty database</td>
+<td>Help menu → "Add Sample Data...", then Cancel</td>
+<td><code>MainWindow.OnCommandAddSampleData</code></td>
+<td>Database should remain untouched (zero accounts)</td>
+<td>New empty database</td>
+<td><strong>Real app bug found, not fixed here</strong>: <code>OnCommandAddSampleData</code> unconditionally does <code>this.accountsControl.SelectedAccount = this.myMoney.Accounts.GetFirstAccount();</code> after <code>SampleDatabase.Create()</code> returns — even when cancelled — and <code>GetFirstAccount()</code> is <code>null</code> on an empty database, which <code>AccountsControl.SelectedAccount</code>'s setter NREs on (<code>!value.IsDeleted</code> with <code>value == null</code>). Filed as <a href="https://github.com/markabrandjord/MyMoney.Net/issues/45">markabrandjord/MyMoney.Net#45</a>. <code>SampleDataFlaUiTests.cs</code>'s <code>CancelPopulateSampleDataDialog_LeavesEmptyDatabaseUnchanged</code> reproduces it reliably and is marked <code>[Ignore]</code> pending the fix. This is also what surfaced the gap that every Basics FlaUI test's assertions can still pass while the real app crashes in the background — see <code>AppCrashGuard.cs</code> and CLAUDE.md</td>
+</tr>
+<tr>
+<td>Populate from a custom template file</td>
+<td>Same, but use the dialog's browse button to pick a non-default <code>SampleData.xml</code></td>
+<td><code>SampleDatabase.Create()</code>'s custom-path branch (reloads via <code>XmlSerializer</code> and rebuilds quotes to match the custom file's securities)</td>
+<td>Custom accounts/securities appear instead of the default set</td>
+<td>A hand-crafted alternate <code>SampleData.xml</code></td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks</td>
+</tr>
+<tr>
+<td>Export current data as a sample-data template</td>
+<td>Help menu → "Export Sample Data"</td>
+<td><code>SampleDatabase.Export(path)</code></td>
+<td>Generated histogram-based template file opens; per the page, values are randomized/anonymized, not real user data</td>
+<td>Fixture DB with real-looking transactions</td>
+<td>Deferred — not selected for the 2026-09-18 Basics implementation plan's 16 tasks; verify the anonymization claim specifically — does exported data ever leak literal Payee/Memo strings?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="skipped-in-basics-reference-only-no-distinct-testable-action">Skipped in Basics (reference-only, no distinct testable action)<a class="headerlink" href="#skipped-in-basics-reference-only-no-distinct-testable-action" title="Permanent link">#</a></h3>
+<p><code>install.md</code> (ClickOnce download page), <code>Updates.md</code> (ClickOnce update-check UI, outside app control), <code>Keyboard.md</code> (every shortcut with real logic — F12 transfer nav, F6 split-balance, Ctrl+Space accept/reconcile, Ctrl+Enter auto-categorize — is already captured under its owning feature above), <code>Calculator.md</code> (self-contained WPF control, no domain-model interaction), <code>Navigation.md</code> (thin selector wrappers already discussed under Quick Search), <code>Clipboard.md</code> (Copy/Cut/Paste glue with no business-layer counterpart and no failure mode beyond what's covered under Balancing Accounts), <code>Setup.md</code> (the initial database-location dialog is the same flow as File lifecycle, under Accounts), <code>Options.md</code> (flat settings panel, no branching business logic — database-password change/removal is already covered by <code>DataEnginePasswordGeneratorTests.cs</code>).</p>
+<hr />
+<h2 id="accounts">Accounts<a class="headerlink" href="#accounts" title="Permanent link">#</a></h2>
+<h3 id="file-lifecycle">File lifecycle<a class="headerlink" href="#file-lifecycle" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>New database (SQLite)</td>
+<td>File | New | SQLite (or the non-DEBUG default)</td>
+<td><code>DatabaseLifecycle.Open</code> via <code>MainWindow</code>'s call site</td>
+<td>New <code>.mmdb</code> file created and opened, empty</td>
+<td>New temp filename</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Open database, no upgrade needed</td>
+<td>File | Open, pick a current-schema fixture</td>
+<td><code>DatabaseLifecycle.Open</code></td>
+<td>Opens normally, data visible</td>
+<td>A current-schema fixture (e.g. reuse <code>PayeeSmokeTest.mmdb</code>)</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Open database, upgrade required, user accepts</td>
+<td>File | Open an old-schema fixture, click <strong>Yes</strong> on the upgrade prompt</td>
+<td><code>DatabaseLifecycle.Open</code> → <code>IBusinessLayerUiCallback.ConfirmWithDetails</code> returns <code>true</code> → engine <code>Upgrade()</code> runs</td>
+<td>Database upgrades and opens; password persisted before load (per <code>DatabaseLifecycleTests</code>' already-covered ordering)</td>
+<td>An old-schema fixture (needs creating/checking in)</td>
+<td>Business-layer gap: confirm <code>DatabaseLifecycleTests</code> actually has an accept-path case with a <em>real</em> pre-upgrade fixture, not just a faked accept; then write this</td>
+</tr>
+<tr>
+<td>Open database, upgrade required, user declines</td>
+<td>Same fixture, click <strong>No</strong></td>
+<td>Same path, <code>ConfirmWithDetails</code> returns <code>false</code></td>
+<td>Load aborts, no password written, no crash</td>
+<td>Same old-schema fixture</td>
+<td>Not started (business-layer decline path already covered by <code>DatabaseLifecycleTests</code> — this scenario only needs to prove the real dialog's No button actually returns <code>false</code> to the callback)</td>
+</tr>
+<tr>
+<td>Save / Save As, each format</td>
+<td>File | Save, then Save As into <code>.mmdb</code>/<code>.xml</code>/<code>.bxml</code>/SQL CE <code>.sdf</code></td>
+<td><code>MainWindow</code>'s <code>Save</code>/<code>SaveAs*</code> methods (not extracted — see the migration's own rationale for why)</td>
+<td>File written, reopens with same data</td>
+<td>A small fixture with a few transactions</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Export to CSV</td>
+<td>File | Export | CSV</td>
+<td><code>Exporters.Export</code>/<code>ExportPrompt</code> → <code>IBusinessLayerUiCallback.PromptSaveFileName</code>/<code>OpenExportedFile</code></td>
+<td>Exported file opens and contains expected rows</td>
+<td>A small fixture</td>
+<td>Not started (business-layer formatting already covered by <code>CsvTransactionFormatTests</code>/<code>ExportersTests</code> — this only proves the dialog wiring and that the file actually opens afterward)</td>
+</tr>
+<tr>
+<td>Export current transaction view (context menu)</td>
+<td>Right-click a transaction grid → <strong>Export...</strong></td>
+<td><code>TransactionsView.OnCommandViewExport</code> → same <code>Exporters.ExportPrompt</code>/<code>Exporters.Export</code> API as File | Export | CSV</td>
+<td>Exported file contains only the rows currently in view (investment columns vs. non-investment columns per <code>ContextMenu.md</code>'s table)</td>
+<td>A small fixture with both a bank account and an investment account view open</td>
+<td>Not started (same business-layer coverage as the row above — this only proves the <em>second</em> call site wires the same API with the right row subset/columns)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="csv-import">CSV import<a class="headerlink" href="#csv-import" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CSV import, column mapping</td>
+<td>File | Import a CSV without a saved mapping</td>
+<td><code>IBusinessLayerUiCallback.PromptForCsvFieldMapping</code> → <code>CsvImportController.ImportCsv</code></td>
+<td>Mapping dialog appears pre-populated from headers; after mapping, transactions import correctly</td>
+<td>A small CSV with a header row not matching a saved <code>CsvMap</code></td>
+<td>Not started (mapping/import logic covered by <code>CsvTransactionImporterTests</code>/<code>CsvImportControllerTests</code> — this proves the real dialog produces a <code>CsvMap</code> that round-trips correctly)</td>
+</tr>
+<tr>
+<td>CSV import, account picker</td>
+<td>Import a CSV without an "Account Number" column</td>
+<td><code>IBusinessLayerUiCallback.PickAccount</code></td>
+<td>Account-picker dialog appears; selected account receives the imported transactions</td>
+<td>A small CSV with no account-number column</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>CSV import, malformed file</td>
+<td>Import a CSV that fails to parse</td>
+<td><code>ShowError</code> (or whichever method now handles this)</td>
+<td>Error dialog shown, app doesn't crash, no partial import</td>
+<td>A deliberately malformed CSV</td>
+<td>Not started</td>
+</tr>
+</tbody>
+</table>
+<h3 id="stock-quotes">Stock quotes<a class="headerlink" href="#stock-quotes" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stock quote download error</td>
+<td>Trigger a quote download with a bad/expired API key</td>
+<td><code>IBusinessLayerUiCallback.ClearOutputLog</code>/<code>AppendErrorLog</code></td>
+<td>Output pane shows the error, log-file link (if present) actually opens the log</td>
+<td>An intentionally-invalid API key in test settings</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Configure Online Service (success)</td>
+<td>Online menu | Online Services... → pick twelvedata/yahoo, enter API key + per-minute/day/month limits</td>
+<td><code>OnlineServiceDialog</code> → <code>DatabaseSettings</code>/<code>StockQuoteManager</code> construction with <code>IStockQuoteService</code>/<code>StockQuoteThrottle</code></td>
+<td>Settings persist (reopen dialog shows same values); a subsequent download respects the entered throttle limits</td>
+<td>A fake API key + small limit values (e.g. limit=1/minute)</td>
+<td>Not started (throttle logic itself covered by <code>StockQuoteThrottleTests.cs</code> — this only proves the dialog's fields round-trip into <code>StockQuoteThrottle</code>/<code>DatabaseSettings</code> correctly)</td>
+</tr>
+<tr>
+<td>Configure Online Service, invalid limit value</td>
+<td>Enter a negative or non-numeric value in a rate-limit field</td>
+<td>(none identified — no validation found in <code>OnlineServiceDialog.xaml.cs</code>)</td>
+<td>Dialog should reject or clamp; currently unclear whether it does</td>
+<td>Negative number / non-numeric text in a limit field</td>
+<td>Business-layer gap: no validation seam found; needs a closer source read to confirm actual behavior before writing a test</td>
+</tr>
+<tr>
+<td>Exchange rate download reflected in Currencies view</td>
+<td>Add a non-USD currency account → triggers <code>ExchangeRateService.CreateOrUpdate</code> from <code>AccountDialog.OnCurrencyChanged</code></td>
+<td><code>ExchangeRateService.CreateOrUpdate</code> (already tested — <code>ExchangeRateServiceTests.cs</code>)</td>
+<td><code>AccountDialog</code>'s rate textbox updates with the fetched rate; <code>CurrenciesView</code> reflects it</td>
+<td>A non-USD currency code (e.g. "EUR") with a fake/mocked rate source</td>
+<td>Not started (rate-fetch logic covered by <code>ExchangeRateServiceTests.cs</code> — this only proves <code>AccountDialog</code>'s currency combo wiring calls it and displays the result)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ofx-download">OFX download<a class="headerlink" href="#ofx-download" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OFX download, protocol error</td>
+<td>Trigger a download against a mock/test server returning a malformed OFX response</td>
+<td><code>IBusinessLayerUiCallback.ConfirmWithDetails</code> (CHALLENGERQ/PINCHRQ paths) or the generic error path (<code>error.GetType().FullName + ": " + error.Message</code> + stack trace rendering, restored in the migration's Task 8)</td>
+<td>Generated <code>OfxErrorTemplate.htm</code> report actually contains the exception type name and stack trace</td>
+<td>A test OFX server/fixture returning a malformed response (needs building — may not exist yet)</td>
+<td>Business-layer gap: no test infrastructure exists yet for driving a fake OFX server response; scope that before attempting this UI test</td>
+</tr>
+<tr>
+<td>MFA challenge</td>
+<td>Trigger a download requiring MFA</td>
+<td><code>MfaChallengeDialog</code></td>
+<td>Dialog renders challenge phrases from <code>MfaPhrases.xml</code> correctly</td>
+<td>Needs a bank/test account that actually triggers MFA — likely the hardest scenario to set up</td>
+<td>Not started, lowest priority (read-verified-only, no realistic manual step reaches this today)</td>
+</tr>
+<tr>
+<td>Online Accounts dialog: bank list lookup + Connect</td>
+<td>Online | Download Accounts → pick a bank from <code>OFXBankList.md</code>'s ~338 entries, click Connect</td>
+<td><code>OfxInstitutionInfo</code> list (already in <code>MyMoney.Business/Ofx/OfxInstitutionInfo.cs</code>) → <code>OnlineAccountDialog.OnButtonVerify</code>/<code>GetProfile</code> (still fully WPF-embedded, ~1700 lines, no seam)</td>
+<td>Profile response renders institution info + credential fields</td>
+<td>A fixture/mock OFX profile response</td>
+<td>Business-layer gap: <code>OnlineAccountDialog</code>'s signon/profile/account-matching orchestration has no business-layer extraction at all — the largest single gap found in this whole audit; the underlying <code>OfxObjectModel</code> parsing is tested (<code>OfxObjectModelTests.cs</code>) but the orchestration around it is not</td>
+</tr>
+<tr>
+<td>Account matching: green check vs. question mark</td>
+<td>After Connect, downloaded account numbers are matched against local accounts</td>
+<td><code>OnlineAccountDialog.AccountListItem</code> (WPF-embedded) — matching against <code>Account.OfxAccountId</code>/<code>AccountAlias</code></td>
+<td>Question-mark shown when no match; green check when <code>OfxAccountId</code> matches; clicking question-mark lets user pick/add the account</td>
+<td>A profile response with one matched and one unmatched account number</td>
+<td>Business-layer gap: same as above — matching logic lives entirely in <code>AccountListItem</code>, no unit-testable seam</td>
+</tr>
+<tr>
+<td>Multi-factor authentication / AuthToken / Change Password dialogs</td>
+<td>Bank challenges with MFA / AuthToken / ChangePassword during signon</td>
+<td><code>OnlineAccountDialog.HandleSignOnErrors</code>/<code>GetSignOnCode</code>/<code>PromptForAuthToken</code>/<code>PromptForPassword</code> → <code>MfaChallengeDialog</code>/<code>AuthTokenDialog</code>/<code>ChangePasswordDialog</code></td>
+<td>Correct dialog chosen per <code>OfxErrorCode</code>; only the MFA path is tracked above — AuthToken and ChangePassword paths aren't tracked anywhere yet</td>
+<td>OFX signon responses with each error code</td>
+<td>Business-layer gap: <code>GetSignOnCode</code>/<code>HandleSignOnErrors</code> dispatch logic is WPF-embedded with no seam</td>
+</tr>
+<tr>
+<td>Multiple online accounts, same institution</td>
+<td>Edit OnlineAccount "Name" to be unique</td>
+<td><code>OnlineAccountDialog</code> → <code>MyMoney.OnlineAccounts.AddOnlineAccount</code> (business-layer container exists in <code>Money.cs</code>)</td>
+<td>Two <code>OnlineAccount</code> records with distinct names/credentials both persist and reconnect independently</td>
+<td>Two <code>OnlineAccount</code> entries for the same bank with different Name/credentials</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Deselect/disconnect an online account</td>
+<td>Click the checkmark icon to toggle "disconnected"</td>
+<td><code>Account.OnlineAccount = null</code> or an <code>IsDisconnected</code>-style flag (need to confirm exact field)</td>
+<td>Account no longer receives future downloads; can be reconnected later</td>
+<td>An account with an active <code>OnlineAccount</code> link</td>
+<td>Not started — need to confirm the exact persisted field for "disconnected" state before writing</td>
+</tr>
+<tr>
+<td>Bank-specific OFX error codes</td>
+<td>Connect against a bank returning one of the cataloged error codes (TYPE1 security, SSL trust failure, 400/404/500, etc.)</td>
+<td><code>OnlineAccountDialog.HandleSignOnErrors</code>/<code>GetSignOnCode</code> (WPF-embedded)</td>
+<td>Correct, specific error message surfaces to the user, not just a generic failure</td>
+<td>Mocked OFX responses reproducing a few of the cataloged codes</td>
+<td>Business-layer gap: same dispatch logic as above; a special case of the "OFX download, protocol error" row above, worth folding in once that row's "no fake OFX server" gap is closed</td>
+</tr>
+</tbody>
+</table>
+<h3 id="bank-credit-card-investment-account-setup">Bank / Credit Card / Investment account setup<a class="headerlink" href="#bank-credit-card-investment-account-setup" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create a new Checking/Savings account</td>
+<td>Accounts panel context menu → Setup Accounts → fill Name, Account Type = Checking, Opening Balance</td>
+<td><code>AccountDialog.HandleOk</code> → <code>Account</code> fields — <code>Account</code>/<code>Accounts</code> already WPF-free in <code>Money.cs</code></td>
+<td>New account appears in the Accounts panel under the right group, opening balance seeds the register</td>
+<td>Name="Test Checking", OpeningBalance=1000.00</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Create account with invalid name</td>
+<td>Type a name containing a char from <code>Accounts.InvalidNameChars</code> (<code>{ } : * " / \ &lt; &gt; \| ?</code>)</td>
+<td><code>AccountDialog.OnNameChanged</code> (pure WPF validation; <code>Accounts.InvalidNameChars</code> itself is business-layer data)</td>
+<td>Textbox turns red, tooltip shows valid-chars message, OK button disabled</td>
+<td>Name="Test/Account"</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Account number silently truncated</td>
+<td>Enter an Account Number/Online Account Id longer than 20 chars (or 50 for <code>OfxAccountId</code>)</td>
+<td><code>Account.OfxAccountId</code>/<code>AccountId</code> setters → <code>Truncate(...)</code> — no rejection or warning at any layer</td>
+<td>Value is silently truncated, not rejected — no error shown to user</td>
+<td>A 60-character account number string</td>
+<td>Business-layer gap: no validation exists to test against; this scenario would document current silent-truncation behavior</td>
+</tr>
+<tr>
+<td>Credit Card account shows negative balance in red</td>
+<td>Create account with Type=Credit, add a charge transaction</td>
+<td>Same <code>AccountDialog</code>/<code>Account</code> API; color is theme-driven</td>
+<td>Balance displays as negative in the themed color; account listed under "Credit" group</td>
+<td>Type=Credit, one $50 charge</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Investment (Brokerage/Retirement) account shows Activity column + Portfolio tab</td>
+<td>Create account with Type=Brokerage, add a Buy/Sell/Dividend transaction</td>
+<td><code>Account</code>/<code>Transaction.InvestmentType</code> (already WPF-free); Portfolio tab backed by <code>Reports/PortfolioReport.cs</code> → <code>CostBasisCalculator</code> (tested)</td>
+<td>Transaction grid shows investment columns; second "Portfolio" tab renders holdings</td>
+<td>Type=Brokerage, one Buy of 10 shares</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Sell more shares than currently held (investment)</td>
+<td>Enter a Sell transaction with Units exceeding current holding</td>
+<td><code>CostBasisCalculator</code>/<code>Transactions.Rebalance</code></td>
+<td>Behavior currently unverified — no test found for this oversell case</td>
+<td>A security with 10 shares held, sell 20</td>
+<td>Business-layer gap: close with a direct <code>CostBasisCalculator</code>/oversell unit test first — establish the actual behavior (negative holding? exception? silently allowed?) before any UI test can assert on it</td>
+</tr>
+</tbody>
+</table>
+<h3 id="loans">Loans<a class="headerlink" href="#loans" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create Loan account + record initial loan amount</td>
+<td>Setup Accounts | Type=Loan → set Principal/Interest categories → enter initial loan transaction</td>
+<td><code>LoanDialog.ButtonOk</code> → <code>Account.CategoryForPrincipal</code>/<code>CategoryForInterest</code> → <code>MyMoney.GetOrCreateLoanAccount</code> → <code>Loan.GetLoanPaymentsAggregation</code> (all WPF-free, <code>Money_Loans.cs</code>)</td>
+<td>Loan register groups payments by year, balance column shows remaining principal</td>
+<td>A Loan account with Principal/Interest categories + one payment split</td>
+<td>Not started (no <code>LoanTests.cs</code>/<code>Money_LoansTests.cs</code> exists — add direct coverage first)</td>
+</tr>
+<tr>
+<td>Refinance: interest rate change recomputes principal/interest</td>
+<td>Enter a new interest rate on an existing loan</td>
+<td><code>Loan.CalculatePercentageOfInterest</code>/<code>ComputeLoanAccountBalance</code></td>
+<td>Principal/interest split recomputes automatically for subsequent payments</td>
+<td>A loan with several payments, then a rate change transaction</td>
+<td>Not started (no direct unit test of <code>CalculatePercentageOfInterest</code>)</td>
+</tr>
+<tr>
+<td>F12 jump to related payment transaction</td>
+<td>Select a loan payment row, press F12</td>
+<td><code>LoansView</code> → <code>CommandGotoRelatedTransaction</code> (WPF-embedded navigation)</td>
+<td>Navigates to the split transaction in the source checking account</td>
+<td>A loan with a payment sourced from a checking-account split</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Loan with Principal/Interest categories not set</td>
+<td>Create Loan account, leave categories null, add payments</td>
+<td><code>Loan.AddPaymentIfMatchingCategoriesForPrincipalOrInterest</code> returns <code>null</code> when either category is null</td>
+<td>No payments show up in the loan register — silently, no error</td>
+<td>A Loan account with categories left blank</td>
+<td>Not started — cheap to unit-test directly since the early-return is already business-layer code</td>
+</tr>
+<tr>
+<td>Invalid/degenerate interest rate</td>
+<td>Force a scenario where <code>Interest</code>/<code>runningBalance</code> yields a nonsensical <code>Percentage</code></td>
+<td><code>Loan.CalculatePercentageOfInterest</code> — no bounds checking</td>
+<td>Confirm whether the UI just displays a nonsensical rate with no warning</td>
+<td>A loan payment sequence that drives <code>runningBalance</code> negative or near-zero</td>
+<td>Business-layer gap: no test covers this edge case</td>
+</tr>
+</tbody>
+</table>
+<h3 id="assets">Assets<a class="headerlink" href="#assets" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create Asset account, track value over time</td>
+<td>Setup Accounts | Type=Asset, Opening Balance = initial value, later add a transaction recording new appraised value</td>
+<td>Same <code>AccountDialog</code>/<code>Account</code> API as bank accounts — no Asset-specific business logic found</td>
+<td>Account shows in Asset group, contributes to Net Worth</td>
+<td>Type=Asset, OpeningBalance=607000, later transaction +44000</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Asset with negative opening balance or negative value transaction</td>
+<td>Enter a negative number in Opening Balance or a large negative transaction</td>
+<td>(none found — no validation on <code>Account.OpeningBalance</code> or transaction <code>Amount</code> for Asset accounts)</td>
+<td>Confirm whether the app accepts this silently</td>
+<td>OpeningBalance = -50000</td>
+<td>Business-layer gap: no validation exists anywhere to test against</td>
+</tr>
+</tbody>
+</table>
+<h3 id="account-aliases">Account Aliases<a class="headerlink" href="#account-aliases" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add alias manually from Account dialog</td>
+<td>In <code>AccountDialog</code>'s alias combo box, type text + Enter</td>
+<td><code>AccountDialog.OnAccountAliasesKeyDown</code> → <code>MyMoney.AccountAliases.AddAlias</code>/<code>FindAlias</code> (already WPF-free)</td>
+<td>New <code>AccountAlias</code> created, appears in the combo dropdown</td>
+<td>Alias text "XXXXXXXXXXXX12345"</td>
+<td>Not started (no <code>AccountAliasTests.cs</code> exists)</td>
+</tr>
+<tr>
+<td>Delete an alias via the close-box</td>
+<td>Click the small close box on an alias item in the dropdown</td>
+<td><code>AccountDialog.OnAccountAliaseDeleted</code> → <code>AccountAliases.RemoveAlias</code></td>
+<td>Alias removed from both the UI list and the underlying collection</td>
+<td>An account with one existing alias</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Duplicate alias pattern moves to new account</td>
+<td>Add an alias pattern that already exists on a different account</td>
+<td><code>AccountAliases.AddAlias(AccountAlias)</code> — explicit "duplicate, so perhaps user is trying to move this alias" branch, reassigns <code>AccountId</code> instead of erroring</td>
+<td>Alias silently moves to the new account, no confirmation shown — worth surfacing as a UI-wiring concern</td>
+<td>Same alias pattern entered on two different accounts</td>
+<td>Not started — a surprising-but-not-broken success path worth an explicit test given no confirmation step exists</td>
+</tr>
+</tbody>
+</table>
+<h3 id="balancing-accounts">Balancing Accounts<a class="headerlink" href="#balancing-accounts" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Balance an account successfully</td>
+<td>Right-click account → Balance Account, enter statement date + ending balance matching computed balance</td>
+<td><code>BalanceControl.Reconcile</code>/<code>UpdateBalances</code> → <code>MyMoney.ReconciledBalance</code>/<code>EstimatedBalance</code> → <code>Done_Click</code> → <code>StatementManager.AddStatement</code></td>
+<td>"Off by" reaches $0, Done enabled, transactions marked Reconciled</td>
+<td>A fixture account with known transactions and a matching statement ending balance</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Balance with mismatched ending balance</td>
+<td>Enter an ending balance that doesn't match the sum of marked-reconciled transactions</td>
+<td><code>BalanceControl.CheckDone</code> (WPF-embedded, no business-layer seam)</td>
+<td>"Off by" shows nonzero delta, Done stays disabled; a sign-flip suggestion appears if the entered balance is the exact negation</td>
+<td>Ending balance off by a small amount, and separately, the exact negated value</td>
+<td>Business-layer gap: <code>CheckDone</code>'s delta/sign-flip logic has no seam or unit test — the underlying balance math is business-layer, but the reconciliation workflow <em>state machine</em> is not</td>
+</tr>
+<tr>
+<td>Non-numeric/empty statement balance entered</td>
+<td>Leave "Ending Balance" blank or type non-numeric text, tab away</td>
+<td><code>BalanceControl.CheckValidDecimal</code> (WPF-embedded, <code>decimal.TryParse</code> failure path)</td>
+<td>Error MessageBox shown, focus returns to the textbox, Done stays disabled</td>
+<td>Empty string, and separately "abc"</td>
+<td>Business-layer gap: parsing/validation lives entirely in the dialog with no extracted, testable rule</td>
+</tr>
+<tr>
+<td>Interest-earned auto-transaction</td>
+<td>Enter a nonzero value in "Interest Earned" during balancing</td>
+<td><code>BalanceControl.TextBoxInterestEarned_LostFocus</code> → <code>MyMoney.Transactions.NewTransaction</code>/<code>AddTransaction</code> + <code>Rebalance</code></td>
+<td>A new interest transaction is created; clearing the field back to 0 removes the auto-created transaction</td>
+<td>Statement with detected interest of $0, user enters $12.34</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Cancel out of balancing mid-way</td>
+<td>Start balancing, mark some transactions reconciled, click Cancel</td>
+<td><code>BalanceControl.Cancel_Click</code>/<code>OnDone(true)</code></td>
+<td>Reconciliation is undone, but the docs explicitly flag that amount edits made <em>during</em> re-balance mode aren't safely rolled back on Cancel</td>
+<td>A previously-balanced account re-entered into balance mode, with a reconciled transaction's amount edited, then Cancel</td>
+<td>Business-layer gap: the page itself documents this as a known rough edge with no described safety net — worth a direct test establishing actual behavior</td>
+</tr>
+<tr>
+<td>Re-edit a past reconciliation</td>
+<td>Pick a previous statement date, change the statement balance, click Done</td>
+<td><code>BalanceControl.ComboBoxPreviousReconcileDates_SelectionChanged</code> → <code>StatementManager.UpdateStatement</code> (WPF app project, not <code>MyMoney.Business</code> — see Statements below)</td>
+<td>Past statement highlights its reconciled transactions in green; changing its balance can throw off later statements per the page's own warning</td>
+<td>An account with 2+ past reconciliations</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Modify a Reconciled transaction outside balance mode</td>
+<td>Try to change the Amount or Delete a transaction with Status=Reconciled, outside of Balance mode</td>
+<td>(need to confirm exact enforcement point — likely a status check in <code>Money.cs</code>)</td>
+<td>Edit/Delete is blocked</td>
+<td>A Reconciled transaction, attempt an edit</td>
+<td>Not started — should confirm which business-layer property enforces this before writing. <strong>Not fully verified</strong>: enforcement point not traced to a specific line.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="statements">Statements<a class="headerlink" href="#statements" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Attach a statement PDF while balancing</td>
+<td>During Balance Account, click Browse next to Statement File, pick a PDF</td>
+<td><code>BalanceControl.OnBrowseStatement</code> → <code>StatementManager.AddStatement</code>/<code>ComputeHash</code> (plain C# class, <code>Source/WPF/MyMoney/Attachments/StatementManager.cs</code> — WPF-free logic, but not in <code>MyMoney.Business</code>)</td>
+<td>PDF copied into <code>&lt;dbname&gt;.Statements/&lt;account&gt;/</code>, index.xml updated, "Goto Statement" becomes enabled</td>
+<td>A small fixture PDF file</td>
+<td>Business-layer gap: <code>StatementManager</code> has zero WPF dependencies but hasn't been migrated to <code>MyMoney.Business</code> — a strong migration candidate, entirely untested</td>
+</tr>
+<tr>
+<td>Statement shared across two accounts (bank-consolidated statement)</td>
+<td>Provide the <em>same</em> statement file for two different accounts' balancing sessions</td>
+<td><code>StatementManager.FindBundledStatement</code>/<code>ComputeHash</code> — hash-based dedup</td>
+<td>Second account's "Goto Statement" opens the same physical file; only one copy exists on disk</td>
+<td>Same PDF hash provided for account A then account B</td>
+<td>Business-layer gap: good, self-contained unit-test target (pure file/hash logic) once extracted</td>
+</tr>
+<tr>
+<td>Goto Statement from a reconciled transaction</td>
+<td>Right-click a reconciled transaction → Go to statement</td>
+<td><code>StatementManager.GetStatementFullPath</code> → opens file via OS shell</td>
+<td>Correct PDF opens for that transaction's statement period</td>
+<td>A reconciled transaction with an associated statement</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Renamed account keeps its statement history</td>
+<td>Rename an account that has existing statements</td>
+<td><code>StatementManager.OnAccountRenamed</code>/<code>OnRenameAccountFolder</code>/<code>UpdateBundledPointers</code></td>
+<td>Statements directory renamed on disk, bundled-statement pointers in <em>other</em> accounts' indexes updated</td>
+<td>An account with statements, renamed, plus a second account bundled to the same statement file</td>
+<td>Business-layer gap: looks the most bug-prone of the <code>StatementManager</code> set, would benefit most from direct coverage</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cost-basis">Cost Basis<a class="headerlink" href="#cost-basis" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Portfolio Report reflects cost basis after a stock split</td>
+<td>Open the investment account's Portfolio tab after recording a security + a stock split</td>
+<td><code>Reports/PortfolioReport.cs</code> → <code>CostBasisCalculator</code> (already tested — <code>CostBasisTests.SimpleCostBasis</code>)</td>
+<td>Report shows adjusted quantity and cost-basis-per-share matching the doc's worked example</td>
+<td>Reuse/mirror <code>CostBasisTests.SimpleCostBasis</code>'s fixture</td>
+<td>Not started — thin render-only check; business logic is already covered</td>
+</tr>
+<tr>
+<td>Tax Report splits multi-lot sale into separate gain/loss events</td>
+<td>Sell shares acquired across multiple lots/dates, view Tax Report</td>
+<td><code>CapitalGainsTaxCalculator</code> (tested via <code>CostBasisTests.CostBasisAcrossTransfers</code>)</td>
+<td>Report lists separate short/long-term events per lot per the doc's FIFO example</td>
+<td>Reuse the multi-lot fixture pattern</td>
+<td>Not started — same "thin render" caveat</td>
+</tr>
+<tr>
+<td>Cost basis flows across an account transfer</td>
+<td>Transfer shares between two investment accounts, then sell from the destination</td>
+<td><code>CostBasisCalculator</code> (already tested — <code>CostBasisTests.CostBasisAcrossTransfers</code>)</td>
+<td>Tax Report on the destination account shows the <em>original</em> acquisition date/cost-basis</td>
+<td>Reuse <code>CostBasisAcrossTransfers</code>'s fixture</td>
+<td>Not started — business logic fully covered; only a report-rendering check would be new</td>
+</tr>
+</tbody>
+</table>
+<h3 id="context-menu-actions">Context Menu actions<a class="headerlink" href="#context-menu-actions" title="Permanent link">#</a></h3>
+<p>Note: <code>Splits...</code>, <code>Delete</code>, <code>View Transaction by Account/Category/Payee/Security</code>, <code>View Security</code>, <code>Category Properties</code>, <code>One Line View</code>, <code>Show All Splits</code>, <code>Lookup Payee</code> are simple navigation/view-toggle commands with no meaningful business-layer surface — omitted as pure UI. <code>Export...</code> is covered under File lifecycle above. <code>Toggle Void</code>/reconcile-related items overlap Balancing Accounts above.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Recategorize all transactions in view</td>
+<td>Right-click → Recategorize all..., pick From/To category, confirm</td>
+<td><code>TransactionsView.OnRecategorizeAll</code> (fully WPF-embedded, no business-layer method)</td>
+<td>Every transaction in the current filtered view gets the new category; transactions outside the view untouched</td>
+<td>A filtered view (e.g. by payee) with 3+ transactions</td>
+<td>Business-layer gap: no <code>RecategorizeAll</code>-equivalent API exists on <code>MyMoney</code>/<code>Transactions</code></td>
+</tr>
+<tr>
+<td>Set Tax Date on a transaction</td>
+<td>Right-click → Set Tax Date..., pick a different year/date</td>
+<td><code>TransactionsView.OnSetTaxDate</code> → <code>MyMoney.TransactionExtras.AddExtra</code>/<code>TransactionExtra.TaxDate</code></td>
+<td><code>TransactionExtra.TaxDate</code> is set, affects Tax Report inclusion</td>
+<td>A transaction, set tax date to prior year</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Move a transaction to a different account</td>
+<td>Right-click → Move..., pick destination account</td>
+<td><code>TransactionsView.OnMoveTransaction</code> → <code>AccountHelper.PickAccount</code> (WPF) → <code>t.Account = account</code> + <code>AttachmentManager.MoveAttachments</code> if applicable</td>
+<td>Transaction (and its attachments) now appear under the destination account</td>
+<td>A transaction with an attachment, target account different from source</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Move a Reconciled transaction (blocked)</td>
+<td>Right-click a Reconciled transaction → Move...</td>
+<td><code>TransactionsView.OnMoveTransaction</code> explicitly checks <code>t.Status == TransactionStatus.Reconciled</code></td>
+<td>MessageBox error shown, transaction stays in its original account</td>
+<td>A Reconciled transaction</td>
+<td>Not started — a clean, already-implemented failure case, good first candidate</td>
+</tr>
+<tr>
+<td>Toggle Accept / Accept All</td>
+<td>Right-click → Toggle Accept, or Accept All on a downloaded-transactions view</td>
+<td><code>TransactionsView.ToggleTransactionStateAccept</code> — no batch "AcceptAll" business-layer method</td>
+<td>Bold/unaccepted styling clears; <code>UnacceptedReport</code> no longer lists it</td>
+<td>A downloaded, unaccepted transaction</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Toggle Void</td>
+<td>Right-click → Toggle Void on a bad-check transaction</td>
+<td>Sets <code>Transaction.Status = TransactionStatus.Void</code> (business-layer property)</td>
+<td>Transaction excluded from balance/reconciliation</td>
+<td>A transaction to void</td>
+<td>Not started</td>
+</tr>
+<tr>
+<td>Rename Payee with auto-alias</td>
+<td>Right-click → Rename Payee, provide new name + set up an alias</td>
+<td><code>RenamePayeeDialog</code> → <code>Payees</code>/<code>Alias</code> APIs</td>
+<td>Payee renamed on the transaction; future transactions matching the alias auto-rename</td>
+<td>A transaction, rename its payee and add a matching alias pattern</td>
+<td>Not started</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="charts">Charts<a class="headerlink" href="#charts" title="Permanent link">#</a></h2>
+<h3 id="method-note">Method note<a class="headerlink" href="#method-note" title="Permanent link">#</a></h3>
+<p>Read all 5 <code>docs/Charts/*.md</code> pages plus every <code>.cs</code> file in <code>Source/WPF/MyMoney/Charts/</code> and the graph-generator classes in <code>Source/WPF/MyMoney/Views/GraphGenerators.cs</code>. <strong>All Charts scenarios are <code>Business-layer gap</code></strong> — the design spec's own survey predicted this and it holds: chart-data classes are either genuinely UI-coupled or, where portable, not yet extracted.</p>
+<p><strong>Notable finding</strong>: of the classes named in the migration design spec's survey, only <code>RentalData.cs</code> is genuinely WPF-free today (<code>ChartData.cs</code>/<code>CategoryData.cs</code> both carry <code>System.Windows.Media.Color</code>/<code>Brush</code>). More significantly, <strong><code>Source/WPF/MyMoney/Views/GraphGenerators.cs</code></strong> (<code>TransactionGraphGenerator</code>, <code>BrokerageAccountGraphGenerator</code>, <code>SecurityGraphGenerator</code>, behind the existing <code>IGraphGenerator</code> interface) has <strong>zero <code>System.Windows.*</code> references</strong> and is the real data-prep feeder for both the Trend Graph and Stock Chart — a genuine cheap-win extraction candidate, on the same footing as the already-completed StockQuotes migration. By contrast, the pie-chart tally logic (<code>CategoryChart.xaml.cs</code>) and history-chart bucketing (<code>HistoryBarChart.xaml.cs</code>) are algorithmically simple but are private methods baked into <code>UserControl</code> subclasses holding <code>Brush</code>-typed state — an extraction there would need a new seam cut, not just a file move.</p>
+<h3 id="chart-tab-switching">Chart tab switching<a class="headerlink" href="#chart-tab-switching" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Switch between chart tabs (Trends/History/Expenses/Income/Stock/Loan/Rental) for the current view</td>
+<td>Click a chart tab below the transaction register</td>
+<td>(none — tab visibility plumbing lives in <code>MainWindow.xaml.cs</code>)</td>
+<td>Correct tab set shown/enabled per view type; a previously-selected tab that becomes invalid falls back to Trends</td>
+<td>Fixture with a regular account, a security, a loan, and a rental building</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="history-chart">History Chart<a class="headerlink" href="#history-chart" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View history chart by category or payee, default Year range (up to 24 years)</td>
+<td>Switch Transaction view to By Category/By Payee, open "History" tab</td>
+<td>(none — data prep is <code>MainWindow.UpdateHistoryChart</code>; bucketing is <code>HistoryBarChart.UpdateChart</code>/<code>AddColumn</code>, entangled with <code>Brush</code>)</td>
+<td>Column count/labels/amounts match transactions aggregated per year</td>
+<td>Fixture with transactions spanning several years in one category, including at least one investment Add/Remove</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Change range dropdown to Month (last 24) or Day (last 31)</td>
+<td>Select Month/Day in the range dropdown</td>
+<td>Same as above</td>
+<td>Correct bucket boundaries and count</td>
+<td>Same fixture with dense recent activity</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Fiscal Year Start shifts year boundaries and labels columns "FYnn"</td>
+<td>Set Fiscal Year Start via Options, view History tab in Year mode</td>
+<td>(none — <code>AddColumn</code>'s <code>fiscalYearStart &gt; 0</code> branch)</td>
+<td>Column boundaries start on the configured month; label reads "FY" + following calendar year</td>
+<td>Fixture + a non-January fiscal year start</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Click/drill into a column</td>
+<td>Left-click a bar in the History chart</td>
+<td>(none — <code>HistoryBarChart.OnColumnClicked</code> → <code>MainWindow</code> filters <code>TransactionsView</code>)</td>
+<td>Transaction view filters to that column's date range; back button restores prior view</td>
+<td>Same fixture</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Right-click Export to CSV</td>
+<td>Right-click chart → Export</td>
+<td><code>ChartData.Export()</code> (writes CSV, opens via shell)</td>
+<td>Exported CSV's rows/columns match the chart's series/labels/values</td>
+<td>Same fixture</td>
+<td>Business-layer gap — note this specific method doesn't itself touch <code>Color</code>, a near-miss for portability</td>
+</tr>
+<tr>
+<td>Edge case: history chart with zero transactions in view</td>
+<td>Open History tab on an empty/filtered-to-nothing view</td>
+<td>n/a</td>
+<td><code>HistoryBarChart.UpdateChart</code> guards empty input, no crash</td>
+<td>Fixture account/category with no transactions</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pie-charts">Pie Charts<a class="headerlink" href="#pie-charts" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View Income/Expense pie charts by category</td>
+<td>Select an account/category/payee view; open Expenses/Income pie tabs</td>
+<td>(none — aggregation is private methods inside <code>CategoryChart.xaml.cs</code>)</td>
+<td>Slice values/labels equal sums of transaction/split amounts grouped by root category, respecting transfers and unassigned-split handling</td>
+<td>Fixture with categorized income/expense transactions, at least one split, one transfer, one uncategorized transaction</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Click a pie slice to pivot into that category's transactions</td>
+<td>Left-click a slice, then click the Expenses tab again</td>
+<td>(none — <code>CategoryChart.OnPieSliceClicked</code> → <code>MainWindow.PieChartSelectionChanged</code>)</td>
+<td>Transaction view filters to the clicked category; re-opening shows children as new slices</td>
+<td>Fixture with a parent category having 2+ child categories</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Toggle a category's visibility via the legend swatch</td>
+<td>Click the color swatch next to a legend entry</td>
+<td>(none — <code>CategoryChart.OnLegendToggled</code>)</td>
+<td>Hidden slice disappears, amount excluded from displayed total; clicking again restores it</td>
+<td>Fixture with 3+ categories, one dominating in size</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Edge case: hide every category / all categories net to zero</td>
+<td>Toggle off every legend entry, or use data that nets to $0</td>
+<td>n/a</td>
+<td>Total shows $0.00, no crash</td>
+<td>Fixture where expense and matching refund cancel to zero</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Export pie chart data to CSV</td>
+<td>Right-click chart → Export</td>
+<td><code>CategoryChart.OnExport</code> → <code>ChartData.Export()</code></td>
+<td>Exported CSV rows match visible (non-hidden) slice labels/values</td>
+<td>Same fixture</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="stock-chart">Stock Chart<a class="headerlink" href="#stock-chart" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View a security's full price history</td>
+<td>Switch to "By Security", select a security with quote history, open "Stock" tab</td>
+<td><code>SecurityGraphGenerator</code> (<code>Views/GraphGenerators.cs</code> — <strong>zero <code>System.Windows.*</code> references</strong>, behind <code>IGraphGenerator</code>)</td>
+<td>Plotted points' dates/values equal <code>StockQuoteHistory.History</code> closes in date order</td>
+<td>A security with a checked-in stock-quote fixture</td>
+<td>Business-layer gap — real cheap-win candidate: <code>GraphGenerators.cs</code> looks portable today, just needs moving + a test</td>
+</tr>
+<tr>
+<td>Edge case: security has no stock quote history</td>
+<td>Select a security with no downloaded quotes</td>
+<td>Same as above</td>
+<td>Stock tab doesn't appear, or renders empty without crashing</td>
+<td>Security fixture with empty/absent quote history</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Edge case: missing stock-split data produces a spurious vertical decline</td>
+<td>View a security whose price actually split but has no matching <code>StockSplit</code> record</td>
+<td><code>SecurityGraphGenerator.Generate()</code> plots raw <code>.Close</code> values with <strong>no split adjustment applied at all</strong></td>
+<td>Confirms this documented gotcha is a genuine code-level artifact, not just a UI glitch — good regression fixture: same security with vs. without the split entity</td>
+<td>A security's quote history spanning a real split, with and without the <code>StockSplit</code> entity</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>"Same context menu items as Trend Graph" (timeframe / Export)</td>
+<td>Right-click the Stock chart</td>
+<td>Same wiring as Trend Graph, below</td>
+<td>See Trend Graph rows</td>
+<td>Same security fixture</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="trend-graph">Trend Graph<a class="headerlink" href="#trend-graph" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View an account's balance (or brokerage/retirement market value) over time</td>
+<td>Select an account, open "Trends" tab</td>
+<td><code>TransactionGraphGenerator</code>/<code>BrokerageAccountGraphGenerator.Prepare()</code>/<code>Generate()</code> (<code>Views/GraphGenerators.cs</code>, <strong>zero <code>System.Windows.*</code> references</strong>)</td>
+<td>Plotted running balance/market value matches an independently-computed running total</td>
+<td>A regular checking-account fixture; a brokerage-account fixture with buys/sells and a pending <code>StockSplit</code></td>
+<td>Business-layer gap — same cheap-win candidate as Stock Chart, same file</td>
+</tr>
+<tr>
+<td>Hover the mouse over the trend line</td>
+<td>Move mouse over the chart</td>
+<td>(none — pure UI)</td>
+<td>Tooltip/pointer follows mouse, shows correct date/balance</td>
+<td>Any populated fixture</td>
+<td>Business-layer gap — genuinely UI, no extraction candidate</td>
+</tr>
+<tr>
+<td>Click on the trend line to scroll transaction view to that date</td>
+<td>Left-click on the chart</td>
+<td>(none — UI event wiring)</td>
+<td>Transaction view scrolls/selects the transaction at the clicked point</td>
+<td>Same fixture</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Right-click → change timeframe and Add Series to compare periods</td>
+<td>Right-click chart, pick timeframe, "Add Series"</td>
+<td>(none — still calls the same <code>IGraphGenerator</code>s per series)</td>
+<td>Two series render with correct per-period date ranges</td>
+<td>Fixture with 2+ years of transaction history</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Export button → CSV</td>
+<td>Click Export</td>
+<td><code>ChartData.Export()</code> (same path as History/Pie)</td>
+<td>Exported CSV matches the currently displayed series/values</td>
+<td>Same fixture</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Edge case: date range with zero transactions</td>
+<td>Select a timeframe with no data</td>
+<td>(none)</td>
+<td>Chart renders empty/flat without crashing</td>
+<td>Fixture account with opening balance only</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="reports">Reports<a class="headerlink" href="#reports" title="Permanent link">#</a></h2>
+<h3 id="note-regarding-method">Note regarding method<a class="headerlink" href="#note-regarding-method" title="Permanent link">#</a></h3>
+<p>Read all 10 <code>docs/Reports/*.md</code> pages and the corresponding <code>Source/WPF/MyMoney/Reports/*.cs</code> implementations. The design spec's framing holds up: every report's <code>Generate(IReportWriter writer)</code> interleaves computation with direct writer calls — no separable "compute the numbers" step exists. <strong>Essentially every scenario below is a <code>Business-layer gap</code></strong>, cataloged as <em>future API requirements</em> rather than existing seams. All reports pull from the live <code>MyMoney</code> graph via ad hoc LINQ, confirming <code>IDatabase</code> only supports whole-graph <code>Load()</code>, not filtered queries.</p>
+<h4 id="net-worth-report">Net Worth Report<a class="headerlink" href="#net-worth-report" title="Permanent link">#</a></h4>
+<p>Parameters: report date (drives historical drill-down), normalized currency; filters accounts by type/tax-status.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Net worth as-of today, mixed accounts</td>
+<td>Reports | Net Worth</td>
+<td>Would need: <code>ComputeNetWorth(MyMoney, DateTime, currencyCode)</code> returning per-category totals, decoupled from <code>IReportWriter</code></td>
+<td>Total matches sum of bank cash + investment cash + securities (by tax status) − credit − loans + assets</td>
+<td>Fixture with checking, brokerage, 401k, Roth IRA, one Asset, one credit card, one loan</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Net worth with zero accounts</td>
+<td>Open a brand-new/empty database, run Net Worth report</td>
+<td>Same API against an empty <code>MyMoney</code></td>
+<td>Report renders with all-zero totals, no crash</td>
+<td>Empty/new database</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Net worth on a historical date with quote history</td>
+<td>Edit the report date field to a past date</td>
+<td>Same API, pulls prices via <code>StockQuoteCache.GetSecurityMarketPrice</code></td>
+<td>Total reflects historical security prices, not current</td>
+<td>Fixture with historical stock quote data</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Net worth with a security missing SecurityType</td>
+<td>Run report where a held security has <code>SecurityType.None</code></td>
+<td>Same API; needs to surface a "has-none-type" flag decoupled from the writer</td>
+<td>Report/API signals the None-type warning without inspecting writer output</td>
+<td>Fixture with one security with unset SecurityType</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Net worth historical bar-chart series (5yr back)</td>
+<td>Chart populates in background after initial render</td>
+<td>Would need: <code>GetHistoricalNetWorth(MyMoney, endDate, yearsBack)</code> independent of the <code>AnimatingBarChart</code> control it's written directly into</td>
+<td>Series values match per-year cash-balance/portfolio results</td>
+<td>Fixture spanning several years of transactions</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<p>Future-API filter vocabulary: date (point-in-time + historical range), currency normalization, account-type predicates (currently ad hoc lambdas).</p>
+<h4 id="investment-portfolio-report">Investment Portfolio Report<a class="headerlink" href="#investment-portfolio-report" title="Permanent link">#</a></h4>
+<p>Parameters: report date; optional single account; optional <code>SecurityGroup</code>/<code>AccountGroup</code> drill-down. Uses <code>CostBasisCalculator</code> (FIFO) grouped by tax status and security type.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All-up portfolio summary, mixed tax statuses</td>
+<td>Reports | Investment Portfolio (no account selected)</td>
+<td>Would need: <code>ComputePortfolioSummary(MyMoney, date)</code> → grouped holdings with market value/gain-loss, independent of the writer</td>
+<td>Table totals match sum of held lots' current market value; Gain/Loss matches <code>MarketValue - TotalCostBasis</code></td>
+<td>Fixture with holdings across a taxable brokerage, a 401k, a Roth IRA, same security in multiple lots</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Single-account portfolio (Portfolio tab)</td>
+<td>Click Portfolio tab on one investment account</td>
+<td>Same, account-filtered</td>
+<td>Shows only that account's holdings; cash/transfers between accounts excluded</td>
+<td>Fixture with 2+ investment accounts, transferred security</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Expand a security group to FIFO lot detail</td>
+<td>Click expander triangle on e.g. "IBM corp total"</td>
+<td>Would need: <code>GetLotDetail(MyMoney, date, security, accountFilter)</code></td>
+<td>Each row's Quantity/Cost Basis/Unit Cost matches a distinct buy lot</td>
+<td>Fixture with multiple buys at different prices/dates, one partial sell</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Portfolio with pending (unmatched) sales</td>
+<td>Sell more shares than FIFO can currently match</td>
+<td>Would need the future API to expose <code>CostBasisCalculator.GetPendingSales()</code> as data, not inline text</td>
+<td>Pending-sale warning surfaces with account/units/security/date</td>
+<td>Fixture with a sale lacking a matching buy lot</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Zero holdings (no investment accounts)</td>
+<td>Run report on a database with no investment accounts</td>
+<td>Same summary API against empty holdings</td>
+<td>Report shows empty/"N/A" sections, no crash</td>
+<td>Database with only bank/credit accounts</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>CSV export of portfolio</td>
+<td>Click Export button</td>
+<td><code>PortfolioReport.Export(filename)</code> → <code>CsvReportWriter</code> (already synchronous/writer-based)</td>
+<td>Exported CSV contains same rows as on-screen report</td>
+<td>Small portfolio fixture</td>
+<td>Business-layer gap (still routes through the same <code>Generate</code>/writer interleaving)</td>
+</tr>
+</tbody>
+</table>
+<p>Future-API filter vocabulary: date, account filter (single vs. all), tax-status grouping, security-type grouping, FIFO lot detail on demand — the richest read-query shape in this category.</p>
+<h4 id="cash-flow-report">Cash Flow Report<a class="headerlink" href="#cash-flow-report" title="Permanent link">#</a></h4>
+<p>Parameters: start/end date range (default 5yr), By Years vs. By Month, normalized currency.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5-year default cash flow, by year</td>
+<td>Reports | Cash Flow (default range)</td>
+<td>Would need: <code>ComputeCashFlow(MyMoney, startDate, endDate, ByYear\|ByMonth)</code> → category-tree totals per period, decoupled from the writer</td>
+<td>Income/Expense/Investments/Unknown group totals per year match manual sums; "Net cash flow" footer = sum of all</td>
+<td>Fixture spanning 5+ years with income, expense, investment-type categories</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Change to 12-month monthly view</td>
+<td>Switch interval dropdown, narrow date range to 1 year</td>
+<td>Same API, <code>byMonth=true</code></td>
+<td>12 monthly columns; totals reconcile to the yearly view</td>
+<td>Same fixture, 1-year window</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Uncategorized / unbalanced-split transactions</td>
+<td>Transactions with no category, or splits that don't sum to the total</td>
+<td>Would need an explicit "Unknown" bucket and a separate unassigned-split bucket</td>
+<td>"Unknown" row appears with correct total; unassigned-split amounts separately identifiable</td>
+<td>Fixture with one uncategorized transaction and one split not summing to total</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Zero transactions in range</td>
+<td>Set date range with no transactions</td>
+<td>Same API against an empty set</td>
+<td>All totals zero, no crash</td>
+<td>Fixture, date range outside all transaction dates</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>CSV export</td>
+<td>Click Export button</td>
+<td><code>CashFlowReport.Export(filename)</code></td>
+<td>CSV rows match the on-screen category breakdown per period</td>
+<td>Small fixture</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Drill down from a cell to transactions</td>
+<td>Click a blue linked number in a category/period cell</td>
+<td>Would need the future API to keep the transaction list backing each cell addressable, not embedded in a UI-click-tied structure</td>
+<td>Clicking returns exactly the transactions tallied into that cell</td>
+<td>Fixture with a category having 2+ transactions in the same period</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<p>Future-API filter vocabulary: date range, period granularity (year/month), category-type bucketing with parent/child roll-up, normalized currency, split-transaction handling; uses <code>Transaction.TaxDate</code>, not raw <code>Date</code>.</p>
+<h4 id="tax-report-income-tax-report">Tax Report (Income Tax Report)<a class="headerlink" href="#tax-report-income-tax-report" title="Permanent link">#</a></h4>
+<p>Parameters: tax year (fiscal-year-aware), Investments Only vs. All Accounts, consolidate-on-date-sold. Skips tax-deferred/tax-free accounts for capital gains.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Income tax report for a year with tax categories set</td>
+<td>Reports | Income Tax Report, pick a year</td>
+<td>Would need: <code>ComputeTaxCategoryTotals(...)</code> plus <code>ComputeCapitalGains(...)</code>, decoupled from the writer</td>
+<td>Per-tax-category totals match category-tagged sums; long/short-term gains split matches holding-period rules</td>
+<td>Fixture with Tax-Category-tagged categories, taxable-account sales spanning both &lt;1yr and &gt;1yr holds</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Year with no tax categories configured</td>
+<td>Run report on a database where no category has a Tax Category set</td>
+<td>Same API — already returns <code>null</code> in this case</td>
+<td>Report/API signals "no tax categories associated" distinctly from "zero activity"</td>
+<td>Fixture with categorized transactions but no Tax Category assignments</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Investments Only, tax-deferred/tax-free accounts present</td>
+<td>Toggle "Investments Only"</td>
+<td>Same capital-gains API, filtered; tax-deferred/tax-free explicitly excluded</td>
+<td>401k/Roth sales never appear in gains output</td>
+<td>Fixture with sales in a taxable brokerage AND a 401k in the same year</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Estimated tax payment misfiled to wrong tax year</td>
+<td>Right-click a transaction, "Set Tax Year…", assign to prior year, re-run report</td>
+<td>Would need the future API to key off <code>Transaction.TaxDate</code> override</td>
+<td>Transaction moves from one year's report to the other after the override</td>
+<td>Fixture with a January estimated-tax-payment transaction</td>
+<td>Business-layer gap — flag as a candidate File-lifecycle-style UI-wiring scenario once the underlying API is unit-testable</td>
+</tr>
+<tr>
+<td>Capital gains with unknown cost basis</td>
+<td>Sell a security lacking cost-basis/lot data</td>
+<td>Same API; <code>CapitalGainsTaxCalculator.Unknown</code> already separates this case</td>
+<td>"Capital Gains with Unknown Cost Basis" section populated distinctly</td>
+<td>Fixture with a sale lacking a recorded purchase lot</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>.txf export for TurboTax</td>
+<td>Click Export, save .txf</td>
+<td><code>TxfExporter.Export(filename, startDate, endDate, investmentsOnly, consolidateOnDateSold)</code> — already a plain file-writing API, no <code>IReportWriter</code> involved</td>
+<td>Exported .txf matches expected TXF record format</td>
+<td>Same fixture as above</td>
+<td><strong>Not a gap</strong> — this export path is already business-layer-clean; could get a direct unit test now</td>
+</tr>
+<tr>
+<td>Empty year (no transactions at all)</td>
+<td>Pick a tax year with zero transactions</td>
+<td>Same APIs against an empty range</td>
+<td>"No categories associated" vs. legitimately-empty year are currently indistinguishable — future API should let the caller tell these apart</td>
+<td>Fixture with data only outside the selected year</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<p>Future-API filter vocabulary: fiscal year with configurable start offset, investments-only vs. all-accounts, consolidate-on-date-sold vs. per-lot, tax-deferred/tax-free exclusion. <code>TxfExporter.Export</code> is the one already-decoupled path in the whole Reports category.</p>
+<h4 id="w2other-tax-forms-report">W2/Other Tax Forms Report<a class="headerlink" href="#w2other-tax-forms-report" title="Permanent link">#</a></h4>
+<p>Parameters: tax year only (narrower than Tax Report — no account/investments toggle).</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W2/tax-form summary with categories configured</td>
+<td>Reports | W3 and Other Tax Forms, pick a year</td>
+<td>Would need: <code>ComputeTaxFormTotals(MyMoney, startDate, endDate)</code> decoupled from the writer</td>
+<td>Per-tax-category total matches sum of transactions/splits tagged with that category's <code>TaxRefNum</code></td>
+<td>Fixture with categories set to 2+ different Tax Categories under the same form</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>No categories have a Tax Category set</td>
+<td>Run report with no Tax Category associations</td>
+<td>Same API, should return "empty" distinctly</td>
+<td>Report reports "no tax category associations" rather than silently empty</td>
+<td>Fixture with categorized transactions but no Tax Category assignments</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Misfiled estimated payment (Jan payment for prior year)</td>
+<td>Same "Set Tax Year…" fix as Tax Report, re-run</td>
+<td>Same tax-year-override concern</td>
+<td>Transaction counts toward the corrected year</td>
+<td>Fixture with a January transaction meant for the prior tax year</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Split transaction with multiple tax-relevant categories</td>
+<td>A paycheck deposit split across gross pay / withholding / 401k categories</td>
+<td>Would need the future API's tally to handle per-split category lookup, currently correct but embedded in the report class</td>
+<td>Each split's amount attributes to its own Tax Category bucket</td>
+<td>Fixture with a multi-split paycheck deposit</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h4 id="unaccepted-report">Unaccepted Report<a class="headerlink" href="#unaccepted-report" title="Permanent link">#</a></h4>
+<p>No date/filter parameters exposed — fixed, all-accounts, all-time scan.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unaccepted transactions across multiple accounts</td>
+<td>Reports | Unaccepted Transactions</td>
+<td>Would need: <code>GetUnacceptedTransactions(MyMoney)</code> decoupled from the writer</td>
+<td>Each account section lists exactly its unaccepted transactions; closed accounts excluded; count footer matches list length</td>
+<td>Fixture with unaccepted transactions in 2+ open accounts plus one closed account</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Zero unaccepted transactions</td>
+<td>Run report where everything's accepted/reconciled</td>
+<td>Same API against all-accepted data</td>
+<td>"Found 0 unaccepted transactions", no per-account sections, no crash</td>
+<td>Fixture with all transactions accepted</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Toggle Accept on a transaction, then re-run</td>
+<td>Accept a transaction, regenerate report</td>
+<td>Really testing the existing accept-toggle logic (may already be covered elsewhere) plus this report's read</td>
+<td>Transaction disappears from the report after acceptance</td>
+<td>Fixture with one unaccepted transaction</td>
+<td>Business-layer gap for the report read; check first whether Toggle-Accept itself already has non-UI coverage</td>
+</tr>
+</tbody>
+</table>
+<p>Future-API filter vocabulary: simplest of the category — "all transactions across all open accounts where <code>Unaccepted == true</code>, grouped by account."</p>
+<h4 id="future-bills-report">Future Bills Report<a class="headerlink" href="#future-bills-report" title="Permanent link">#</a></h4>
+<p>No user-facing filter controls; internally hardcoded 5-year lookback / 12-month forecast.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Recurring expense forecast, typical data</td>
+<td>Reports | Future Bills</td>
+<td>Would need: <code>ForecastRecurringPayments(MyMoney, asOfDate, monthsAhead)</code> wrapping the already-plain <code>Payments.FindRecurringPayments</code></td>
+<td>Each month's predicted payments match <code>RecurringPayment.GetNextPrediction()</code>; year total matches sum</td>
+<td>Fixture with 2+ recurring Expense-category transactions with <code>Category.Frequency</code> set</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>No recurring payments found</td>
+<td>Data with no Expense category having a Frequency set / too little history</td>
+<td>Same API against non-recurring data</td>
+<td>Empty result, "No recurring payments found", no crash</td>
+<td>Fixture with only one-off expense transactions</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Force a category into the report via Frequency override</td>
+<td>Categories dialog: set a category's Frequency to non-None</td>
+<td>A category-configuration write, separate from the report read</td>
+<td>Category appears in next run even with sparse history</td>
+<td>Fixture category with Frequency manually set</td>
+<td>Flag as out-of-category (Categories dialog), not a Reports gap</td>
+</tr>
+<tr>
+<td>Transactions older than the 5-year lookback window</td>
+<td>Data has only a single very old occurrence (&gt;5yrs ago)</td>
+<td>Same forecast API — validates the hardcoded 5-year trim once extracted as a parameter</td>
+<td>Old-only payment does NOT appear in forecast</td>
+<td>Fixture with one old Expense transaction, no recent recurrence</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<p>Two currently-hardcoded internal parameters (5yr lookback, 12mo horizon) should become real parameters in the future API.</p>
+<h4 id="account-summary-report">Account Summary Report<a class="headerlink" href="#account-summary-report" title="Permanent link">#</a></h4>
+<p>Parameters: report date, normalized currency. Iterates every <code>AccountType</code>, summing cash + investment value per account.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Account summary as of today, default currency</td>
+<td>Reports | Account Summary</td>
+<td>Would need: <code>ComputeAccountSummary(MyMoney, date, currencyCode?)</code> decoupled from the writer</td>
+<td>Each account's row balance matches <code>Transactions.GetBalance(...)</code>; grand total only shown when a single common currency applies</td>
+<td>Fixture with accounts across several <code>AccountType</code>s</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Normalized to a foreign currency (e.g. AUD)</td>
+<td>Set normalized currency to AUD</td>
+<td>Same API, ratio conversion applied</td>
+<td>All amounts converted; common-symbol total shown in AUD</td>
+<td>Fixture + a Currency entry for AUD with a defined ratio</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Mixed currencies produce no single total</td>
+<td>Accounts in genuinely different currencies, normalization off</td>
+<td>Same API; <code>various</code> flag suppresses the grand total</td>
+<td>No misleading single total shown</td>
+<td>Fixture with 2+ accounts in different native currencies</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Zero accounts of a given type</td>
+<td>e.g. no Loan accounts exist</td>
+<td>Same API; per-type section omitted</td>
+<td>No empty/blank section appears</td>
+<td>Fixture missing one or more <code>AccountType</code>s</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Historical date with stock-quote-dependent investment value</td>
+<td>Change report date to the past</td>
+<td>Same API, dependent on <code>StockQuoteCache</code></td>
+<td>Investment portion reflects historical price</td>
+<td>Fixture with historical stock quotes and an investment account</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<h4 id="retirement-plan-report">Retirement Plan Report<a class="headerlink" href="#retirement-plan-report" title="Permanent link">#</a></h4>
+<p><strong>Architecturally the outlier of the ten reports</strong> — not a filter/subtotal query but a multi-decade tax/withdrawal simulation engine. <code>RetirementPlanState</code> exposes ~15 scalar/enum inputs: ROI, inflation, desired income, current/spouse age, filing status/state, retirement/graduation age, Roth-conversion strategy + years, Social Security amount/age/COLA, tax-bracket inflation. RMD age hardcoded to 75.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Baseline retirement simulation, no Roth conversion</td>
+<td>Enter retirement settings, run report</td>
+<td>Would need: <code>RunRetirementSimulation(MyMoney, RetirementPlanState, stockQuoteCache, stateTaxData)</code> returning year-by-year series as plain data</td>
+<td>Assets-remaining total and per-tax-status breakdown match a hand-computed projection for a deterministic fixture</td>
+<td>Fixture with taxable brokerage, 401k, Roth IRA with known balances, round-number ROI/inflation</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Unrealistic retirement age (retire before current age, or past graduation age)</td>
+<td>Set <code>RetirementAge</code> &lt; <code>CurrentAge</code>, or &gt; <code>GraduationAge</code></td>
+<td>Same API — needs to define/validate behavior for this invalid input (no visible guard today)</td>
+<td>Simulation either rejects clearly or degrades gracefully rather than looping incorrectly</td>
+<td>Fixture with <code>RetirementAge</code> below <code>CurrentAge</code></td>
+<td>Business-layer gap — also a genuine input-validation hole to design, not just a test gap</td>
+</tr>
+<tr>
+<td>RMD kicks in at age 75 with a large tax-deferred balance</td>
+<td>Simulate past age 75 with substantial 401k funds</td>
+<td>Same API; exercises the RMD withdrawal branch</td>
+<td>Forced RMD amount matches <code>TaxDeferred / RMDFactor(age)</code>; taxes jump that year</td>
+<td>Fixture with a large 401k balance, simulation crossing age 75</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Roth conversion strategy comparison</td>
+<td>Set Roth Conversion strategy, or run the built-in sweep (0-15 years)</td>
+<td>Same API's <code>RunRothSimulation()</code> sweep</td>
+<td>Each sweep point matches a full independent run with that conversion-years value</td>
+<td>Same fixture, varying conversion years 0-15</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Social security claimed early vs. late (62 vs. 67 vs. 70)</td>
+<td>Change Social Security claim age</td>
+<td>Same API; exercises spousal SS/COLA compounding</td>
+<td>Lifetime SS income and drawdown differ correctly by claim age</td>
+<td>Fixture with SS amount set, run three ages</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>No tax-deferred accounts at all</td>
+<td>Run simulation with only taxable/tax-free holdings</td>
+<td>Same API; Tax-Deferred-Strategy control hidden when none exist</td>
+<td>Simulation runs without RMD/Roth-conversion logic engaging</td>
+<td>Fixture with only a taxable brokerage and a Roth IRA</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Dividend income projection with sparse dividend history</td>
+<td>Run simulation on an account with few/no dividend transactions</td>
+<td>Same API's dividend-yield projection</td>
+<td>With insufficient history, projected dividend income is 0 or clearly flagged, not spurious</td>
+<td>Fixture with zero/near-zero dividend history</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Different state tax setting</td>
+<td>Change <code>TaxFilingState</code></td>
+<td>Same API; drives state tax via <code>StateTaxes.Load()</code></td>
+<td>Tax totals differ correctly between a no-income-tax state and a high-tax state</td>
+<td>Same fixture, two <code>TaxFilingState</code> values</td>
+<td>Business-layer gap</td>
+</tr>
+</tbody>
+</table>
+<p>A future business-layer API for Retirement Plan needs its own design thought entirely separate from "filter transactions, subtotal by X" — it's a simulation engine, not a query.</p>
+<h3 id="cross-report-observations-for-a-future-business-layer-query-api">Cross-report observations for a future business-layer query API<a class="headerlink" href="#cross-report-observations-for-a-future-business-layer-query-api" title="Permanent link">#</a></h3>
+<p>Filter/parameter vocabulary observed across all ten reports:</p>
+<ul>
+<li><strong>Date/date-range</strong>: point-in-time (Net Worth, Portfolio, Account Summary), explicit start+end (Cash Flow), fiscal-year-aware with configurable offset (Tax Report, W2), multi-year forward projection (Future Bills: 12mo; Retirement Plan: decades).</li>
+<li><strong>Account filtering</strong>: by <code>AccountType</code> enum, by tax-status flags (<code>IsTaxDeferred</code>/<code>IsTaxFree</code>), single account vs. all, open/closed.</li>
+<li><strong>Category filtering/grouping</strong>: by <code>CategoryType</code> with parent/child roll-up (Cash Flow), by <code>Category.TaxRefNum</code> (Tax/W2), by <code>Category.Frequency</code> (Future Bills).</li>
+<li><strong>Transaction-status filtering</strong>: <code>Unaccepted</code> flag, <code>Status == Void</code>/<code>IsDeleted</code> exclusion (done ad hoc inline in nearly every report), split handling with per-split category + unassigned remainder.</li>
+<li><strong>Currency normalization</strong>: present in Net Worth, Portfolio, Account Summary, Cash Flow; absent elsewhere.</li>
+<li><strong>Security/holdings queries</strong>: FIFO lot matching + market-value-as-of-date, the richest sub-shape, independently reimplemented in three reports.</li>
+<li><strong>No filter surface at all</strong>: Unaccepted Report, Future Bills (hardcoded windows).</li>
+</ul>
+<hr />
+<h2 id="development">Development<a class="headerlink" href="#development" title="Permanent link">#</a></h2>
+<p>No scenarios. <code>docs/dev/index.md</code> is entirely developer/contributor documentation (build steps, VS Test Explorer, DGML scenario-test tooling, the project dependency diagram) — no end-user application behavior described anywhere on the page.</p>
+<hr />
+<h2 id="undocumented-in-help-file-menu-api-audit">Undocumented in help file — Menu &amp; API audit<a class="headerlink" href="#undocumented-in-help-file-menu-api-audit" title="Permanent link">#</a></h2>
+<p>Found by reading <code>Source/WPF/MyMoney/MainWindow.xaml</code>'s full menu structure and <code>Source/WPF/MyMoney.Business/</code>'s public surface directly, independent of whether any help page mentions them. Items already owned by Taxes/StockQuotes/Importers/Ofx/DatabaseLifecycle/Charts/Reports/core account-CRUD/AutoCategorization/CostBasis/Loans/SampleData/Currencies/Options/Aliases/QuickSearch/Queries are excluded (covered above). Command definitions live in <code>Source/WPF/MyMoney/Commands/Commands.cs</code>.</p>
+<h3 id="file-menu-items-not-covered-elsewhere">File menu items not covered elsewhere<a class="headerlink" href="#file-menu-items-not-covered-elsewhere" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Recent Files (MRU)</td>
+<td>File | Recent Files, click a prior database</td>
+<td>None — <code>RecentFilesMenu</code> owns the list via <code>Settings</code>, outside <code>MyMoney.Business</code> entirely</td>
+<td>Clicking an entry reopens that database via the normal <code>DatabaseLifecycle.Open</code> path; a missing/moved file is handled, not a crash</td>
+<td>Open two small fixture dbs in sequence to populate the MRU list</td>
+<td>Business-layer gap</td>
+</tr>
+<tr>
+<td>Open Containing Folder</td>
+<td>File | Open Containing Folder...</td>
+<td>None — calls <code>NativeMethods.ShellExecute("explore", dir)</code> directly</td>
+<td>Explorer opens showing the folder; disabled when no db is open or its directory doesn't exist</td>
+<td>Any open fixture db</td>
+<td>Business-layer gap — trivial OS shell-out, low priority</td>
+</tr>
+<tr>
+<td>Export Accounts Dependencies (DGML)</td>
+<td>File | Export Accounts Dependencies (DGML)..., pick save location</td>
+<td><code>Exporters.ExportDgmlAccountMap(MyMoney, fileName)</code></td>
+<td>Valid DGML/XML written describing account transfer relationships</td>
+<td>Fixture db with several accounts linked by transfers</td>
+<td>Business-layer gap — <code>ExportersTests.cs</code> covers other exporters but not this one; the caller also has no try/catch around export+shell-open</td>
+</tr>
+<tr>
+<td>Associate QIF, QFX, OFX and MMDB</td>
+<td>File | Associate QIF, QFX, OFX and MMDB</td>
+<td><code>FileAssociation.Associate(ext, path)</code> — writes <code>HKCU\Software\Classes\...</code> registry keys directly</td>
+<td>Success: registry keys point the four extensions at this app, confirmation shown. Failure: caught, error MessageBox shown</td>
+<td>N/A — real HKCU registry mutation</td>
+<td>Business-layer gap; a FlaUI test here leaves real registry changes on the test machine — recommend read-only/manual verification, not automated</td>
+</tr>
+<tr>
+<td>Add User (SQL Server)</td>
+<td>File | Add User..., enabled only when the open database is <code>SqlServerDatabase</code></td>
+<td><code>SqlServerDatabase.AddLogin(userName, password)</code> via <code>AddLoginDialog</code></td>
+<td>Success: new SQL Server login+user created. Failure: duplicate username/invalid password surfaces a real SQL error</td>
+<td>Needs a real SQL Server test instance</td>
+<td>Not started — no test coverage found for <code>AddLogin</code></td>
+</tr>
+<tr>
+<td>File | Backup — currently unreachable</td>
+<td>N/A today</td>
+<td><code>IDatabase.Backup(path)</code>, invoked by a fully-wired <code>CommandBinding</code>/handler</td>
+<td>—</td>
+<td>—</td>
+<td>Observation, not a scenario: dead/orphaned wiring — a working <code>CommandBinding</code> and handler exist, but no <code>MenuItem</code>, button, or shortcut anywhere fires it</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edit-menu-cleanup-submenu-database-maintenance-utilities">Edit menu — "Cleanup" submenu (database-maintenance utilities)<a class="headerlink" href="#edit-menu-cleanup-submenu-database-maintenance-utilities" title="Permanent link">#</a></h3>
+<p>None of these six items have any matching help page anywhere in <code>docs/</code>, and none have unit-test coverage. (<code>GC.Collect</code> and an env-var dump are excluded — pure dev/debug utilities.)</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Remove unused securities</td>
+<td>Edit | Cleanup | Remove unused securities</td>
+<td><code>MyMoney.RemoveUnusedSecurities()</code></td>
+<td>Securities held by zero transactions are removed; a referenced security is untouched</td>
+<td>Fixture db with one orphan security + one referenced security</td>
+<td>Business-layer gap — no test coverage</td>
+</tr>
+<tr>
+<td>Check Transfers (dangling-transfer detection)</td>
+<td>Edit | Cleanup | Check Transfers</td>
+<td><code>MyMoney.CheckTransfers()</code> → consumed by <code>TransactionsView.CheckTransfers()</code>, prompts to fix dangling transfers</td>
+<td>A transfer whose other side was deleted is returned in the dangling set and the fix-up prompt appears; a clean db returns empty, no prompt</td>
+<td>Fixture db with one transfer manually broken (one side deleted, bypassing the linked-delete)</td>
+<td>Business-layer gap — zero coverage; <code>docs/Basics/Transfers.md</code> never mentions this feature at all</td>
+</tr>
+<tr>
+<td>Fix Splits</td>
+<td>Edit | Cleanup | Fix Splits</td>
+<td><strong>None</strong> — logic is inline in <code>MainWindow.xaml.cs</code>'s click handler, not extracted at all</td>
+<td>Transactions with <code>IsSplit=true</code> but a non-<code>Split</code> category get corrected; reports count fixed, or "all good"</td>
+<td>Fixture db with a transaction manually put into that inconsistent state</td>
+<td>Business-layer gap — logic isn't even in the business layer, can't be unit-tested without extracting it first</td>
+</tr>
+<tr>
+<td>Remove Duplicate Securities</td>
+<td>Edit | Cleanup | Remove Duplicate Securities</td>
+<td><code>MyMoney.RemoveDuplicateSecurities()</code> → <code>int</code></td>
+<td>Duplicate security records collapse to one; returned count matches the confirmation message</td>
+<td>Fixture db with two <code>Security</code> rows for the same symbol</td>
+<td>Business-layer gap — no test coverage</td>
+</tr>
+<tr>
+<td>Remove Duplicate Payees</td>
+<td>Edit | Cleanup | Remove Duplicate Payees</td>
+<td><code>MyMoney.RemoveDuplicatePayees()</code> → <code>int</code></td>
+<td>Same pattern, for payees</td>
+<td>Fixture db with two <code>Payee</code> rows for the same name</td>
+<td>Business-layer gap — no test coverage</td>
+</tr>
+<tr>
+<td>Reset all category frequencies</td>
+<td>Edit | Cleanup | Reset all category frequencies</td>
+<td><code>MyMoney.ResetCategoryFrequencies()</code></td>
+<td>Category "frequency" counters reset to zero; picker ordering changes on next use</td>
+<td>Fixture db with categories that have non-zero frequency counts</td>
+<td>Business-layer gap — no test coverage</td>
+</tr>
+</tbody>
+</table>
+<h3 id="query-menu-raw-sql-access">Query menu — raw SQL access<a class="headerlink" href="#query-menu-raw-sql-access" title="Permanent link">#</a></h3>
+<p>(Not the query-builder panel — that's covered under Basics' Quick Search &amp; Advanced Queries, above.)</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Adhoc SQL Query</td>
+<td>Query | Adhoc SQL Query...</td>
+<td><code>IDatabase.QueryDataSet(string)</code>, exercised through <code>FreeStyleQueryDialog</code></td>
+<td>Success: valid SELECT populates the results grid; Save writes to XML. Failure: malformed SQL is caught, shown in a MessageBox, no crash. Also: this menu item only does anything when the open db is <code>SqlServerDatabase</code> — for SQLite/XML it silently no-ops with <strong>no message at all</strong></td>
+<td>The existing "Redmond"/"MyMoney" SQL Server test instance</td>
+<td>Business-layer gap for the failure path — <code>QueryDataSet</code> is only incidentally exercised (via <code>PRAGMA</code> checks in <code>SqliteDatabaseContractTests.cs</code>), never for a malformed-query error; the silent-no-op-on-SQLite behavior is a real UX gap worth confirming is intentional</td>
+</tr>
+<tr>
+<td>Show Last Update</td>
+<td>Query | Show Last Update...</td>
+<td><code>IDatabase.GetLog()</code> — works against any db flavor</td>
+<td>Dialog opens pre-populated with the accumulated operation log for the session</td>
+<td>Any fixture db, after a couple of edits</td>
+<td>Not started — no test coverage found</td>
+</tr>
+</tbody>
+</table>
+<h3 id="business-layer-capabilities-with-no-help-page">Business-layer capabilities with no help page<a class="headerlink" href="#business-layer-capabilities-with-no-help-page" title="Permanent link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>UI action</th>
+<th>Business-layer API</th>
+<th>Verify</th>
+<th>Test data</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Command-line argument handling</td>
+<td>Launch <code>MyMoney.exe</code> with <code>/n</code>, <code>/nd &lt;name&gt;</code>, <code>/nosettings</code>, <code>/h</code>/<code>-?</code>/<code>--help</code>, or a bare filename</td>
+<td><code>ParseCommandLine</code> (<code>MainWindow.xaml.cs</code>), called from the constructor</td>
+<td>Each flag produces its documented effect; an unrecognized flag falls through with no <code>default</code> case, silently ignored — confirm this is intended rather than a swallowed-typo bug</td>
+<td>None needed for <code>/h</code>/<code>/n</code>; a small fixture file for the bare-filename case</td>
+<td>Business-layer gap — untestable without launching the whole process; the <code>/h</code> usage text is the closest thing to docs this has anywhere</td>
+</tr>
+</tbody>
+</table>
+<h3 id="observation-only-not-a-testable-scenario-today">Observation only — not a testable scenario today<a class="headerlink" href="#observation-only-not-a-testable-scenario-today" title="Permanent link">#</a></h3>
+<p><code>CommandFileRestore</code>, <code>CommandReportBudget</code>, and <code>CommandShowBudget</code> are declared in <code>Commands.cs</code> with no <code>CommandBinding</code>, <code>MenuItem</code>, or handler anywhere. The domain model carries a full <code>Category.Budget</code> column and <code>Transaction</code>/<code>Split.IsBudgeted</code>/<code>BudgetBalanceDate</code> change-tracking in <code>Money.cs</code>, but nothing in the WPF project references any of it. This reads as an incomplete/abandoned budgeting feature — real business-layer surface, currently unreachable by any end user. Flagged so it isn't silently lost; if it's ever wired up, it needs both business-layer and FlaUI coverage built from scratch.</p>
+<hr />
+<h2 id="documentation-gaps-found">Documentation gaps found<a class="headerlink" href="#documentation-gaps-found" title="Permanent link">#</a></h2>
+<p>Building this catalog directly from the help file's own structure surfaced real gaps in the documentation itself, not just in test coverage. Two kinds:</p>
+<p><strong>Missing documentation</strong> (a real, working feature with no help page at all) — every row in "Undocumented in help file — Menu &amp; API audit" above is one of these. The most significant clusters, worth their own help pages if anyone picks up a documentation pass:</p>
+<ul>
+<li>The entire Edit | Cleanup submenu (6 database-maintenance tools) — none mentioned anywhere in <code>docs/</code>.</li>
+<li>The Query | Adhoc SQL Query and Show Last Update dialogs.</li>
+<li>Command-line launch arguments (<code>/n</code>, <code>/nd</code>, <code>/nosettings</code>, bare-filename opening) — the <code>/h</code> usage text is the only documentation this has.</li>
+<li>File | Associate file extensions and File | Add User (SQL Server).</li>
+</ul>
+<p><strong>Stale documentation</strong> (a help page describing something that no longer matches the code) — one confirmed instance found:</p>
+<ul>
+<li><code>docs/Images/components.png</code> (referenced from the Development page's "Projects and Packages" section) predates the entire 3-tier layer-extraction work — shows a monolithic <code>MyMoney</code> project with no <code>MyMoney.Business</code>/<code>MyMoney.Data</code> split, references <code>MSTest</code>/<code>EntityFramework</code> (not used anywhere in the current codebase), and is missing <code>PerformanceProvider</code>/<code>UITests</code>/<code>ScenarioTest</code>/<code>UIControlsTest</code> entirely. Filed as <a href="https://github.com/markabrandjord/MyMoney.Net/issues/41">issue #41</a>.</li>
+</ul>
+<p>Not filed as issues yet — the missing-documentation items above are tracked here for now; file them individually if/when a documentation pass is actually scheduled, rather than opening 4+ issues speculatively.</p>
+<hr />
+<h2 id="adding-a-new-scenario">Adding a new scenario<a class="headerlink" href="#adding-a-new-scenario" title="Permanent link">#</a></h2>
+<p>Add a row to the relevant table (or a new table for a new area) with the
+same six columns. Keep the "Business-layer coverage" judgment explicit —
+if you're not sure whether the underlying API is already unit-tested,
+check before assuming a FlaUI test is the right next step. If you find a
+real feature with no corresponding help page, or a help page describing
+behavior that no longer matches the code, add it to "Documentation gaps
+found" above too.</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

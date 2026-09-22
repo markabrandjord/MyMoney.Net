@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/specs/2026-09-15-layer-extraction-design/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Layer Extraction — Design Spec - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Layer Extraction \u2014 Design Spec", url: "#_top", children: [
+              {title: "Status", url: "#status" },
+              {title: "Context", url: "#context" },
+              {title: "Goals", url: "#goals" },
+              {title: "Non-Goals", url: "#non-goals" },
+              {title: "Architecture", url: "#architecture" },
+              {title: "UI-Decoupling Mechanism", url: "#ui-decoupling-mechanism" },
+              {title: "Migration Sequencing", url: "#migration-sequencing" },
+              {title: "Testing / Verification", url: "#testing-verification" },
+              {title: "Open Questions / Future Work", url: "#open-questions-future-work" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="layer-extraction-design-spec">Layer Extraction — Design Spec<a class="headerlink" href="#layer-extraction-design-spec" title="Permanent link">#</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">#</a></h2>
+<p>Design phase. This is item #1 of the five-item 3-tier architecture
+initiative (see the tracking work item, GitHub issue #1, for the full
+list). It is the foundation item #3 (business-layer test-support
+library) and item #5 (Uno/Xamarin thin clients) both depend on.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">#</a></h2>
+<p>Today, <code>MyMoney.csproj</code> is a monolith: the domain model
+(<code>Database/Money.cs</code>, ~15,000 lines defining <code>MyMoney</code>,
+<code>Accounts</code>/<code>Account</code>, <code>Transactions</code>/<code>Transaction</code>, <code>Categories</code>,
+<code>Securities</code>, <code>Payees</code>, <code>Splits</code>, <code>RentBuildings</code>, and the
+<code>PersistentObject</code>/<code>PersistentContainer</code> change-tracking base classes)
+and the storage layer (<code>IDatabase</code> and its implementations —
+<code>SqliteDatabase</code>, <code>SqlDatabase</code>, <code>SqlCeDatabase</code>, <code>XmlStore</code>,
+<code>CsvStore</code>, and item #2's new <code>SqlServerStoredProcDatabase</code>) are
+compiled directly into the WPF application project, alongside Views,
+Reports, Charts, Taxes, Importers, and everything else. There is no
+enforced boundary — nothing stops a UI concern from creeping into the
+domain model or the storage layer, and nothing lets another client
+(a test-support library, an Uno app, the legacy Xamarin app) consume
+the domain model or storage layer without dragging in WPF.</p>
+<p>Investigating the current code for this spec surfaced concrete
+evidence of that boundary already having eroded:</p>
+<ul>
+<li><code>MoneyDataObject.cs</code>, which lives in <code>Database/</code>, implements
+  <code>System.Windows.IDataObject</code> — WPF clipboard/drag-drop interop, not
+  domain data.</li>
+<li><code>SqlDatabase.cs</code> calls <code>MessageBoxEx.Show(...)</code> directly (a
+  mixed-mode SQL login warning).</li>
+<li><code>SampleDatabase.cs</code> reaches into <code>Application.Current.MainWindow</code> to
+  set a dialog owner.</li>
+<li><code>Money.cs</code> depends on <code>StockQuoteCache</code> (from the separate
+  <code>StockQuotes/</code> folder, not a separate project), which in turn pulls
+  in a stray <code>using System.Windows.Forms.Design.Behavior;</code> that
+  nothing in the file actually uses.</li>
+<li><code>CostBasis.cs</code> (in <code>Database/</code>) has an unused
+  <code>using System.Windows.Navigation;</code>.</li>
+</ul>
+<p><code>Money.cs</code> itself, notably, has <strong>zero</strong> WPF dependencies — the
+domain model is already clean; the leaks are all in adjacent files
+that happen to share the <code>Database/</code> folder.</p>
+<h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Pull the domain model and the storage layer out of <code>MyMoney.csproj</code>
+  into two new class libraries — <code>MyMoney.Business</code> and
+  <code>MyMoney.Data</code> — each independently buildable, each with a real
+  public contract, with <code>MyMoney.csproj</code> reduced to a thin consumer of
+  both.</li>
+<li>Do this as a full extraction in one item: all of <code>Money.cs</code> and all
+  six <code>IDatabase</code> implementations move, not a partial vertical slice.
+  A half-migrated state (some storage engines extracted, some not)
+  would be a worse resting point than either "all in the monolith" or
+  "all extracted."</li>
+<li>Fix the WPF leaks found above as part of the move — not a
+  drive-by refactor, but a direct consequence of the boundary this
+  item exists to create. Per the brainstorming skill's own guidance:
+  existing problems that affect the work get fixed as part of the
+  work, not ignored and not expanded into unrelated cleanup.</li>
+<li>Preserve behavior exactly. This is a refactor: the full existing
+  test suite must keep passing, unchanged, throughout.</li>
+<li>Prove the resulting layers are genuinely portable: no true
+  UI-rendering assembly (<code>PresentationFramework</code>/<code>PresentationCore</code>)
+  in either new DLL. <code>MyMoney.Data</code> additionally has zero WPF-family
+  references at all; <code>MyMoney.Business</code> may reference <code>WindowsBase</code>
+  for its event-marshaling backbone (discovered during implementation
+  to be load-bearing — see the plan's Global Constraints and ledger).
+  Full portability, including dropping <code>WindowsBase</code>, stays deferred
+  to item #5, the entire reason item #5 depends on this item existing.</li>
+</ul>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">#</a></h2>
+<ul>
+<li>Building item #3 (the business-layer test-support library) or any
+  new inline/mock unit tests beyond proving the layer boundary is
+  real. Item #3 explicitly depends on this item and is scoped to do
+  that deeper testing work — building it here would be doing item
+  #3's job inside item #1.</li>
+<li>Wiring up Uno or Xamarin (item #5). No design work has started
+  there and it stays TBD until this item lands.</li>
+<li>Moving <code>Importers/</code>, <code>Ofx/</code>, <code>Reports/</code>, <code>Charts/</code>, <code>Taxes/</code>, or the
+  StockQuotes fetch/throttle machinery (<code>StockQuoteManager</code>,
+  <code>Yahoo</code>/<code>Polygon</code>/<code>TwelveData</code>/<code>MarketStack</code>, throttling). These are
+  business-logic-adjacent but not part of the tracking issue's stated
+  scope ("the domain model and storage layer"), and none of them are
+  a dependency of <code>Money.cs</code> itself (see StockQuotes handling below).
+  They stay in <code>MyMoney.csproj</code> for now.</li>
+<li>Renaming the <code>Walkabout.Data</code> namespace, or any other namespace.
+  The project/assembly names change; the C# namespaces inside them do
+  not. Bundling a namespace rename with a project-structure move would
+  compound two risky changes into one unreviewable diff for no forcing
+  reason.</li>
+<li>True cross-platform portability of <code>SqlCeDatabase</code> (legacy SQL
+  Server Compact support). It uses <code>Microsoft.Win32</code> registry lookups
+  and dynamically loads a Windows-only assembly by reflection — not
+  portable regardless of TargetFramework choice. Left as-is; if item
+  #5 needs to exclude it later, that's item #5's problem to solve.</li>
+</ul>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">#</a></h2>
+<pre><code>MyMoney.Business.csproj  (net10.0-windows7.0, WindowsBase allowed, no
+                          PresentationFramework/PresentationCore)
+  Database/Money.cs           -- MyMoney, Accounts, Transactions, Categories,
+                                  Securities, Payees, Splits, RentBuildings,
+                                  PersistentObject/PersistentContainer
+  Database/IDatabase.cs       -- the storage contract; lives here because
+                                  IDatabase.Load/Save reference MyMoney, a
+                                  business-layer type (dependency inversion:
+                                  the business layer declares the contract,
+                                  the data layer implements it)
+  StockQuotes/StockQuoteCache.cs  -- moved from MyMoney.csproj's StockQuotes/
+                                      folder; the one class Money.cs actually
+                                      depends on (stray unused WinForms-design
+                                      using dropped in the move)
+  (other Money.cs-adjacent Database/ files with no WPF dependency, e.g.
+   Mapping.cs, Query.cs, AutoCategorization.cs, CostBasis.cs (dead
+   System.Windows.Navigation using dropped), Encryption.cs, SecurityService.cs,
+   AsyncSqlQuery.cs, Payments.cs, Money_Loans.cs, DatabaseSettings.cs,
+   IDirectorySecurity.cs — final per-file placement confirmed during
+   implementation by checking each for WPF references, same method used
+   for this spec)
+
+MyMoney.Data.csproj  (net10.0-windows7.0)
+  references MyMoney.Business
+  Database/SqliteDatabase.cs
+  Database/SqlDatabase.cs           -- MessageBoxEx.Show call replaced with
+                                        the new UI-prompt callback (below)
+  Database/SqlCeDatabase.cs
+  Database/XmlStore.cs
+  Database/CsvStore.cs
+  Database/SqlServerStoredProcDatabase.cs   (item #2)
+  Database/DataEngineConfig.cs              (item #2, no WPF dependency)
+  Database/DataEngineCredentialStore.cs     (item #2, no WPF dependency)
+  Database/DataEnginePasswordGenerator.cs   (item #2, no WPF dependency)
+  Database/IDirectorySecurity.cs    -- pre-existing interface
+                                        (SqlServerDatabase already has a
+                                        settable IDirectorySecurity
+                                        SecurityService property; only its
+                                        one concrete implementation,
+                                        SecurityService, is WPF-app-bound
+                                        via Setup/DirectorySetup, so it
+                                        stays in MyMoney.csproj, same
+                                        injection pattern as
+                                        IDataLayerUiCallback below)
+  Database/IDataLayerUiCallback.cs  -- new: the UI-decoupling interface
+                                        (see below)
+
+MyMoney.csproj  (WPF app, thinned)
+  references MyMoney.Business, MyMoney.Data
+  Interop/MoneyDataObject.cs    -- relocated here from Database/ (it's WPF
+                                    clipboard interop, IDataObject, not
+                                    domain data)
+  Database/DataEngineStartup.cs -- stays here; it wires into
+                                    MainWindow.xaml.cs's constructor and is
+                                    inherently WPF-startup-sequence code
+  Database/SampleDatabase.cs    -- stays here in full, unmodified in kind:
+                                    it's not a storage engine (no IDatabase
+                                    implementation, lives in namespace
+                                    Walkabout.Assistance not Walkabout.Data)
+                                    but a WPF wizard whose Create() method
+                                    directly drives a real dialog
+                                    (SampleDatabaseOptions.ShowDialog()) as
+                                    its actual control flow -- discovered
+                                    during implementation planning to be far
+                                    more WPF-coupled than a single
+                                    Application.Current.MainWindow lookup.
+                                    Its portable data-construction logic
+                                    (everything after the dialog returns)
+                                    is split out into a new
+                                    SampleDataGenerator class in
+                                    MyMoney.Business instead -- not routed
+                                    through IDataLayerUiCallback, since the
+                                    dialog-driving code that stays here
+                                    never crosses the assembly boundary at
+                                    all.
+  StockQuotes/ (minus StockQuoteCache.cs, IStockQuoteService.cs) --
+                                    StockQuoteManager and the fetch
+                                    providers stay here, now consuming
+                                    StockQuoteCache/StockQuoteHistory from
+                                    MyMoney.Business instead of sibling
+                                    files
+  a new class implementing IDataLayerUiCallback with the real
+    MessageBoxEx call, registered wherever SqlServerDatabase is
+    constructed (IDataLayerUiCallback ended up serving only the
+    SqlDatabase.cs mixed-mode-login warning -- see above for why
+    SampleDatabase doesn't use it)
+  everything else unchanged: Views/, Reports/, Charts/, Taxes/,
+    Importers/, Ofx/, MainWindow.xaml.cs, etc.
+</code></pre>
+<h2 id="ui-decoupling-mechanism">UI-Decoupling Mechanism<a class="headerlink" href="#ui-decoupling-mechanism" title="Permanent link">#</a></h2>
+<p>Investigation during implementation planning found <code>SampleDatabase.cs</code>
+is not actually a data-layer class at all (see Architecture, above) —
+it stays in <code>MyMoney.csproj</code> entirely, so its
+<code>Application.Current.MainWindow</code> dialog-owner lookup never needs to
+cross the assembly boundary. That leaves exactly one real UI call
+inside the code being extracted: <code>SqlServerDatabase.AddLogin</code>'s
+mixed-mode-login warning (<code>SqlDatabase.cs</code>) — the original authors had
+already left a <code>// TODO - we need to remove any UI from the DataBase
+model lower layer</code> comment at that exact line. It's replaced by a
+single small interface in <code>MyMoney.Data</code>:</p>
+<pre><code class="language-csharp">namespace Walkabout.Data
+{
+    public interface IDataLayerUiCallback
+    {
+        void ShowWarning(string message, string title);
+    }
+}
+</code></pre>
+<p><code>SqlServerDatabase</code> takes an <code>IDataLayerUiCallback</code> via a settable
+property (matching the existing <code>SecurityService</code> property's pattern
+on the same class) and calls it instead of touching
+<code>MessageBoxEx</code>/<code>MessageBoxButton</code>/<code>MessageBoxImage</code> directly.
+<code>MyMoney.csproj</code> provides the real implementation (backed by
+<code>MessageBoxEx.Show</code>) and sets it wherever <code>SqlServerDatabase</code> is
+constructed. If no callback is supplied, the call site degrades
+gracefully (a no-op via <code>?.</code>) rather than throwing.</p>
+<h2 id="migration-sequencing">Migration Sequencing<a class="headerlink" href="#migration-sequencing" title="Permanent link">#</a></h2>
+<p>Order is dictated by the dependency graph: <code>MyMoney.Data</code> depends on
+<code>MyMoney.Business</code> (confirmed concretely — <code>SqlDatabase.cs</code> alone
+references domain types like <code>Payee</code>/<code>Account</code>/<code>Transaction</code>/<code>MyMoney</code>
+171 times), so extraction has to happen in that order.</p>
+<ol>
+<li><strong><code>MyMoney.Business</code> first.</strong> Move <code>Money.cs</code>, <code>IDatabase.cs</code>,
+   <code>StockQuoteCache.cs</code>, and the other WPF-free <code>Database/</code>-adjacent
+   files. Verify it builds standalone before touching anything else.</li>
+<li><strong><code>MyMoney.Data</code> second.</strong> Move the six <code>IDatabase</code> implementations
+   and item #2's config/credential/password classes; add
+   <code>IDataLayerUiCallback</code> and wire <code>SqlDatabase</code>/<code>SampleDatabase</code> to
+   use it. Verify it builds standalone, referencing only
+   <code>MyMoney.Business</code>.</li>
+<li><strong>Thin <code>MyMoney.csproj</code> last.</strong> Remove the now-moved files, add
+   <code>ProjectReference</code>s to both new projects, relocate
+   <code>MoneyDataObject.cs</code>, implement <code>IDataLayerUiCallback</code> for real,
+   leave <code>DataEngineStartup.cs</code> and the StockQuotes fetch machinery in
+   place.</li>
+<li><strong>Update downstream consumers.</strong> <code>UnitTests.csproj</code>,
+   <code>MyMoneyAdmin.csproj</code>, <code>UITests.csproj</code>, <code>ScenarioTest.csproj</code> get
+   <code>ProjectReference</code>s to whichever of the new projects they actually
+   need, added mechanically.</li>
+</ol>
+<p>Namespaces are preserved throughout (<code>Walkabout.Data</code> stays
+<code>Walkabout.Data</code>) — this is a project-boundary move, not a rename, so
+existing <code>using</code> statements in untouched files keep compiling
+unchanged.</p>
+<h2 id="testing-verification">Testing / Verification<a class="headerlink" href="#testing-verification" title="Permanent link">#</a></h2>
+<ul>
+<li>Full solution build stays green at every stage above — no
+  intermediate state ships a broken build.</li>
+<li>The full existing test suite (currently 29 passed, 1 skipped, 0
+  failed) must keep passing, unchanged, throughout. This is a
+  refactor: any existing test that needs to change to keep passing is
+  a signal something leaked, not an expected cost of the work.</li>
+<li>A new, automated portability check (added to <code>UnitTests.csproj</code> or a
+  small dedicated test) asserts <code>MyMoney.Business.dll</code> and
+  <code>MyMoney.Data.dll</code> reference no WPF assembly
+  (<code>PresentationFramework</code>/<code>PresentationCore</code>/<code>WindowsBase</code>) — turns
+  the "is this actually portable" question into something <code>dotnet
+  test</code> answers on every run, not a one-time manual inspection.</li>
+<li><code>UnitTests.csproj</code> gains direct <code>ProjectReference</code>s to
+  <code>MyMoney.Business</code> and <code>MyMoney.Data</code> (not just transitively via
+  <code>MyMoney.csproj</code>) — proves the two DLLs are independently
+  consumable, which is the actual point of this item.</li>
+<li>The existing FlaUI scenario test from item #4
+  (<code>PayeeSelectionTests.SelectingAPayee_AfterOpeningFixtureFile_DoesNotCrash</code>)
+  is re-run against the thinned app as an end-to-end regression smoke
+  check — not new UI test coverage (out of scope, see Non-Goals), just
+  reuse of what item #4 already built to confirm the real running app
+  still works after the boundary move.</li>
+<li>No new inline/mock unit tests beyond the two boundary-proof checks
+  above. Deeper business-layer test coverage is item #3's explicit
+  scope, not this item's.</li>
+</ul>
+<h2 id="open-questions-future-work">Open Questions / Future Work<a class="headerlink" href="#open-questions-future-work" title="Permanent link">#</a></h2>
+<ul>
+<li>Final per-file placement of the smaller <code>Database/</code>-adjacent files
+  (<code>Mapping.cs</code>, <code>Query.cs</code>, <code>AutoCategorization.cs</code>, <code>Encryption.cs</code>,
+  <code>SecurityService.cs</code>, <code>AsyncSqlQuery.cs</code>, <code>Payments.cs</code>,
+  <code>Money_Loans.cs</code>, <code>DatabaseSettings.cs</code>, <code>IDirectorySecurity.cs</code>) is
+  confirmed file-by-file during implementation using the same
+  WPF-reference check used for this spec, not decided in advance here
+  — none showed WPF dependencies in the investigation for this spec,
+  so the working assumption is all of them join <code>MyMoney.Business</code>,
+  but this gets verified, not assumed, per file.</li>
+<li>True cross-platform portability (dropping the <code>-windows7.0</code> TFM
+  suffix, dealing with <code>SqlCeDatabase</code>) is explicitly deferred to
+  item #5, which is unspecced and TBD.</li>
+<li>Whether <code>IDataLayerUiCallback</code> should grow additional methods is
+  deferred until a third real UI-in-data-layer call site is found —
+  YAGNI; two call sites don't justify speculative extensibility.</li>
+</ul>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

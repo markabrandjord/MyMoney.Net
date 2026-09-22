@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/scenario-capture/redesign-decision-register/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Redesign Decision Register - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Redesign Decision Register", url: "#_top", children: [
+              {title: "Counts", url: "#counts" },
+              {title: "How items were sorted", url: "#how-items-were-sorted" },
+              {title: "Cluster tags", url: "#cluster-tags" },
+          ]},
+          {title: "The Decision Register", url: "#the-decision-register", children: [
+              {title: "domain-model", url: "#domain-model" },
+              {title: "navigation-ui", url: "#navigation-ui" },
+              {title: "views-editing", url: "#views-editing" },
+              {title: "dialogs-forms", url: "#dialogs-forms" },
+              {title: "reports-charts", url: "#reports-charts" },
+              {title: "import-export", url: "#import-export" },
+              {title: "taxes", url: "#taxes" },
+              {title: "data-engine", url: "#data-engine" },
+              {title: "security", url: "#security" },
+          ]},
+          {title: "56. The decision is bigger: whether a remote, community-maintained directory is allowed to", url: "#56-the-decision-is-bigger-whether-a-remote-community-maintained-directory-is-allowed-to", children: [
+              {title: "D-43 \u2014 What does \"password-protect my file\" promise?", url: "#d-43-what-does-password-protect-my-file-promise" },
+              {title: "attachments-documents", url: "#attachments-documents" },
+              {title: "rental-property", url: "#rental-property" },
+              {title: "cross-cutting", url: "#cross-cutting" },
+          ]},
+          {title: "BUG-ONLY items", url: "#bug-only-items", children: [
+          ]},
+          {title: "HOUSEKEEPING items", url: "#housekeeping-items", children: [
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="redesign-decision-register">Redesign Decision Register<a class="headerlink" href="#redesign-decision-register" title="Permanent link">#</a></h1>
+<p>Triage of every open question raised by the nine-phase scenario-capture audit
+(<code>end-user-scenarios.md</code>, same folder) into the three things they can actually be:
+a <strong>decision</strong> the redesign has to make, a <strong>bug</strong> that is already understood and
+tracked, or <strong>housekeeping</strong> that only affects the catalog's own internal consistency.</p>
+<p>This exists so the design panel works from a short, sorted list instead of re-reading
+6,950 lines of catalog and re-deciding what is worth arguing about.</p>
+<h2 id="counts">Counts<a class="headerlink" href="#counts" title="Permanent link">#</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open questions processed</td>
+<td><strong>193</strong> — 8 (P1), 9 (P2), 15 (P3), 30 (P4), 32 (P5), 24 (P6), 25 (P7), 26 (P8), 24 (P9)</td>
+</tr>
+<tr>
+<td><strong>DECISION</strong></td>
+<td><strong>59 open questions</strong>, consolidated into <strong>53 register entries</strong> (six pairs describe one decision each and were merged — see below)</td>
+</tr>
+<tr>
+<td><strong>BUG-ONLY</strong></td>
+<td><strong>114</strong> — 96 already tracked in issues #52–#58, 18 not yet filed</td>
+</tr>
+<tr>
+<td><strong>HOUSEKEEPING</strong></td>
+<td><strong>20</strong> — catalog-construction and phase-boundary calls</td>
+</tr>
+</tbody>
+</table>
+<p>59 + 114 + 20 = 193, matching the catalog's own closing count.</p>
+<p><strong>Merged decisions</strong> (one decision, two open questions): D-52 (P5 OQ6 + P8 OQ20, printing),
+D-50 (P2 OQ5 + P8 OQ16, backup/restore), D-29 (P7 OQ10 + P7 OQ13, tax-data vintage),
+D-37 (P8 OQ24 + P9 OQ22, is SQL Server a shipped configuration), D-34 (P9 OQ2 + P9 OQ23,
+concurrency scope), D-39 (P9 OQ9 + P9 OQ10, schema upgrade).</p>
+<h2 id="how-items-were-sorted">How items were sorted<a class="headerlink" href="#how-items-were-sorted" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>DECISION</strong> — a panel debating alternatives would produce genuinely different
+  recommendations, and the answer changes what gets built. Where the underlying code is
+  also plainly broken, the defect is cross-referenced to its issue; the <em>decision</em> is what
+  the fixed code should do, which the issue does not answer.</li>
+<li><strong>BUG-ONLY</strong> — one correct answer, no alternatives to weigh. Full detail already lives
+  in #52–#58; the compact list below exists to prove the triage happened. 18 items are
+  real defects that no issue covers yet and are marked <code>untracked</code>.</li>
+<li><strong>HOUSEKEEPING</strong> — "which phase should own describing X", "I classified Y as shell
+  rather than view content". Matters to the catalog, not to the redesign.</li>
+</ul>
+<p>Borderline calls were resolved toward DECISION, per the brief, with the reason stated in
+the entry.</p>
+<h2 id="cluster-tags">Cluster tags<a class="headerlink" href="#cluster-tags" title="Permanent link">#</a></h2>
+<p><code>domain-model</code> (4) · <code>navigation-ui</code> (3) · <code>views-editing</code> (5) · <code>dialogs-forms</code> (3) ·
+<code>reports-charts</code> (9) · <code>import-export</code> (3) · <code>taxes</code> (4) · <code>data-engine</code> (8) ·
+<code>security</code> (4) · <code>attachments-documents</code> (3) · <code>rental-property</code> (2) · <code>cross-cutting</code> (5)</p>
+<hr />
+<h1 id="the-decision-register">The Decision Register<a class="headerlink" href="#the-decision-register" title="Permanent link">#</a></h1>
+<h2 id="domain-model"><code>domain-model</code><a class="headerlink" href="#domain-model" title="Permanent link">#</a></h2>
+<h3 id="d-1-revive-category-funding-or-leave-envelope-budgeting-out-of-the-model">D-1 — Revive category funding, or leave envelope budgeting out of the model?<a class="headerlink" href="#d-1-revive-category-funding-or-leave-envelope-budgeting-out-of-the-model" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 1 OQ1 · <strong>Cluster:</strong> <code>domain-model</code></p>
+<p><code>AccountType.CategoryFund</code> (value 9) exists in the enum and is explicitly commented as
+unused, retained only so existing databases don't shift their stored values. Nothing in
+the product creates or consumes one, so the catalog gives it no scenario. What it points
+at, though, is a real capability the product does not have: funding a category from an
+account — envelope budgeting. The decision is whether the redesign wants envelope-style
+budgeting as a first-class concept (in which case this is a design exercise from scratch,
+not a resurrection — there is no behaviour to restore, only an enum value) or whether
+budgeting stays purely a per-period comparison of actuals against a budgeted amount. This
+is entangled with D-3: if budgeting moves to the transaction level, envelope funding
+becomes substantially more plausible.</p>
+<h3 id="d-2-should-domain-objects-carry-view-state-at-all">D-2 — Should domain objects carry view state at all?<a class="headerlink" href="#d-2-should-domain-objects-carry-view-state-at-all" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 1 OQ4 · <strong>Cluster:</strong> <code>domain-model</code></p>
+<p><code>Transaction</code> carries <code>TransactionDropTarget</code>, <code>AttachmentDropTarget</code> and <code>IsCutting</code>;
+<code>Security</code> carries <code>IsExpanded</code>; <code>Category</code> carries <code>IsEditing</code>. These are drag-drop and
+inline-editing states of a particular WPF grid, living on the persisted domain types and
+travelling with them everywhere the model goes. The catalog deliberately gave them no
+domain scenarios and deferred them to Phase 3. The redesign has to decide whether the new
+domain model stays "one object graph that both persistence and the UI bind to directly"
+— which is what makes these fields exist, and is why the model is so cheap to bind — or
+whether view state moves into view models, at the cost of a mapping layer over a ~15k-line
+object graph. This is the single most structural choice in this cluster and it constrains
+several others (D-8's view-state restoration, D-5's status model).</p>
+<h3 id="d-3-is-budgeting-a-transaction-level-concept-or-a-split-level-one">D-3 — Is budgeting a transaction-level concept or a split-level one?<a class="headerlink" href="#d-3-is-budgeting-a-transaction-level-concept-or-a-split-level-one" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 1 OQ5 · <strong>Cluster:</strong> <code>domain-model</code></p>
+<p><code>TransactionFlags.Budgeted</code> exists as a bit on the flags enum and is deliberately cleared
+on import, but <code>Transaction</code> exposes no property for it — only <code>Split.IsBudgeted</code> is
+readable and writable, so in working code budget participation is a property of an
+itemised line, never of a whole transaction. The flag bit is either a removed capability
+or an unfinished one. A user marking "this whole paycheque is budgeted" and a user marking
+"the $40 groceries line of this transaction is budgeted" are different products. The
+decision has visible downstream reach: Phase 3's advanced search offers a <code>Field.Budgeted</code>
+condition (B-8) that the model cannot currently answer for a transaction, and the
+budget-report command was never wired up at all (D-50's sibling finding).</p>
+<h3 id="d-4-what-does-a-currency-ratio-mean-and-can-a-non-usd-user-be-right">D-4 — What does a currency ratio mean, and can a non-USD user be right?<a class="headerlink" href="#d-4-what-does-a-currency-ratio-mean-and-can-a-non-usd-user-be-right" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ12 · <strong>Cluster:</strong> <code>domain-model</code></p>
+<p><code>ExchangeRateService</code> always requests <code>fetch-all?from=USD</code> and stores <code>Currency.Ratio =
+1 / rate</code>, so every currency in the file is expressed against the dollar, regardless of
+what the user picked as their display currency (<code>DatabaseSettings.DisplayCurrency</code>, which
+also defaults to <code>"USD"</code>). The catalog could not establish from the code whether a
+non-US user's totals come out right, because nothing at either end states the convention
+<code>Currency.Ratio</code> is supposed to satisfy. The decision is what the product's currency model
+actually is: dollar-anchored with conversion at display time, home-currency-anchored, or
+per-transaction rates captured at entry. Related and probably part of the same answer: the
+rate service's address is hard-coded and overwritten in its constructor, so unlike the four
+market-data providers it cannot be pointed anywhere else — deliberate single-source, or an
+oversight to correct.</p>
+<h2 id="navigation-ui"><code>navigation-ui</code><a class="headerlink" href="#navigation-ui" title="Permanent link">#</a></h2>
+<h3 id="d-5-what-is-the-products-model-for-telling-the-user-what-it-is-doing">D-5 — What is the product's model for telling the user what it is doing?<a class="headerlink" href="#d-5-what-is-the-products-model-for-telling-the-user-what-it-is-doing" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 2 OQ9 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<p>Status messages are suppressed for the first three seconds after startup and again for
+five seconds after a load completes (<code>loadTime + 3000</code>, <code>skipMessagesUntil</code>). Those guards
+exist because the code issues far more <code>ShowMessage</code> calls than a user could read, and the
+timers are the blunt instrument that keeps the status area usable. A redesign that reworks
+the status bar without knowing this will reintroduce the message storm the guards suppress.
+The decision is what replaces it: a transient status line with explicit rate limiting, a
+notification/activity centre that keeps history, or progress surfaced only where an
+operation is long enough to need it. Small, but it has to be answered before the status
+surface is redrawn rather than after.</p>
+<h3 id="d-6-is-there-a-compactdensity-mode-and-is-it-a-user-setting">D-6 — Is there a compact/density mode, and is it a user setting?<a class="headerlink" href="#d-6-is-there-a-compactdensity-mode-and-is-it-a-user-setting" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ18 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<p><code>Themes/Compact.xaml</code> is a complete density style sheet, commented as imported from another
+project, that nothing merges and no setting names — <code>MainWindow</code> hard-codes only the
+<code>Light.xaml</code> and <code>Dark.xaml</code> paths. Separately, the transaction register has its own
+row-height setting, so the product already has a partial, local answer to the same question.
+The decision is whether a product-wide density control is a capability the redesign offers
+(and therefore a dimension every new surface must honour) or whether density stays a
+per-surface affordance and <code>Compact.xaml</code> is vendored material to delete. Deciding it before
+the visual language is set is much cheaper than retrofitting.</p>
+<h3 id="d-7-how-does-theming-work-when-a-third-theme-exists">D-7 — How does theming work when a third theme exists?<a class="headerlink" href="#d-7-how-does-theming-work-when-a-third-theme-exists" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ19 · <strong>Cluster:</strong> <code>navigation-ui</code></p>
+<p>Theming today is complete only for code that opts into it. <code>AppTheme.GetThemedBrush</code> exists
+precisely because a brush obtained the normal way is frozen and will not follow a theme
+change, so anything drawn in code that skips it keeps its original colour until restart —
+<code>MessageBoxEx.SetImageStyle</code> does exactly that, deliberately. <code>UpdateDynamicBrushes</code> throws
+outright if a themed resource turns out not to be a solid colour, and only writes a debug
+line when a brush named in code is missing from the incoming theme. The catalog's own
+observation is that a redesign introducing a third theme would find these one at a time.
+The decision is the theming contract: every colour resolved through dynamic resources with
+no code-side brushes at all, a validated token set that fails loudly at build time, or the
+current best-effort model with restart-on-theme-change made explicit to the user.</p>
+<h2 id="views-editing"><code>views-editing</code><a class="headerlink" href="#views-editing" title="Permanent link">#</a></h2>
+<h3 id="d-8-is-put-me-back-where-i-was-a-product-guarantee-or-a-per-surface-nicety">D-8 — Is "put me back where I was" a product guarantee or a per-surface nicety?<a class="headerlink" href="#d-8-is-put-me-back-where-i-was-a-product-guarantee-or-a-per-surface-nicety" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ2 · <strong>Cluster:</strong> <code>views-editing</code></p>
+<p><code>IView.SerializeViewState</code>/<code>DeserializeViewState</code> exists on every surface, and exactly two
+implement it properly: the transaction register and the holdings list. The loan schedule
+builds a state object and then returns a bare <code>ViewState</code> on deserialize, so the loan
+account is never restored; the rename-rules, rental-summary and rent-input views return
+<code>null</code> from both. Phase 5 found the same hole from the reports side — the app never reopens
+on the report the user was last reading (B-31). So P3-VIEW-2 describes an intent that holds
+for two surfaces out of eight-ish. The decision is whether the redesign promises
+restore-where-you-were everywhere (which means it belongs in the shell's navigation
+contract, not in each surface's own code, and every new surface inherits it) or whether it
+is explicitly a register-and-holdings feature. Promising it in the shell is the only way it
+stops decaying, but it forces every surface to have serialisable selection identity.</p>
+<h3 id="d-9-which-surfaces-are-searchable">D-9 — Which surfaces are searchable?<a class="headerlink" href="#d-9-which-surfaces-are-searchable" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ4 · <strong>Cluster:</strong> <code>views-editing</code></p>
+<p><code>CurrenciesView</code> implements a <code>QuickFilter</code> property and its row collection implements
+matching — but there is no <code>QuickFilterControl</code> in its XAML and <code>FocusQuickFilter()</code> is
+empty, so the plumbing is there and nothing drives it. <code>LoansView</code>, <code>RentSummaryView</code> and
+<code>RentInputControl</code> are in the same position. P3-VIEW-7's claim that a surface which can't
+be searched does nothing is technically satisfied. The decision is whether search is a
+universal shell affordance that every list gets for free (consistent, discoverable, and
+occasionally pointless on a six-row list) or a deliberate per-surface choice. Answering
+"universal" also answers what Ctrl+F does on a surface with nothing to find.</p>
+<h3 id="d-10-ship-show-me-everything-like-this-or-drop-it">D-10 — Ship "show me everything like this", or drop it?<a class="headerlink" href="#d-10-ship-show-me-everything-like-this-or-drop-it" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ5 · <strong>Cluster:</strong> <code>views-editing</code></p>
+<p><code>TransactionsView</code> has a <code>CommandViewSimilarTransactions</code>, a can-execute handler and a
+command binding; the execute handler is empty and the menu item is commented out. It is an
+empty shell, not a working feature that lost its entry point, so the redesign is deciding
+whether to build it rather than whether to restore it. It matters more than it looks: the
+product already has the ingredients (the quick-filter expression language, the advanced
+query builder, the payee index that <code>AutoCategorization</code> walks across accounts) and
+"everything like this one" is one of the most common things a user wants from a register.
+The alternative is that the existing search surfaces are considered sufficient and the
+command is deleted.</p>
+<h3 id="d-11-should-the-categories-tree-show-balances">D-11 — Should the categories tree show balances?<a class="headerlink" href="#d-11-should-the-categories-tree-show-balances" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ9 · <strong>Cluster:</strong> <code>views-editing</code></p>
+<p><code>CategoryBalance</code> carries a <code>Balance</code> that <code>UpdateRoots</code>/<code>UpdateBalance</code> keep continuously
+current — and the data template for it renders only the word "Total". Group headings show
+no figure either. Meanwhile the accounts panel <em>does</em> show group totals, so the asymmetry
+is visible to a user looking at the two panels side by side. Either the display was dropped
+deliberately (a category total across all time is arguably meaningless without a date
+range) or it was never finished. The decision is whether the navigation panels are
+<em>navigation</em> — names and selection only — or whether they carry figures; and if they carry
+figures, over what period, since that question is what makes a category total hard and an
+account balance easy.</p>
+<h3 id="d-12-should-duplicate-detection-be-suppressed-while-reconciling">D-12 — Should duplicate detection be suppressed while reconciling?<a class="headerlink" href="#d-12-should-duplicate-detection-be-suppressed-while-reconciling" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ15 · <strong>Cluster:</strong> <code>views-editing</code></p>
+<p>The duplicate-transaction bracket (P3-DUP-1) is offered only when the user is <em>not</em>
+reconciling (<code>!this.IsReconciling</code>). The catalog's read is that this is probably deliberate
+— a real statement legitimately contains repeated identical charges, and flagging them
+during a balance would be noise. The counter-argument is equally real: reconciling against
+a statement is exactly the moment a user is most likely to <em>find</em> a genuine duplicate, and
+the product goes quiet precisely then. A panel could go either way, and there is a third
+option (keep detecting, present it differently during a reconcile). Worth deciding rather
+than inheriting, because the current behaviour is invisible — nothing tells the user
+detection has been turned off.</p>
+<h2 id="dialogs-forms"><code>dialogs-forms</code><a class="headerlink" href="#dialogs-forms" title="Permanent link">#</a></h2>
+<h3 id="d-13-what-does-cancel-guarantee">D-13 — What does Cancel guarantee?<a class="headerlink" href="#d-13-what-does-cancel-guarantee" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ2 · <strong>Cluster:</strong> <code>dialogs-forms</code> · <em>Defect instances: #52</em></p>
+<p><code>AccountDialog</code> edits everything on a working copy and commits on OK (P4-ACCT-3) — except
+aliases, where adding calls <code>money.AccountAliases.AddAlias</code> immediately and the close box
+calls <code>container.RemoveAlias</code> immediately, so cancelling the window undoes neither. Two
+more windows have the same shape from different causes: <code>OnlineServiceDialog</code>'s <code>Apply()</code>
+is empty with a comment admitting there is no restore-on-cancel (B-14), and <code>RentalDialog</code>'s
+unit table edits the same <code>List&lt;RentUnit&gt;</code> the real property holds because <code>ShallowCopy</code> is
+a <code>MemberwiseClone</code> (B-20). Those three are filed as bugs; what is <em>not</em> decided is the
+convention they should be fixed toward. Edit-on-copy-commit-on-OK is one answer and is what
+most of the product already does, but it does not survive contact with shared global
+records like aliases, which other open windows may also be editing. The alternatives are
+live-edit-with-undo (which the product has no infrastructure for — see D-49), or live-edit
+with the dialog honestly not offering a Cancel button for those fields.</p>
+<h3 id="d-14-what-commits-a-form-from-the-keyboard-and-may-it-commit-something-destructive">D-14 — What commits a form from the keyboard, and may it commit something destructive?<a class="headerlink" href="#d-14-what-commits-a-form-from-the-keyboard-and-may-it-commit-something-destructive" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ20 · <strong>Cluster:</strong> <code>dialogs-forms</code> · <em>Defect instances: #52</em></p>
+<p>Enter and Escape are handled four different ways across 29 dialog classes: <code>IsDefault</code>/
+<code>IsCancel</code> in most, hand-rolled key interception in <code>RecategorizeDialog</code> and
+<code>AttachmentDialog</code>, Enter-swallowing in <code>AccountDialog</code>'s alias box so the window doesn't
+close, and several windows with competing <code>IsDefault</code> buttons (B-17). The sharpest case is
+not the inconsistency but <code>RecategorizeDialog</code>: its interception is window-wide, so pressing
+Enter while still typing in the category box commits the entire recategorize-everything
+operation. Picking one mechanism is the easy half. The real decision is whether Enter is
+allowed to commit an irreversible bulk operation at all, or whether destructive
+confirmations must require an explicit, distinct gesture — which also sets the rule for
+every new dialog the redesign adds.</p>
+<h3 id="d-15-one-real-shared-dialog-base-and-what-it-must-carry">D-15 — One real shared dialog base, and what it must carry<a class="headerlink" href="#d-15-one-real-shared-dialog-base-and-what-it-must-carry" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ30 · <strong>Cluster:</strong> <code>dialogs-forms</code> · <em>Defect instances: #52</em></p>
+<p>Counted across the 29 dialog classes: the themed base class is used by 24 of the 28 that
+aren't <code>BaseDialog</code> itself, a help topic by 4, <code>CenterOwner</code> by 14 of 24 with XAML,
+<code>ShowInTaskbar="False"</code> by 13, and Enter/Escape four ways. Each of P4-DLG-1…P4-DLG-5
+describes the <em>majority</em> convention, not an invariant — a dialog picked at random has a
+fair chance of missing two or three. The catalog calls one real shared base carrying all
+five the cheapest single improvement available in that folder, and the recently landed
+"two dialogs opening disconnected from the app window" fix on this branch is the same class
+of gap being found one at a time. The decision is not <em>whether</em> but <em>what it enforces and
+how hard</em>: owner/centring/taskbar/theme/help/keyboard as a base class an author can still
+bypass, or as an analyser-enforced contract; and whether "has a help topic" is on that list
+at all, which is D-51.</p>
+<h2 id="reports-charts"><code>reports-charts</code><a class="headerlink" href="#reports-charts" title="Permanent link">#</a></h2>
+<h3 id="d-16-how-is-a-report-or-chart-scoped-and-is-there-still-a-shared-range-dialog">D-16 — How is a report or chart scoped, and is there still a shared range dialog?<a class="headerlink" href="#d-16-how-is-a-report-or-chart-scoped-and-is-there-still-a-shared-range-dialog" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ16 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p><code>ReportRangeDialog</code> is named for reports and used by none. Its single caller in the whole
+product is <code>TrendGraph.OnSetRange</code> — the range command on the history chart strip — which
+retitles it "Graph Range" and sets <code>ShowInterval = false</code>. Reports configure themselves in
+the side panel instead (P3-PANEL-1). Half the window is dead in both directions: its
+category tick-list is collapsed in XAML, <code>EnableCategoriesSelection</code> is never set by
+anything, and the <code>Categories</code> setter that would populate it is never called — so the list
+is simultaneously hidden and empty. Two things need deciding. First, whether report and
+chart scoping share one surface at all or stay separate (the window's name, title and dead
+half are the residue of a repurposing nobody tidied). Second, whether <em>category filtering</em>
+of a report is a capability the redesign wants — the intent is written down here and
+implemented nowhere, and it is the kind of thing users ask for constantly.</p>
+<h3 id="d-17-what-is-a-shareable-report-and-is-html-it">D-17 — What is a shareable report, and is HTML it?<a class="headerlink" href="#d-17-what-is-a-shareable-report-and-is-html-it" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ3 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p>An exported report is not a self-contained document. <code>HtmlDocumentReportWriter</code>'s <code>&lt;head&gt;</code>
+links Bootstrap from a CDN, so the file is unstyled offline. <code>WriteElement</code> is a no-op, so
+every chart and every net-worth colour swatch is simply absent. <code>WriteHyperlink</code> emits a
+plain <code>span</code> with a comment saying there is nowhere to link to. The expandable groups are
+no-ops, so the detail rows of the cash-flow, W-2 and portfolio reports come out shifted one
+column left. The catalog's judgement is that a redesign wanting a shareable report should
+treat this as a rewrite rather than a tweak — which makes the format a real choice: a
+self-contained HTML file with inlined styles and rendered charts, PDF, or leaning on
+printing (D-52) and dropping HTML export entirely. This is the report a user hands to an
+accountant, so "what lands on disk" is the requirement, not the mechanism.</p>
+<h3 id="d-18-does-every-report-export-and-to-what">D-18 — Does every report export, and to what?<a class="headerlink" href="#d-18-does-every-report-export-and-to-what" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ4 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p><code>ShowExportButton</code> is called by exactly two of the nine reports — cash flow and portfolio.
+Every other report either inherits <code>Report.Export</code>, which throws <code>NotImplementedException</code>,
+or overrides it to throw explicitly (<code>FutureBillsReport</code>, <code>UnacceptedReport</code>, <code>W2Report</code>).
+The exception is unreachable today only because the button is never shown, and Phase 5's
+OQ21 found the net-worth report one character away from making it reachable (B-44). So the
+product's position is "two reports export, silently". The decision is whether export is a
+guarantee of the report framework (every report can produce a table, so every report can
+produce a CSV — which then makes "what a report <em>is</em>" a stricter contract) or an opt-in
+per report, in which case the reports that don't export should say so rather than simply
+lack a button.</p>
+<h3 id="d-19-what-should-a-mixed-currency-total-say">D-19 — What should a mixed-currency total say?<a class="headerlink" href="#d-19-what-should-a-mixed-currency-total-say" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ8 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p>In <code>AccountSummaryReport.WriteAccountSummary</code>, if two accounts of the same kind report
+different currency symbols, a local <code>various</code> flag is set and the method returns <code>0</code>
+instead of its real subtotal — so that entire account type silently drops out of the grand
+total. Because <code>commonSymbol</code> is a field shared across types, one odd account anywhere can
+suppress the "All Accounts" row for everything. The catalog's summary is that the report
+currently says less than it knows. The redesign has to pick a policy and apply it
+everywhere totals appear: convert to the display currency at today's rate and say so, show
+per-currency subtotals side by side and refuse to add them, or show the total with an
+explicit "excludes N accounts in other currencies" note. This is the same underlying
+question as D-4 and should probably be answered with it.</p>
+<h3 id="d-20-should-generated-category-colours-be-persisted">D-20 — Should generated category colours be persisted?<a class="headerlink" href="#d-20-should-generated-category-colours-be-persisted" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ20 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p><code>CategoryChart.Tally</code> assigns <code>c.Root.Color = cd.Color.ToString()</code> for any category that
+has no colour of its own — a write to the persisted model performed as a side effect of
+rendering a chart. The user can therefore be told they have unsaved changes purely because
+they looked at a pie chart. The catalog is careful to separate the two halves: doing it
+from a draw path is plainly wrong (tracked in #52), but <em>whether generated colours should
+stick</em> is a genuine design question — persisting them is exactly what makes P5-CHART-4's
+"same category, same colour every time" hold across sessions. The alternatives are a
+deterministic colour function derived from the category (stable without persisting
+anything), or assigning a colour at category-creation time as an explicit, visible property.</p>
+<h3 id="d-21-does-the-net-worth-picture-include-what-the-user-owes">D-21 — Does the net-worth picture include what the user owes?<a class="headerlink" href="#d-21-does-the-net-worth-picture-include-what-the-user-owes" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ22 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p>The net-worth report's pie chart carries the comment <em>"liabilities are not included in the
+pie chart because that would be confusing"</em>, and indeed omits credit-card balances — and
+then the very next call, <code>WriteLoanAccountRows(writer, data, color, true)</code>, adds every
+liability loan to the same pie with <code>Math.Abs(balance)</code>. A mortgage therefore appears as a
+positive slice of what the chart presents as net worth. The code contradicts itself, so
+there is no "current intent" to preserve; the panel has to pick. Assets-only with
+liabilities shown as a separate figure, a two-sided asset/liability comparison, or a
+waterfall from gross assets to net are all defensible and look completely different. Also
+in scope for the same answer: asset and loan rows are added with no drill-down attached, so
+those slices are the only ones that do nothing when clicked, with no indication of the
+difference.</p>
+<h3 id="d-22-as-at-the-start-or-the-end-of-the-chosen-day">D-22 — As at the start or the end of the chosen day?<a class="headerlink" href="#d-22-as-at-the-start-or-the-end-of-the-chosen-day" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ23 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p><code>PortfolioReport.InternalGenerate</code> writes its heading with <code>ReportDate</code> and then, whenever
+that isn't today, a sub-heading reading <em>"As of "</em> plus <code>ReportDate.AddDays(-1)</code>. The two
+lines of the same report disagree by a day. That is a bug in the sense that they cannot
+both be right, but the question underneath is one a user genuinely asks and the product has
+never answered: does "portfolio as of 31 December" mean holdings and prices at the close of
+the 31st, or the state of the book at the start of that day? The answer determines whether
+a sale made on the date appears, which is a real difference at a tax-year boundary, and it
+needs to be the same answer across the portfolio report, the history chart and the tax
+report's fiscal-year range.</p>
+<h3 id="d-23-how-are-report-options-hosted-and-should-a-report-remember-them">D-23 — How are report options hosted, and should a report remember them?<a class="headerlink" href="#d-23-how-are-report-options-hosted-and-should-a-report-remember-them" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ29 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p><code>MainWindow.GetService(typeof(ReportsControl))</code> calls <code>ShowReportsPanel()</code>, which disposes
+the old panel and constructs a new one — so <em>asking for the service</em> is what makes the
+panel appear, and every report gets a fresh one. That is why the panel has <code>Hide…</code> methods
+with no matching <code>Show…</code> for the date and currency rows: each report hides what doesn't
+apply and relies on the next report getting a clean panel. It works, and it is also the
+reason every report must re-register its event handlers on every generation (all of them do
+it by unsubscribing twice first — <code>Unregister(); … Unregister(); Register();</code> appears
+verbatim in four reports). "Getting a service has a visible side effect" is a pattern the
+redesign should not inherit, but the replacement is a real choice: one persistent options
+surface that reports declaratively describe their parameters to, or per-report option
+panels owned by the report and restored with it (which folds into D-8 and B-31).</p>
+<h3 id="d-24-one-vocabulary-for-a-period">D-24 — One vocabulary for "a period"<a class="headerlink" href="#d-24-one-vocabulary-for-a-period" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ32 · <strong>Cluster:</strong> <code>reports-charts</code></p>
+<p>There are four overlapping notions of a time period in this one feature area, and the one
+that looks like the intended shared vocabulary is the least used. <code>IReport.cs</code> defines
+<code>enum ReportInterval { Days, Months, Years }</code>; no report uses it, and its only consumer is
+<code>ReportRangeDialog</code>'s interval combo, which that dialog's sole caller collapses (D-16) — so
+it is reachable in name only. Meanwhile the cash-flow report buckets by two hard-coded
+strings, the history chart has <code>HistoryRange</code> (the same three members with different
+semantics), and the trend graph has <code>CalendarRange</code> (ten members). A redesign that wants
+"choose a period" to mean one thing has four definitions to reconcile, and the reconciliation
+is not mechanical: the ten-member <code>CalendarRange</code> and the three-member <code>ReportInterval</code>
+encode different user intents (recurrence vs bucketing), and collapsing them loses
+something.</p>
+<h2 id="import-export"><code>import-export</code><a class="headerlink" href="#import-export" title="Permanent link">#</a></h2>
+<h3 id="d-25-what-should-money-file-import-accept">D-25 — What should "Money File Import" accept?<a class="headerlink" href="#d-25-what-should-money-file-import-accept" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ25 · <strong>Cluster:</strong> <code>import-export</code></p>
+<p>Despite the name and the multi-file selection, <code>MoneyFileImportDialog.ProcessFile</code> accepts
+only <code>.db</code>/<code>.mmdb</code> and answers anything else with <em>"Import only supports sqllite money
+files"</em> (sic) before stopping the whole batch. The product can, elsewhere, read <code>.xml</code>,
+<code>.bxml</code>, <code>.sdf</code> and CSV — all of which are "a money file" by any ordinary reading, and at
+least two of which are whole-file formats this same dialog's merge semantics would apply to
+cleanly. The decision is the feature's scope: one merge entry point that accepts every
+whole-file format the storage layer can open (which interacts with D-35's engine
+portfolio), or a deliberately narrow SQLite-to-SQLite merge that is named and worded
+honestly. The current state is the worst of both — a broad name, a narrow implementation
+and a misspelled error.</p>
+<h3 id="d-26-is-qif-import-worth-keeping">D-26 — Is QIF import worth keeping?<a class="headerlink" href="#d-26-is-qif-import-worth-keeping" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 6 OQ20 · <strong>Cluster:</strong> <code>import-export</code></p>
+<p><code>QifImporter.ImportQif</code> is the only route in with no <code>BeginUpdate</code>/<code>EndUpdate</code> scope and no
+rollback, and it <code>throw</code>s on the first field code it doesn't recognise, on a malformed
+status line, on a split with no amount, and on an illegal self-transfer — so a file that is
+90% valid leaves 90% of its transactions committed, no way to tell which, and a message box
+naming a line number. Every list churns a row at a time while it runs. It also has no
+notion of the <code>!Account</code> / <code>!Type:Cat</code> / <code>!Type:Class</code> sections real exports contain, so a
+whole-file Microsoft Money export fails on its first line. The catalog puts the question
+plainly: whether QIF import is worth keeping at all is a redesign question. It is directly
+load-bearing for <em>this fork's</em> reason to exist — importing Quicken data — so the panel
+should weigh "rewrite QIF properly, transactionally, with an error report" against "QFX/OFX
+and CSV only, and tell Quicken users to export those instead".</p>
+<h3 id="d-27-what-happens-when-an-imported-transaction-isnt-in-the-accounts-currency">D-27 — What happens when an imported transaction isn't in the account's currency?<a class="headerlink" href="#d-27-what-happens-when-an-imported-transaction-isnt-in-the-accounts-currency" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 6 OQ23 · <strong>Cluster:</strong> <code>import-export</code> · <em>Defect instances: #56</em></p>
+<p>There are two guards for this and neither runs. <code>OfxRequest.CheckUSD</code> — called before every
+bank, card and investment statement is applied — has its entire body commented out with
+<code>return true;</code> left behind, so the statement's declared currency is read and discarded.
+<code>ProcessCurrency</code> has an inverted guard (it only records an error when the set already
+contains the symbol, and only adds to the set inside that branch), so the set starts empty
+and stays empty forever; it is also wired only into the investment path, never bank or
+card. Fixing the guards is a bug (#56). What the fixed guards should <em>do</em> is not decided:
+refuse the import, book at the account's currency with an error row, convert using the
+stored <code>Currency.Ratio</code>, or store the transaction in its own currency (which the domain
+model's P1-CUR-* scenarios suggest it can represent). For a product that models currencies
+as thoroughly as Phase 1 describes, the import side currently knows nothing about them.</p>
+<h2 id="taxes"><code>taxes</code><a class="headerlink" href="#taxes" title="Permanent link">#</a></h2>
+<h3 id="d-28-what-happens-to-a-sale-the-product-cant-find-a-purchase-for">D-28 — What happens to a sale the product can't find a purchase for?<a class="headerlink" href="#d-28-what-happens-to-a-sale-the-product-cant-find-a-purchase-for" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 7 OQ3 · <strong>Cluster:</strong> <code>taxes</code> · <em>Defect instances: #57</em></p>
+<p><code>CapitalGainsTaxCalculator</code> sorts a sale into its <code>Unknown</code> list when <code>sale.Error != null</code>,
+and <code>SecuritySale.Error</code> is never assigned anywhere in the codebase. Three consequences
+follow: the tax report's "Capital Gains with Unknown Cost Basis" section can never render,
+its "Errors Found" section can never render, and <code>TxfExporter</code>'s entire refnum-673
+unknown-basis branch is dead code. What actually happens is that <code>SecurityFifoQueue.Sell</code>
+parks the sale in a private <code>pending</code> list, recovered only if a later purchase turns up — so
+a user who transferred a holding in from an untracked broker, or inherited shares, sells
+them and gets a tax report with <strong>no row at all</strong>. Filed as a defect in #57, but the correct
+behaviour is a genuine choice with a real user experience attached: flag the row with a
+zero basis, prompt the user to supply a basis and remember it, or exclude with a visible
+count of what was excluded. This matters disproportionately for this fork, whose whole
+premise is importing a history that begins mid-life.</p>
+<h3 id="d-29-which-tax-year-is-this-product-for-and-how-does-the-user-know">D-29 — Which tax year is this product for, and how does the user know?<a class="headerlink" href="#d-29-which-tax-year-is-this-product-for-and-how-does-the-user-know" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 7 OQ10 + Phase 7 OQ13 · <strong>Cluster:</strong> <code>taxes</code> · <em>Defect instances: #57</em></p>
+<p><code>TxfSpec.txt</code> — the catalogue behind the whole of §7.1, every selectable tax line — is
+version 041, dated 6/16/06, and every line carries an IRS reference of the form
+<code>2004:1040:21</code>. Form 1040 was restructured in 2018 into a short form plus Schedules 1–3, so
+many line numbers the user picks from no longer exist, some refnums have been retired, and
+HSA lines, qualified business income and the 1099-NEC are absent entirely. Separately,
+<code>FederalTaxes.json</code> is a bare object with no year, no source and no published date (its
+figures look 2026-shaped); <code>StateTaxes.json</code> at least self-describes. There is no staleness
+check, nothing on screen saying which year the rules are from, and no update mechanism short
+of shipping a new build. The decision is what the product claims: a tax-year-versioned
+data set with a visible vintage and an update path, a deliberately vaguer "estimate only,
+not tax advice" framing with the year-specific export dropped, or keeping the current
+behaviour and accepting that it exports refnums current software may reject.</p>
+<h3 id="d-30-model-every-filing-status-properly-or-disclose-the-approximations">D-30 — Model every filing status properly, or disclose the approximations?<a class="headerlink" href="#d-30-model-every-filing-status-properly-or-disclose-the-approximations" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 7 OQ14 · <strong>Cluster:</strong> <code>taxes</code></p>
+<p><code>FederalTaxes.GetIncomeTax</code> maps married-filing-separately to the <strong>Single</strong> brackets and
+the <strong>Single</strong> standard deduction, with the code's own comments reading <em>"are there income
+brackets for this?"</em> and <em>"todo"</em> — close at the lower bands and wrong at the top, where the
+separate threshold is half the joint one, not the single one. The state data has no
+head-of-household or separate tables at all, so <code>StateData.GetIncomeTax</code> maps
+head-of-household to Single too, noted as <em>"state data doesn't have this category"</em>. A
+head-of-household user therefore gets a correct federal estimate and a state estimate
+computed on the wrong table, and nothing in the UI says so. Two honest answers exist —
+complete the tables (51 hand-maintained state files, a real maintenance commitment) or
+state the limitation where the figure appears — and they lead to very different products.
+Silently approximating is the one option that should be off the table.</p>
+<h3 id="d-31-is-a-characterization-test-allowed-to-ratify-a-wrong-answer">D-31 — Is a characterization test allowed to ratify a wrong answer?<a class="headerlink" href="#d-31-is-a-characterization-test-allowed-to-ratify-a-wrong-answer" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 7 OQ15 · <strong>Cluster:</strong> <code>taxes</code></p>
+<p><code>StateData.GetCapitalGainsTax</code> has no <code>if (gains &lt; 0) return 0;</code> guard, unlike
+<code>FederalTaxes.GetCapitalGainsTax</code> and both <code>GetIncomeTax</code> methods, which all have one — so
+once <code>baseGains</code> exceeds the state exemption, a realised loss produces a <em>negative</em> tax, a
+refund no state offers. This one is already documented rather than fixed:
+<code>UnitTests/TaxTests.cs</code> asserts <code>Is.EqualTo(-3500.0M)</code> for Washington with a $50,000 loss,
+with a comment explaining that the clamp is missing. That makes it a policy question, not
+just a fix: this migration's own rule is characterization-testing — capture what the code
+does, don't silently "fix" it to match a guess — and here that rule has pinned a defect. The
+panel should decide when a characterization test is evidence to preserve and when it is a
+bug with a test holding the door open, and what the convention is for marking the
+difference (an explicitly named <code>Ratifies_Known_Defect</code> test, a linked issue, an
+<code>[Ignore]</code>). It generalises well beyond tax.</p>
+<h2 id="data-engine"><code>data-engine</code><a class="headerlink" href="#data-engine" title="Permanent link">#</a></h2>
+<h3 id="d-32-should-the-user-ever-choose-a-storage-engine">D-32 — Should the user ever choose a storage engine?<a class="headerlink" href="#d-32-should-the-user-ever-choose-a-storage-engine" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 2 OQ3 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p>"File ▸ New" behaves differently in a debug build: in release it goes straight to creating
+the product's default storage, and in debug it grows a submenu offering a choice of engine.
+The catalog described the release behaviour on the assumption that a storage engine is not
+an end-user concept — which is a defensible product position and also the thing the panel
+has to ratify or overturn. If the redesign intends to expose a choice (SQLite file vs
+shared SQL Server being the meaningful one for a household), it needs designing as a real
+user-facing concept with consequences explained, not inherited from a debug-only menu.
+Directly coupled to D-35 (which engines survive) and D-37 (whether SQL Server is a shipped
+configuration at all).</p>
+<h3 id="d-33-is-there-a-power-user-data-surface-and-what-is-it">D-33 — Is there a power-user data surface, and what is it?<a class="headerlink" href="#d-33-is-there-a-power-user-data-surface-and-what-is-it" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 2 OQ7 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p><code>Query ▸ Adhoc SQL Query</code> and <code>Query ▸ Show Last Update</code> both open a free-form SQL window
+over the user's own financial data. The catalog gave them no scenario on the judgement that
+a SQL console is a developer tool rather than an end-user capability — but it is also the
+only place the product currently offers anything like "ask an arbitrary question of my
+data", and it is reachable from the normal menu in a release build. The adhoc one silently
+does nothing unless the books happen to be on a server (B-23), and on the XML and CSV
+engines the query text is ignored entirely (B-105). So the decision has two halves: does the
+redesign offer a power-user query capability at all, and if so is it SQL over the live
+store (with the obvious hazards) or a safe structured query surface built on the existing
+<code>Query.cs</code> vocabulary that the advanced search already uses.</p>
+<h3 id="d-34-what-does-the-concurrency-guarantee-actually-cover">D-34 — What does the concurrency guarantee actually cover?<a class="headerlink" href="#d-34-what-does-the-concurrency-guarantee-actually-cover" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 9 OQ2 + Phase 9 OQ23 · <strong>Cluster:</strong> <code>data-engine</code> · <em>Defect instances: #58</em></p>
+<p>The per-record path (<code>*_SaveBatch</code>) checks <code>ExpectedVersion</code> and writes <code>Version =
+Version + 1</code>. The per-row procedures the whole-file save uses — <code>Transactions_Update</code>,
+<code>Categories_Update</code>, <code>Payees_Update</code> and thirteen others — do neither, so a full save
+neither checks nor increments, and P1-WHOLE-4's "warn me if someone else changed this"
+simply does not fire for the operation most likely to need it. The SQLite whole-file path
+has the same gap for the same reason. Separately, the version column was deliberately added
+to eleven aggregate-root tables and deliberately not to <code>Splits</code>, <code>Investments</code>,
+<code>RentUnits</code>, <code>AccountAliases</code> or <code>TransactionExtras</code>, which are saved as part of their
+parent — and <code>RentUnits</code> in particular is written by <code>SaveRentUnitsForBuilding</code> with no
+version check of any kind, including after the parent building's <code>DELETE</code> has already run.
+The defects are filed in #58; the decision is the guarantee's scope and shape — is
+optimistic concurrency a property of every write path (so whole-file save must route through
+<code>SaveBatch</code> or be removed), and is the aggregate-root boundary the right granularity given
+<code>RentUnits</code> sits outside it. The existing design doc treats the version column as <em>the</em>
+guarantee, so this is ratifying or amending that document.</p>
+<h3 id="d-35-which-storage-engines-does-the-redesign-keep-and-what-must-each-do">D-35 — Which storage engines does the redesign keep, and what must each do?<a class="headerlink" href="#d-35-which-storage-engines-does-the-redesign-keep-and-what-must-each-do" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 9 OQ12 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p><code>SaveOne</code>, <code>SaveTransfer</code> and <code>SaveBatch</code> throw <code>NotImplementedException</code> on
+<code>SqlServerDatabase</code> (and therefore <code>SqlCeDatabase</code>), on <code>XmlStore</code>/<code>BinaryXmlStore</code> (with an
+explicit "see the design spec's Non-goals") and on <code>CsvStore</code>. Only <code>SqliteDatabase</code> and
+<code>SqlServerStoredProcDatabase</code> implement them. So P9-SAVE-2 describes a real capability that
+is a property of the storage choice, and nothing tells the user that picking <code>.xml</code> means
+every edit rewrites the whole file — with the concurrency consequences of D-34 attached.
+Related engine-capability asymmetries are filed as bugs (B-105, B-106: query and log return
+nothing on XML/CSV). The decision is the portfolio: which of the five engines survive, and
+what the capability floor is for one that does — per-record save, optimistic concurrency,
+query, log, backup. An engine that cannot meet the floor is either a <em>format</em> (import/export
+target) rather than a store, or it goes.</p>
+<h3 id="d-36-auto-heal-integrity-errors-surface-them-or-keep-ignoring-them">D-36 — Auto-heal integrity errors, surface them, or keep ignoring them?<a class="headerlink" href="#d-36-auto-heal-integrity-errors-surface-them-or-keep-ignoring-them" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 9 OQ3 · <strong>Cluster:</strong> <code>data-engine</code> · <em>Defect instances: #58</em></p>
+<p>All three engines' <code>ReadTransactions</code> build an <code>ArrayList</code> of <code>DataError</code> records on every
+load — "other side of split transfer not found", "transaction is marked as a transfer, but
+other side of transfer was not found", "already have a transfer for this transaction, so
+transfer N is a duplicate of transfer M" — and return it. Every production caller discards
+the return value; the only code that reads the list is the unit tests. <code>DataError.Heal
+(MyMoney)</code>, the method whose name says it was meant to repair them, has an empty body and a
+<code>// heal thyself!</code> comment. So Phase 1's P1-XFER-8 ("have broken transfers found and
+reported") is half true: they are found on every load and reported to nobody. The three
+answers are genuinely different products — repair silently on load (fast, and hides the fact
+that data was wrong), surface a review surface the user acts on (honest, and needs UI that
+doesn't exist), or keep collecting and only report on demand. Cheapest of the Phase 9
+findings to act on, and it turns a class of silent corruption into something a user can see.</p>
+<h3 id="d-37-is-sql-server-a-shipped-configuration-or-a-developer-one">D-37 — Is SQL Server a shipped configuration or a developer one?<a class="headerlink" href="#d-37-is-sql-server-a-shipped-configuration-or-a-developer-one" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ24 + Phase 9 OQ22 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p>Two independent findings say the same thing. The whole of <code>DataEngineStartup</code> — reconnecting
+to a server database on startup — is inside <code>#if DEBUG</code>, so a release build never
+auto-reopens a SQL Server set of books and the user must go through the File menu every
+time (P8-STORE-6 describes behaviour most users will never see). And <code>MyMoney.Data.csproj</code>
+has no content item copying <code>SqlScripts/</code> to the output, while <code>SqlServerBootstrapper</code> reads
+<code>Bootstrap/</code>, <code>Migrations/</code>, <code>Access/</code> and <code>Test/</code> off disk at run time — the plan documents
+say that copy lives in <code>MyMoney.csproj</code> and is DEBUG-only, which if still true means a
+release build cannot bootstrap a server or create a catalog at all. Either SQL Server is a
+supported configuration, in which case both of these are release blockers and the whole
+bootstrap path needs a release test, or it is a development/testing engine and should be
+labelled as one — which would substantially simplify D-32 and D-35 and would retire the
+server-credential exposures B-100 and B-102 outright.</p>
+<h3 id="d-38-which-sql-server-engine-is-the-real-one">D-38 — Which SQL Server engine is the real one?<a class="headerlink" href="#d-38-which-sql-server-engine-is-the-real-one" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 9 OQ4 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p><code>DatabaseFactory.CreateDatabase</code>'s <code>DbFlavor.SqlServer</code> case constructs <code>SqlServerDatabase</code>
+— the raw-SQL engine, which needs direct table rights the <code>MyMoneyUser</code> login is
+deliberately not granted. The 3,075-line <code>SqlServerStoredProcDatabase</code> is constructed in
+exactly one production place, <code>SqlServerConnectionFactory.Connect</code>, reached only through the
+registry-driven path. So the engine that the entire <code>SqlScripts/Access/</code> surface, the
+bootstrapper and the persistence-concurrency design exist to serve is <em>not</em> what you get by
+opening a SQL Server database through <code>DatabaseLifecycle</code>. Either the factory case is wrong
+or <code>DbFlavor</code> needs to distinguish the two, and someone has to say which — the answer
+determines whether D-34 and the <code>DBString</code> escaping defects (B-109, B-110) are live in
+production at all, and whether 3,000 lines of carefully written engine are reachable.</p>
+<h3 id="d-39-how-does-a-schema-upgrade-work-and-what-is-the-user-told">D-39 — How does a schema upgrade work, and what is the user told?<a class="headerlink" href="#d-39-how-does-a-schema-upgrade-work-and-what-is-the-user-told" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 9 OQ9 + Phase 9 OQ10 · <strong>Cluster:</strong> <code>data-engine</code></p>
+<p><code>SqliteDatabase.CreateOrUpdateTable</code>'s rebuild path creates <code>NEW_&lt;Table&gt;</code>, copies rows,
+<code>DROP TABLE</code>s the original and renames — correctly, inside one transaction. The weak link is
+that the column list is derived by <code>ParseColumnSql</code>, a hand-written scanner over SQLite's
+stored <code>CREATE TABLE</code> text, and the only thing standing between a mis-parse and a
+<code>DROP TABLE</code> of real data is <code>if (first) throw new Exception("Invalid table definition…")</code>.
+No test coverage is named for it anywhere in that folder. Alongside it,
+<code>IDatabase.UpgradeRequired</code> is <code>true</code> only for <code>SqlCeDatabase</code> —
+<code>SqlServerDatabase.UpgradeRequired</code> returns <code>false</code> from both branches of a decorative
+try/catch, SQLite and XML return <code>false</code> outright, and <code>SqliteDatabase.Upgrade()</code> is empty
+and marked <code>// TBD</code> — so P9-UPGRADE-3's confirmation prompt is dead for four engines out of
+five and a reader of <code>IDatabase</code> would never guess it. The decision covers both: a real
+migration mechanism (versioned scripts with tests, as the SQL Server side already has)
+versus the current reflective DDL rebuild, and whether an in-place upgrade is something the
+user is told about, asked about, or never sees.</p>
+<h2 id="security"><code>security</code><a class="headerlink" href="#security" title="Permanent link">#</a></h2>
+<h3 id="d-40-one-credential-window-for-six-jobs-or-six-windows">D-40 — One credential window for six jobs, or six windows?<a class="headerlink" href="#d-40-one-credential-window-for-six-jobs-or-six-windows" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ1 · <strong>Cluster:</strong> <code>security</code></p>
+<p><code>PasswordWindow</code> is simultaneously the "set a password on my data" window, the "prove you
+know it" window, the online-banking sign-in, the multi-factor questionnaire, the
+authentication-token prompt and the change-password flow — each subclass bending it by
+adding fields and rewriting its prose at runtime. The catalog captured them as several
+scenarios because they are genuinely different user goals with different stakes: one
+protects a local file, another hands credentials to a third party over the network. Keeping
+them unified is a real position (one audited, careful credential surface, one place to get
+masking and clipboard behaviour right) and so is splitting them (a bank sign-in should look
+nothing like a local file password, and conflating them trains users to type banking
+credentials into whatever window looks familiar). Worth deciding deliberately, because this
+is the riskiest window in the product and everything else in this cluster passes through it.</p>
+<h3 id="d-41-what-may-a-shareable-diagnostic-log-contain">D-41 — What may a shareable diagnostic log contain?<a class="headerlink" href="#d-41-what-may-a-shareable-diagnostic-log-contain" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 6 OQ13 · <strong>Cluster:</strong> <code>security</code> · <em>Defect instances: #56</em></p>
+<p><code>OfxRequest.SaveLog</code> blanks nine credential-bearing elements — the hard part done — but
+<code>BANKID</code>, <code>ACCTID</code> and <code>BROKERID</code>, and every transaction in the response, are written to
+<code>OfxLogs\</code> in the clear. P6-ENTRY-5's entire purpose is to get the user to hand that file to
+someone else for troubleshooting. The masking gap is in #56; the decision is what the
+"Details…" affordance should actually offer. A redacted-by-default log with an explicit
+"include account identifiers" opt-in, a structured error report that carries no statement
+content at all, and today's full-fidelity log with a clear warning are all workable and
+lead to different diagnostics quality. Whatever is chosen, the product should be able to
+state what leaves the machine.</p>
+<h3 id="d-42-should-the-product-trust-a-third-party-institution-directory">D-42 — Should the product trust a third-party institution directory?<a class="headerlink" href="#d-42-should-the-product-trust-a-third-party-institution-directory" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 6 OQ18 · <strong>Cluster:</strong> <code>security</code> · <em>Defect instances: #56</em></p>
+<p>Both <code>OfxHomeProviderList</code> (<code>http://www.ofxhome.com/api.php?all=yes</code>) and
+<code>OfxHomeProviderInfo</code> are plain HTTP. What comes back includes <strong>the URL the product will
+subsequently post the user's banking credentials to</strong>, and it is merged into the user's
+local directory and saved. <code>OfxRequest.SendOfxRequest</code> does upgrade a bare institution
+address to <code>https://</code> before posting, which limits the damage, but an entry whose stored URL
+already begins <code>http://</code> is left alone. Switching to HTTPS is the obvious fix and is in</p>
+<h1 id="56-the-decision-is-bigger-whether-a-remote-community-maintained-directory-is-allowed-to">56. The decision is bigger: whether a remote, community-maintained directory is allowed to<a class="headerlink" href="#56-the-decision-is-bigger-whether-a-remote-community-maintained-directory-is-allowed-to" title="Permanent link">#</a></h1>
+<p>supply the endpoint that receives credentials at all, or whether the product should pin a
+vetted list, require explicit user confirmation before a changed endpoint is used, or drop
+directory sync and let users enter their institution's details themselves. The catalog calls
+it the most security-relevant thing in the phase and says it deserves a deliberate decision
+rather than inheritance.</p>
+<h3 id="d-43-what-does-password-protect-my-file-promise">D-43 — What does "password-protect my file" promise?<a class="headerlink" href="#d-43-what-does-password-protect-my-file-promise" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ9 · <strong>Cluster:</strong> <code>security</code> · <em>Defect instances: #52/#56 family</em></p>
+<p><code>Encryption</code> hard-codes <code>saltValue = "Money Rocks"</code> and <code>initVector = "*B5good!+027XYZ."</code>,
+derives the key with <code>PasswordDeriveBytes</code> (PBKDF1) over SHA-1 with <code>passwordIterations = 2</code>,
+and comments that these "cannot change". Every encrypted file the product has ever written
+shares one salt and one IV, and the derivation offers essentially no resistance to
+brute-force. A user who password-protects an exported financial file is getting far less
+protection than the feature implies. This is not a drop-in fix — changing any of it breaks
+every existing file, which is why the comment is there — so the decision is the migration
+strategy: a versioned file format that reads old files and writes new ones, a one-time
+convert-on-open with a warning, or withdrawing file encryption and pointing at OS-level
+options (BitLocker, EFS) instead. Related and cheaper: while a <code>.bxml</code> file is being read or
+written, the fully decrypted contents of the user's entire financial history exist as a
+plain file in <code>%TEMP%</code> (B-103).</p>
+<h2 id="attachments-documents"><code>attachments-documents</code><a class="headerlink" href="#attachments-documents" title="Permanent link">#</a></h2>
+<h3 id="d-44-bring-scanning-back-or-delete-it">D-44 — Bring scanning back, or delete it?<a class="headerlink" href="#d-44-bring-scanning-back-or-delete-it" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ22 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<p>The scan toolbar button, the scanner-selection code and the acquire-image flow are all
+commented out in <code>AttachmentDialog</code>, while the WIA error-code enumeration and the
+error-message translator survive as live, uncalled code — and the dialog's own class comment
+still reads "Interaction logic for ScanDialog.xaml". Scanning receipts was clearly the
+original point of this window. The intent is written down and mostly implemented, so this is
+a cheaper revival than most items in this register, but it is still a scope decision with a
+real cost (WIA is a fussy dependency, and phone-camera-to-cloud has largely replaced desktop
+scanning for receipts). The alternatives are revive it, replace it with an import-from-folder
+/ watch-folder flow, or delete the dead block and the orphaned WIA code with it.</p>
+<h3 id="d-45-what-happens-to-paperwork-when-its-transaction-is-deleted">D-45 — What happens to paperwork when its transaction is deleted?<a class="headerlink" href="#d-45-what-happens-to-paperwork-when-its-transaction-is-deleted" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ13 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<p><code>AttachmentManager.OnMoneyChanged</code>'s delete branch calls <code>DeleteAttachments(t)</code> and carries
+the comment <em>"todo: would be nice to warn the user they are losing them…"</em> — twice, in two
+different handlers. Deleting a transaction that has a receipt filed against it destroys the
+receipt immediately and silently. The product otherwise treats deleting a transaction as a
+low-stakes, easily made action, so this is a real asymmetry: the cheap action silently
+destroys the irreplaceable artefact. The options are warn-and-confirm (which makes a common
+action heavier), orphan the file into a holding area with a recoverable window, or keep
+attachments until an explicit cleanup — and the answer interacts with D-46, because
+attachments live <em>beside</em> the data file rather than inside it, so there is currently nothing
+to restore them from.</p>
+<h3 id="d-46-file-documents-by-account-name-or-by-account-id">D-46 — File documents by account name or by account id?<a class="headerlink" href="#d-46-file-documents-by-account-name-or-by-account-id" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 8 OQ14 · <strong>Cluster:</strong> <code>attachments-documents</code></p>
+<p>Both <code>AttachmentManager</code> and <code>StatementManager</code> build a folder path from
+<code>NativeMethods.GetValidFileName(account.Name)</code>. Renames are handled (P8-ATT-6, P8-STMT-5),
+but two accounts whose names differ only in characters that get stripped — <code>"Visa: Joint"</code>
+and <code>"Visa / Joint"</code> — resolve to the same folder, and every document in it is then matched
+to transactions by id across both accounts. <code>StatementManager</code> additionally keys its whole
+in-memory index by the raw account name, and the model permits two accounts with the same
+name outright. Using the account's identifier would remove the entire class of problem, at
+the cost of folders a human can no longer read — which is exactly the trade-off P8-ATT-3
+exists to describe, since "your documents are ordinary files you can find in Explorer" is a
+deliberate, valuable property of the current design. The third option is readable names plus
+a manifest that maps them.</p>
+<h2 id="rental-property"><code>rental-property</code><a class="headerlink" href="#rental-property" title="Permanent link">#</a></h2>
+<h3 id="d-47-finish-per-unit-rent-entry-or-delete-it">D-47 — Finish per-unit rent entry, or delete it?<a class="headerlink" href="#d-47-finish-per-unit-rent-entry-or-delete-it" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 3 OQ1 · <strong>Cluster:</strong> <code>rental-property</code> · <em>Tracked as #53</em></p>
+<p><code>Views/RentPayementsView.xaml</code> (class <code>RentInputControl</code>) is a complete, working surface for
+entering rent received per unit per month, grouped by month with per-month totals — and it
+is never constructed anywhere in the product. Rental tracking otherwise has <strong>no way at all</strong>
+to record what each tenant actually paid, so this is not a missing convenience, it is the
+missing half of the feature. #53 exists to track it and asks this exact question rather than
+answering it, which is why it is here: the panel has to decide whether rental property is a
+capability the redesign carries forward (in which case this view is a head start and D-48 is
+its companion) or a niche feature to retire, taking <code>RentBuildings</code>, <code>RentUnits</code>, the rental
+dialog and the rent-summary view with it.</p>
+<h3 id="d-48-what-is-a-rental-property-in-the-model-and-how-much-of-it-is-editable">D-48 — What is a rental property in the model, and how much of it is editable?<a class="headerlink" href="#d-48-what-is-a-rental-property-in-the-model-and-how-much-of-it-is-editable" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ23 · <strong>Cluster:</strong> <code>rental-property</code></p>
+<p>Phase 1's P1-RENT-1 records purchase date, purchase price, land value and current estimated
+value on a property. <code>RentalDialog</code> offers none of them — so either they are maintained
+somewhere else, or they can only arrive by import, or they are vestigial. Before a redesign
+assumes the existing window is the complete property editor, someone has to say which of
+those fields the product actually intends to carry and what they are <em>for</em>: purchase price
+and land value are depreciation inputs, which implies a tax capability the product does not
+otherwise have, and current estimated value is a net-worth input that nothing currently
+updates. Pairs with D-47 — the two together are "is rental property a real feature here".</p>
+<h2 id="cross-cutting"><code>cross-cutting</code><a class="headerlink" href="#cross-cutting" title="Permanent link">#</a></h2>
+<h3 id="d-49-build-undo-or-remove-the-menu-items">D-49 — Build undo, or remove the menu items?<a class="headerlink" href="#d-49-build-undo-or-remove-the-menu-items" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 2 OQ1 · <strong>Cluster:</strong> <code>cross-cutting</code> · <em>Defect instances: #52</em></p>
+<p>Undo and Redo sit in the Edit menu, permanently disabled: <code>OnCommandCanUndo</code>/
+<code>OnCommandCanRedo</code> unconditionally set <code>CanExecute = false</code>, the execute handlers are empty,
+and the <code>UndoManager manager</code> field created for them in the constructor is never used (the
+separate <code>navigator</code> instance that drives back/forward navigation works fine and is
+unrelated). Critically, the <em>domain</em> model has no undo support either — nothing in Phase 1
+corresponds to it — so this is new work, not resurfacing something that used to work.
+Building it means a change-tracking or command-journal design across a ~15k-line object
+graph with a persistence layer that already has its own change-tracking notion
+(<code>ChangeType</code>), which is a significant architectural commitment; removing the menu items is
+free and honest. It also sets the answer for D-13: live-edit-with-undo is only an option for
+dialogs if undo exists.</p>
+<h3 id="d-50-does-the-product-back-up-the-users-data">D-50 — Does the product back up the user's data?<a class="headerlink" href="#d-50-does-the-product-back-up-the-users-data" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 2 OQ5 + Phase 8 OQ16 · <strong>Cluster:</strong> <code>cross-cutting</code> · <em>Defect instances: #52</em></p>
+<p><code>AppCommands.CommandFileBackup</code> has a command binding in <code>MainWindow.xaml</code> and a complete
+implementation (<code>OnCommandBackup</code>, with per-storage-format file filters) — and no menu item,
+button or keyboard gesture anywhere references it, so backup is dead UI.
+<code>CommandFileRestore</code> and <code>CommandReportBudget</code> are declared and never bound at all. Phase 8
+confirmed the other half: <code>Settings.BackupPath</code> is a live preference, read, written and
+migrated like any other, so the product persistently remembers where backups should go and
+offers no way to make one. The stakes are higher than they look, because attachments and
+statements live in folders <em>beside</em> the financial file (P8-ATT-2, P8-STMT-3), so "there is
+no backup" means the irreplaceable documents are unprotected too. The decision: is backup a
+product capability (and if so, is it manual, scheduled, versioned, and does it include the
+document folders?), or is it explicitly the user's problem and the dead command and
+preference come out? If it is restored, Phase 9's OQ16 documents the behaviours being
+restored (B-108) — those engines' <code>Backup</code> implementations have their own sharp edges.</p>
+<h3 id="d-51-does-the-product-ship-in-product-help">D-51 — Does the product ship in-product help?<a class="headerlink" href="#d-51-does-the-product-ship-in-product-help" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 4 OQ19 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<p>Four windows carry a <code>HelpKeyword</code>: <code>AccountDialog</code>, <code>OnlineAccountDialog</code>,
+<code>AttachmentDialog</code> and <code>SampleDatabaseOptions</code>. The other twenty-five do not, including the
+loan, category, rename-payee and online-service windows, which are at least as likely to
+need explaining — and the reports options panel points F1 at the reconciliation topic
+because the keyword was copy-pasted from <code>BalanceControl</code> (B-48). So P4-DLG-2 describes what
+exists rather than a guarantee. The decision is whether contextual help is part of the
+product (in which case it is a requirement of the shared dialog base in D-15, with a
+coverage check, and someone owns writing the topics) or whether the redesign relies on the
+UI being self-explanatory and the existing help wiring comes out. Half-covered help that
+sometimes opens the wrong topic is worse than neither.</p>
+<h3 id="d-52-is-printing-a-capability-of-this-product">D-52 — Is printing a capability of this product?<a class="headerlink" href="#d-52-is-printing-a-capability-of-this-product" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 5 OQ6 + Phase 8 OQ20 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<p>The only <code>Print</code> command binding in the entire product is in <code>AttachmentDialog</code>. There is
+no print menu item, button, keyboard shortcut or context-menu entry for a report, a
+register, a statement, a balance or a chart; <code>FlowDocumentView</code> adds none. (The underlying
+WPF document viewer has its own built-in print handling, so Ctrl+P with focus inside the
+document may do something, but the product neither advertises nor tests it.) Phase 8's
+cross-cutting sweep confirmed from the other side that there is no shared printing layer,
+no page setup and no print-specific layout anywhere — this is build-from-nothing, not
+wiring-up. For a personal-finance product whose reports are mostly things you hand to an
+accountant, that is a conspicuous gap, and it trades directly against D-17: a good
+export-to-PDF story may be a better answer than a print pipeline, but they are different
+amounts of work and only one of them needs page layout.</p>
+<h3 id="d-53-how-does-the-product-ship-version-and-refresh-its-reference-data">D-53 — How does the product ship, version and refresh its reference data?<a class="headerlink" href="#d-53-how-does-the-product-ship-version-and-refresh-its-reference-data" title="Permanent link">#</a></h3>
+<p><strong>From:</strong> Phase 7 OQ18 · <strong>Cluster:</strong> <code>cross-cutting</code></p>
+<p><code>FederalTaxes.Load</code> and <code>StateTaxes.Load</code> do <code>Path.Combine(Path.GetDirectoryName(assembly
+.Location), "Taxes", "&lt;file&gt;.json")</code> and <code>File.ReadAllText</code> with no existence check and no
+error handling, relying on <code>CopyToOutputDirectory=Always</code>. <code>TxfSpec.txt</code>, in the same
+folder, is an <code>EmbeddedResource</code> instead. Three data files, two delivery mechanisms, and the
+two that can go missing are the two with no fallback — and <code>assembly.Location</code> is empty
+under single-file publishing, which would make <code>Path.Combine</code> throw. Phase 7's own closing
+note (OQ25) points out this is really a "how does this product ship reference data" question
+that also covers the institution directory and the stock-quote and split caches. The
+decision spans all of them: embedded and versioned with the build (simple, stale between
+releases), downloadable with a cache and a visible vintage (current, needs an update service
+and a trust story — see D-42), or user-supplied. D-29 depends on the answer.</p>
+<hr />
+<h1 id="bug-only-items">BUG-ONLY items<a class="headerlink" href="#bug-only-items" title="Permanent link">#</a></h1>
+<p>Already-understood defects with one correct answer. Full detail lives in the referenced
+issue. <code>untracked</code> means the audit found it but no issue covers it yet — 18 of these, and
+they should be appended to #52 (or the relevant high-priority issue) before the panel
+convenes so nothing falls between the catalog and the tracker.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Open question</th>
+<th>Summary</th>
+<th>Tracked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B-1</td>
+<td>P1 OQ2</td>
+<td><code>CategoryType.Reserved</code> unused-undeletable; <code>RecurringExpense</code> silently rewritten to <code>Expense</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-2</td>
+<td>P1 OQ3</td>
+<td><code>Account.SyncGuid</code> has no observable behaviour anywhere</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-3</td>
+<td>P2 OQ2</td>
+<td><code>Edit ▸ Cleanup</code> ships GC.Collect and a full environment-variable dump to end users</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-4</td>
+<td>P3 OQ3</td>
+<td><code>CurrenciesView.Caption</code> returns "Securities"; its ViewState is written against <code>Security</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-5</td>
+<td>P3 OQ6</td>
+<td><code>ChangeTracker</code> per-type accessors are dead and would throw <code>InvalidCastException</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-6</td>
+<td>P3 OQ7</td>
+<td>Double-clicking an account is unreachable — hit-test result discarded, <code>item</code> always null</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-7</td>
+<td>P3 OQ8</td>
+<td>A newly created account/loan is never selected (<code>Account</code> assigned to an <code>AccountViewModel</code> list)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-8</td>
+<td>P3 OQ10</td>
+<td>Advanced search offers <code>Field.Budgeted</code>, which the model can't answer per transaction (resolution follows D-3)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-9</td>
+<td>P3 OQ11</td>
+<td><code>QueryViewControl.Cut</code> always overwrites the clipboard with an empty query</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-10</td>
+<td>P4 OQ3</td>
+<td><code>LoanDialog.ButtonGoToWebSite</code> dereferences <code>WebSite</code> before its null guard</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-11</td>
+<td>P4 OQ4</td>
+<td>Loan window validates nothing, has no help topic, copies an <code>OpeningBalance</code> it can't edit</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-12</td>
+<td>P4 OQ5</td>
+<td><code>ShowHideFieldsForAccountType</code> has no <code>default:</code> arm — irrelevant fields stay visible</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-13</td>
+<td>P4 OQ6</td>
+<td><code>AuthTokenDialog</code> computes a fallback label and passes the empty one anyway</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-14</td>
+<td>P4 OQ7</td>
+<td><code>OnlineServiceDialog</code> Cancel keeps the changes — <code>Apply()</code> is empty by admission (see D-13)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-15</td>
+<td>P4 OQ8</td>
+<td><code>MergeCategoryDialog</code>'s OK is <code>IsCancel="True"</code>, nothing is <code>IsDefault</code>; call sites test the result two ways</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-16</td>
+<td>P4 OQ9</td>
+<td><code>RenamePayeeDialog.CheckConflicts</code> builds a <code>Regex</code> from a 50ms timer; malformed pattern throws uncaught</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-17</td>
+<td>P4 OQ10</td>
+<td>Multiple <code>IsDefault="True"</code> buttons in three dialogs, one of them destructive (Disable clears an access key)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-18</td>
+<td>P4 OQ11</td>
+<td><code>AttachmentDialog.OnDrop</code> copies <code>files[0]</code>'s content N times with each file's extension</td>
+<td>#54</td>
+</tr>
+<tr>
+<td>B-19</td>
+<td>P4 OQ12</td>
+<td><code>AttachmentDialog.Save</code> deletes and fails to rewrite non-image attachments; <code>Copy</code> empty, <code>Cut</code> destroys</td>
+<td>#54</td>
+</tr>
+<tr>
+<td>B-20</td>
+<td>P4 OQ13</td>
+<td><code>RentalDialog</code> unit edits survive Cancel — <code>ShallowCopy</code> is a <code>MemberwiseClone</code> sharing the list (see D-13)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-21</td>
+<td>P4 OQ14</td>
+<td><code>MoneyFileImportDialog</code> files imported attachments against the <em>source</em> file's transaction id</td>
+<td>#54</td>
+</tr>
+<tr>
+<td>B-22</td>
+<td>P4 OQ15</td>
+<td><code>ReportRangeDialog.ShowInterval(true)</code> re-shows the label but not the combo</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-23</td>
+<td>P4 OQ17</td>
+<td>Adhoc SQL Query is always enabled and silently does nothing on SQLite</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-24</td>
+<td>P4 OQ18</td>
+<td>Four newest dialogs derive from <code>Window</code>, not <code>BaseDialog</code> — white system windows in dark mode</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-25</td>
+<td>P4 OQ21</td>
+<td><code>AccountListItem.ToolTipMessage</code> raises <code>PropertyChanged</code> for a property that doesn't exist</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-26</td>
+<td>P4 OQ24</td>
+<td>"Test database" tick-box shown in release builds for SQL Server, <code>#if !DEBUG</code>-hidden for SQLite</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-27</td>
+<td>P4 OQ26</td>
+<td>Six of eight <code>FreeStyleQueryDialog</code> File-menu items have no handler and no command</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-28</td>
+<td>P4 OQ27</td>
+<td><code>SampleDatabaseOptions</code> defaults to a relative path, so it opens with OK disabled unless the caller fixes it</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-29</td>
+<td>P5 OQ1</td>
+<td><code>Payments.ComputeRecurrence</code> excludes any category that <em>has</em> a frequency; outlier removal recomputes unfiltered</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-30</td>
+<td>P5 OQ2</td>
+<td><code>GenerateHtmlReport</code> doesn't await <code>Generate</code>; the <code>using</code> closes the writer mid-write</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-31</td>
+<td>P5 OQ5</td>
+<td><code>ReportViewState</code> is <code>[XmlIgnore]</code> and <code>DeserializeViewState</code> returns a bare <code>ViewState</code>; portfolio state holds unserializable predicates (evidence for D-8)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-32</td>
+<td>P5 OQ7</td>
+<td><code>AccountSummaryReport</code> formats with the machine's currency symbol beside the account's real currency code</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-33</td>
+<td>P5 OQ9</td>
+<td>Cash-flow CSV omits the Unknown group and the Total row and flips expense signs — doesn't match the screen</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-34</td>
+<td>P5 OQ10</td>
+<td><code>PortfolioReport.WriteSummaryRow</code> opens a cell it never closes when the third column is null</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-35</td>
+<td>P5 OQ11</td>
+<td><code>GenerateCapitalGains</code> calls <code>EndTable()</code> unconditionally — unbalanced document, HTML writer throws</td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-36</td>
+<td>P5 OQ12</td>
+<td><code>TaxReport.ApplyState</code> sets the report-type combo from the consolidation flag, index inverted</td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-37</td>
+<td>P5 OQ13</td>
+<td>RMD age computed as 73/75 but the distribution table's <code>RmdAge</code> is hard-coded to 75</td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-38</td>
+<td>P5 OQ14</td>
+<td>State tax computed on <code>income</code> where the adjacent federal line uses <code>amount</code></td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-39</td>
+<td>P5 OQ15</td>
+<td>Closed brokerage/money-market accounts counted in the plan — <code>&amp;&amp;</code>/<code>||</code> precedence, twice</td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-40</td>
+<td>P5 OQ16</td>
+<td><code>ChartData.Export</code> indexes every series by <code>Series[0]</code>'s count; also leaks an empty temp file per export</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-41</td>
+<td>P5 OQ17</td>
+<td><code>ComputeLinearRegression</code> tests <code>c == last</code> twice where <code>first</code> was meant</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-42</td>
+<td>P5 OQ18</td>
+<td>Split transfers tallied with the running remainder instead of the line's subtotal, in two must-stay-in-sync methods</td>
+<td>#55</td>
+</tr>
+<tr>
+<td>B-43</td>
+<td>P5 OQ19</td>
+<td><code>Charts/Styles.cs</code> loads a <code>Charts/styles.xaml</code> that doesn't exist; nothing calls it</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-44</td>
+<td>P5 OQ21</td>
+<td><code>NetWorthReport.Register()</code> uses <code>-=</code> where every other report uses <code>+=</code>, hiding a <code>NotImplementedException</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-45</td>
+<td>P5 OQ24</td>
+<td>The portfolio report's inline heading <code>DatePicker</code> is unreachable once the report is sited</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-46</td>
+<td>P5 OQ25</td>
+<td><code>Report.ExportReportAsCsv</code> reports failures in a box titled "Error Exporting .txf"</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-47</td>
+<td>P5 OQ26</td>
+<td><code>AnimatingBarChart.OnDataChanged</code> throws a bare <code>Exception</code> from a property setter</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-48</td>
+<td>P5 OQ27</td>
+<td><code>ReportsControl</code>'s help keyword is the reconciliation topic; two of nine reports set none</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-49</td>
+<td>P5 OQ28</td>
+<td><code>OnCommandReportUnaccepted</code> constructs a <code>FlowDocumentReportWriter</code> and discards it</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-50</td>
+<td>P6 OQ1</td>
+<td>Multi-file import drains its accumulator lists inside the per-file loop — three files import six times</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-51</td>
+<td>P6 OQ2</td>
+<td><code>GroupCsvByAccount</code> adjusts <code>accountNameIndex</code> once per row, deleting an innocent column after the first</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-52</td>
+<td>P6 OQ3</td>
+<td>CSV rows with no account number are silently dropped; cancelling the account picker NREs</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-53</td>
+<td>P6 OQ4</td>
+<td><code>($1,234.56)</code> imports as <code>+1234.56</code> — accounting negatives become income</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-54</td>
+<td>P6 OQ5</td>
+<td>QIF import asks for an account three times; "does not currently exit" typo; type guessed from the file path containing "Checking"</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-55</td>
+<td>P6 OQ6</td>
+<td><code>accountTypeMismatch</code> computed before the switch that sets <code>at</code> — refuses correct merges, permits wrong ones</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-56</td>
+<td>P6 OQ7</td>
+<td>A first-time QIF import marks nothing <code>Unaccepted</code>, unlike every other route in</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-57</td>
+<td>P6 OQ8</td>
+<td><code>AccountsControl.Paste</code> always reports failure — <code>LastAccount</code> is never assigned on that path</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-58</td>
+<td>P6 OQ9</td>
+<td>The product's own CSV export can't be re-imported: <code>ToString("C2")</code>, machine symbol, <code>ToShortDateString()</code></td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-59</td>
+<td>P6 OQ10</td>
+<td><code>AccountsControl.ExportList</code> writes balances as <code>"C3"</code> with the machine's symbol beside a currency column</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-60</td>
+<td>P6 OQ11</td>
+<td>OFX encoding regex is run against a hard-coded sample string, never the file — always "utf-8"</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-61</td>
+<td>P6 OQ12</td>
+<td>"Save As → .csv" writes the current transaction view's rows, not the file</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-62</td>
+<td>P6 OQ14</td>
+<td>A failed OFX version retry leaves <code>OfxVersion</code> flipped; <code>Signup</code>'s copy of the same retry restores it</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-63</td>
+<td>P6 OQ15</td>
+<td>An MFA challenge with only machine questions errors out, discarding the answers it just computed</td>
+<td>#56</td>
+</tr>
+<tr>
+<td>B-64</td>
+<td>P6 OQ16</td>
+<td>MFA timestamp answered with lowercase <code>hh</code> — every afternoon answer is twelve hours out</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-65</td>
+<td>P6 OQ17</td>
+<td>DGML account map: no error handling on the write, deleted transactions included, null deref, bare <code>catch {}</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-66</td>
+<td>P6 OQ19</td>
+<td><code>UpdateCachedProfile</code> merges two identifier-less institutions; <code>GetCachedBankList</code> re-saves on read; reference-equality change detection</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-67</td>
+<td>P6 OQ21</td>
+<td>Dead second CSV importer; <code>Exporters.SupportXml</code> never set true; <code>ExportAccount</code>'s dedupe field never cleared</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-68</td>
+<td>P7 OQ1</td>
+<td>Federal capital-gains bands walked against gains alone, ignoring ordinary income</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-69</td>
+<td>P7 OQ2</td>
+<td>Long-term test is <code>Days &gt; 365</code>, a day out across a leap year</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-70</td>
+<td>P7 OQ4</td>
+<td>The per-account <code>.txf</code> route skips <code>WriteHeader</code> entirely</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-71</td>
+<td>P7 OQ5</td>
+<td><code>.txf</code> acquisition/sale dates written with <code>ToShortDateString()</code></td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-72</td>
+<td>P7 OQ6</td>
+<td>Report and <code>.txf</code> disagree in sign (expense flip) and amount (tax-exempt inclusion); <code>WriteRecordFormat1</code> skips <code>Round</code></td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-73</td>
+<td>P7 OQ7</td>
+<td><code>ExportCategories</code> handles only record formats 1 and 3 — 56 of 376 tax lines export as nothing, no <code>default:</code></td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-74</td>
+<td>P7 OQ8</td>
+<td><code>GenerateGroups</code> drops any transaction whose group key (usually the payee) is empty, uncounted</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-75</td>
+<td>P7 OQ9</td>
+<td><code>TaxCategory</code> instances are process-wide statics that <code>GenerateGroups</code> writes each run's results onto</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-76</td>
+<td>P7 OQ11</td>
+<td>Three states' <code>deductionPercentage</code> never read; two more states spell the key <code>"deduction"</code>, matching no property</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-77</td>
+<td>P7 OQ12</td>
+<td>Bracket inflation moves Single/Married/Head income brackets only — not Separate, not capital gains, not the standard deduction</td>
+<td>#57</td>
+</tr>
+<tr>
+<td>B-78</td>
+<td>P7 OQ16</td>
+<td>The bracket walk loses a cent per band; <code>Bracket.Max</code> is never read, so no table ordering is validated</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-79</td>
+<td>P7 OQ17</td>
+<td><code>StateTaxes.json</code> has a trailing comma; <code>RetirementControl</code>'s constructor loads it eagerly with no try/catch</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-80</td>
+<td>P7 OQ20</td>
+<td><code>RetirementPlan.FindState</code> falls back to <code>Data[0]</code> — Alabama — for any unrecognised state</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-81</td>
+<td>P7 OQ21</td>
+<td>"Tax Excempt" column header; "TuboTax" export tooltip</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-82</td>
+<td>P7 OQ22</td>
+<td><code>TaxReport.GetSalesTax</code> filters on <code>t.Date</code> while every other figure uses <code>t.TaxDate</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-83</td>
+<td>P7 OQ23</td>
+<td><code>W2Report</code> doesn't exclude tax-deferred/tax-free accounts and rounds every figure to whole dollars</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-84</td>
+<td>P8 OQ1</td>
+<td><code>GetUniqueStatementName</code> tests the bare parameter, not the full path — statements silently overwrite</td>
+<td>#54</td>
+</tr>
+<tr>
+<td>B-85</td>
+<td>P8 OQ2</td>
+<td><code>ImportStatements</code> passes a foreign relative path; merged statements arrive with no document and no hash</td>
+<td>#54</td>
+</tr>
+<tr>
+<td>B-86</td>
+<td>P8 OQ3</td>
+<td><code>MessageBoxEx.Show</code> returns <code>None</code> immediately when called off the UI thread — the question answers itself</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-87</td>
+<td>P8 OQ4</td>
+<td><code>MessageBoxEx</code> computes a default button and ignores it; Escape always cancels, even OK-only</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-88</td>
+<td>P8 OQ5</td>
+<td><code>DownloadLog.OnQuoteAvailable</code> calls <code>TryUpdate</code> on a key nothing ever adds — today's quote never merges</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-89</td>
+<td>P8 OQ6</td>
+<td><code>DirectorySetup.AddWritePermission</code> never calls <code>SetAccessControl</code> — nothing is granted</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-90</td>
+<td>P8 OQ7</td>
+<td><code>CrashReport.Save</code> uses <code>File.OpenWrite</code> (no truncate); <code>Load</code> then throws and deletes both reports</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-91</td>
+<td>P8 OQ8</td>
+<td><code>TempFilesManager.RemoveTempFile</code> removes from the list it is <code>foreach</code>-ing — throws whenever it matches</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-92</td>
+<td>P8 OQ10</td>
+<td><code>FilterLiteral</code> judges the first row by a different date rule from every later row</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-93</td>
+<td>P8 OQ11</td>
+<td>Hard-coded <code>MSFT</code> / 2025-01-08 debug branch shipped in <code>GetMissingDataRanges</code>; silent ten-range cap</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-94</td>
+<td>P8 OQ15</td>
+<td><code>Settings.ReadXml</code>/<code>WriteXml</code> throw on any unhandled property type; no try/catch around <code>Settings.Load</code></td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-95</td>
+<td>P8 OQ17</td>
+<td><code>CalculatorPopup</code> ignores <code>OemMinus</code>; <code>CalculatorControl.OnKeyDown</code> is fourteen empty cases</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-96</td>
+<td>P8 OQ21</td>
+<td><code>MoneyDataObject</code> implements every <code>SetData</code> overload as <code>throw new NotImplementedException()</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-97</td>
+<td>P8 OQ22</td>
+<td><code>ChangeInfoReport.HasLatestVersion</code> returns unconditionally inside the first loop iteration</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-98</td>
+<td>P8 OQ23</td>
+<td>Background failures swallowed — empty <code>catch {}</code> in <code>AttachmentWatcher</code>, debug-only elsewhere (see D-36)</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-99</td>
+<td>P9 OQ1</td>
+<td>Whole-file save calls <code>OnUpdated()</code>/<code>RemoveDeleted()</code> before the transaction commits — a failed commit destroys the work</td>
+<td>#58</td>
+</tr>
+<tr>
+<td>B-100</td>
+<td>P9 OQ5</td>
+<td>Three generated server passwords written in clear to <code>dataengine.config.json</code>, <code>MyMoneyAdmin</code> holding <code>dbcreator</code></td>
+<td>#58</td>
+</tr>
+<tr>
+<td>B-101</td>
+<td>P9 OQ6</td>
+<td>A half-failed bootstrap loses the passwords for logins it already created; retry silently rotates them</td>
+<td>#58</td>
+</tr>
+<tr>
+<td>B-102</td>
+<td>P9 OQ7</td>
+<td><code>AddLogin</code> concatenates user input into <code>sp_addLogin</code>/<code>sp_addsrvrolemember</code> and grants <code>sysadmin</code></td>
+<td>#58</td>
+</tr>
+<tr>
+<td>B-103</td>
+<td>P9 OQ8</td>
+<td><code>XmlStore</code> accepts a password it never uses; <code>.bxml</code> load leaves decrypted plaintext in <code>%TEMP%</code> on failure</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-104</td>
+<td>P9 OQ11</td>
+<td>SQL CE branch says "SQL Express does not appear to be installed" and links the Compact download</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-105</td>
+<td>P9 OQ13</td>
+<td><code>XmlStore.QueryDataSet</code> ignores the query and returns the whole file; <code>CsvStore</code> returns empty</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-106</td>
+<td>P9 OQ14</td>
+<td><code>XmlStore</code>/<code>CsvStore</code> <code>GetLog()</code> return <code>""</code>; the stored-proc engine bypasses the logging base entirely</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-107</td>
+<td>P9 OQ15</td>
+<td><code>SqlCeDatabase</code> builds its connection string with SQL Server's builder and ignores <code>includeDatabase</code></td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-108</td>
+<td>P9 OQ16</td>
+<td><code>Backup</code> uses <code>File.Copy</code> with no overwrite on three engines (delete-first workaround leaves a gap); SQL Server flips recovery model and uses <code>WITH INIT</code></td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-109</td>
+<td>P9 OQ17</td>
+<td><code>DBString</code> rewrites CR/LF as the literal two-character sequences <code>\r</code> and <code>\n</code>, which T-SQL does not interpret</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-110</td>
+<td>P9 OQ18</td>
+<td><code>UpdateLoanPayments</code>' update branch skips <code>DBString</code> on <code>Memo</code>; same omission in four other updaters; unbracketed database names</td>
+<td>#58</td>
+</tr>
+<tr>
+<td>B-111</td>
+<td>P9 OQ19</td>
+<td><code>XmlStore.Save</code> never calls <code>money.OnSaved()</code> — the file still shows as unsaved; <code>Load</code> asymmetries too</td>
+<td>#52</td>
+</tr>
+<tr>
+<td>B-112</td>
+<td>P9 OQ20</td>
+<td><code>DataEnginePasswordGenerator</code> takes <code>value % charset.Length</code> with no rejection sampling</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-113</td>
+<td>P9 OQ21</td>
+<td><code>LoadDatabasePassword</code> signals "no password stored" by throwing; <code>SaveDatabasePassword</code> swallows every exception</td>
+<td>untracked</td>
+</tr>
+<tr>
+<td>B-114</td>
+<td>P9 OQ24</td>
+<td><code>SqlServerStoredProcDatabase.ReadStockSplits</code> declared <code>new</code> over a <code>protected virtual</code> base member</td>
+<td>#52</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Untracked (18):</strong> B-12, B-22, B-26, B-28, B-32, B-33, B-34, B-47, B-54, B-59, B-94, B-97,
+B-107, B-112, B-113 — plus B-84 and B-85 which <em>are</em> in #54's body but were listed as
+"not yet filed" in the catalog's closing note (they have since been added), and B-103 which
+is covered by #52's Phase 9 section rather than #58 where its siblings live.</p>
+<hr />
+<h1 id="housekeeping-items">HOUSEKEEPING items<a class="headerlink" href="#housekeeping-items" title="Permanent link">#</a></h1>
+<p>Catalog-construction and phase-boundary calls. No bearing on what the redesign should do;
+listed to show they were read and dismissed rather than missed.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Open question</th>
+<th>Why it's housekeeping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H-1</td>
+<td>P1 OQ6</td>
+<td><code>Transaction.to</code>/<code>Split.to</code> classified as infrastructure supporting P1-XFER-8 rather than a capability of their own — a labelling call</td>
+</tr>
+<tr>
+<td>H-2</td>
+<td>P1 OQ7</td>
+<td>Stock-quote fetching referenced in Phase 1 but described in Phase 8 — phase ownership</td>
+</tr>
+<tr>
+<td>H-3</td>
+<td>P1 OQ8</td>
+<td>Attachments appear in Phase 1 only as a flag; the documents themselves are Phase 8 — phase ownership</td>
+</tr>
+<tr>
+<td>H-4</td>
+<td>P2 OQ4</td>
+<td>The settings flyout catalogued as shell (2.9) rather than deferred to Phase 4 — boundary call, flagged with the exact scenarios to revisit</td>
+</tr>
+<tr>
+<td>H-5</td>
+<td>P2 OQ6</td>
+<td>Left-navigation panels split between Phase 2 (navigation) and Phase 3 (their own capabilities) — boundary call</td>
+</tr>
+<tr>
+<td>H-6</td>
+<td>P2 OQ8</td>
+<td>Chart-strip <em>arrangement</em> is Phase 2, chart <em>content</em> is Phase 5 — boundary call</td>
+</tr>
+<tr>
+<td>H-7</td>
+<td>P3 OQ12</td>
+<td>"The door, not the room" — modal flows captured as affordances here, contents owned by Phase 4</td>
+</tr>
+<tr>
+<td>H-8</td>
+<td>P3 OQ13</td>
+<td><code>FlowDocumentView</code> hosts both the in-register portfolio and every standalone report; its own controls catalogued in Phase 3 in passing</td>
+</tr>
+<tr>
+<td>H-9</td>
+<td>P3 OQ14</td>
+<td><code>GraphGenerators.cs</code> lives in <code>Views/</code> but is owned by Phase 5 — location vs ownership note</td>
+</tr>
+<tr>
+<td>H-10</td>
+<td>P4 OQ28</td>
+<td>Boundary with Phases 5/6 for the tax-report, report-range and import dialogs — option collection here, contents there</td>
+</tr>
+<tr>
+<td>H-11</td>
+<td>P4 OQ29</td>
+<td>Modal UI outside <code>Dialogs/</code> (<code>MessageBoxEx</code>, print dialog, native pickers) left to Phase 8 — scope note</td>
+</tr>
+<tr>
+<td>H-12</td>
+<td>P5 OQ30</td>
+<td>Where the Phase 7 line was drawn around <code>TaxReport</code>/<code>W2Report</code> and the tax machinery behind them</td>
+</tr>
+<tr>
+<td>H-13</td>
+<td>P5 OQ31</td>
+<td>Where the Phase 6 line was drawn — report file-writing captured as report affordances, not export formats</td>
+</tr>
+<tr>
+<td>H-14</td>
+<td>P6 OQ22</td>
+<td><code>.txf</code> file-writing mechanics assigned to Phase 7 rather than Phase 6, with the reasoning recorded</td>
+</tr>
+<tr>
+<td>H-15</td>
+<td>P6 OQ24</td>
+<td>Where the Phase 8 line was drawn for attachments and the quote cache (the two defects noted in passing — <code>DownloadControl.SelectEntry</code>'s endless timer and <code>DoSync</code>'s useless guard — are in #52)</td>
+</tr>
+<tr>
+<td>H-16</td>
+<td>P7 OQ19</td>
+<td>Crossed namespaces and a filename naming another file's class — a navigation note for readers, not a redesign input</td>
+</tr>
+<tr>
+<td>H-17</td>
+<td>P7 OQ24</td>
+<td><code>MyMoney.Business/CostBasis.cs</code> claimed by Phase 7 rather than 5 or 8; only the ownership label is in question</td>
+</tr>
+<tr>
+<td>H-18</td>
+<td>P7 OQ25</td>
+<td>Fiscal-year start, report printing and tax-data delivery handed to Phase 8 — scope note (the delivery half became D-53)</td>
+</tr>
+<tr>
+<td>H-19</td>
+<td>P8 OQ25</td>
+<td><code>MyMoney.Data/</code> scoped out of Phase 8 and asked to be confirmed; Phase 9 closed it, so the qualifier no longer applies</td>
+</tr>
+<tr>
+<td>H-20</td>
+<td>P8 OQ26</td>
+<td><code>AutoCategorization</code> and <code>Query.cs</code> claimed without new scenarios; notes that cross-account category suggestion should get a scenario of its own — a catalog gap, not a decision</td>
+</tr>
+</tbody>
+</table>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

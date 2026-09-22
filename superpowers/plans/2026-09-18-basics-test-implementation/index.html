@@ -1,0 +1,1890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-18-basics-test-implementation/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Basics Test Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Basics Test Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "Task 1: Shared fixture builder + FlaUI test scaffolding", url: "#task-1-shared-fixture-builder-flaui-test-scaffolding" },
+              {title: "Task 2: Auto-Categorization business-layer tests", url: "#task-2-auto-categorization-business-layer-tests" },
+              {title: "Task 3: Quick Search \u0026amp; Advanced Queries business-layer tests + one FlaUI test", url: "#task-3-quick-search-advanced-queries-business-layer-tests-one-flaui-test" },
+              {title: "Task 4: Categories business-layer tests", url: "#task-4-categories-business-layer-tests" },
+              {title: "Task 5: Categories FlaUI tests", url: "#task-5-categories-flaui-tests" },
+              {title: "Task 6: Currencies \u0026amp; Securities business-layer tests", url: "#task-6-currencies-securities-business-layer-tests" },
+              {title: "Task 7: Currencies \u0026amp; Securities FlaUI test", url: "#task-7-currencies-securities-flaui-test" },
+              {title: "Task 8: Payees \u0026amp; Aliases business-layer tests", url: "#task-8-payees-aliases-business-layer-tests" },
+              {title: "Task 9: Payees \u0026amp; Aliases FlaUI tests", url: "#task-9-payees-aliases-flaui-tests" },
+              {title: "Task 10: Splits \u0026amp; Transfers business-layer tests", url: "#task-10-splits-transfers-business-layer-tests" },
+              {title: "Task 11: Splits \u0026amp; Transfers FlaUI tests", url: "#task-11-splits-transfers-flaui-tests" },
+              {title: "Task 12: Merging Duplicate Transactions business-layer tests", url: "#task-12-merging-duplicate-transactions-business-layer-tests" },
+              {title: "Task 13: Merging Duplicate Transactions FlaUI test", url: "#task-13-merging-duplicate-transactions-flaui-test" },
+              {title: "Task 14: Attachments FlaUI test + follow-up issue", url: "#task-14-attachments-flaui-test-follow-up-issue" },
+              {title: "Task 15: Sample Data FlaUI test", url: "#task-15-sample-data-flaui-test" },
+              {title: "Task 16: End-of-section retro and tracking doc finalization", url: "#task-16-end-of-section-retro-and-tracking-doc-finalization" },
+              {title: "Task 17: Consolidate CLAUDE.md\u0027s \"Things that have been gotten wrong before\" section", url: "#task-17-consolidate-claudemds-things-that-have-been-gotten-wrong-before-section" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="basics-test-implementation-plan">Basics Test Implementation Plan<a class="headerlink" href="#basics-test-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Turn the Basics section of the FlaUI/business-layer scenario catalog (<code>docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md</code>) into running, automated tests — a business-layer unit test for every reachable API, a self-driving FlaUI test for every dialog/UI wiring scenario — following the conventions in <code>docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md</code>.</p>
+<p><strong>Architecture:</strong> Business-layer tests (NUnit, <code>Source/WPF/UnitTests</code>) exercise <code>MyMoney.Business</code> APIs directly against a fresh in-memory <code>MyMoney</code> graph per test — Fresh Fixture pattern, no shared state. FlaUI tests (NUnit, <code>Source/WPF/UITests</code>) drive the real WPF app via UI Automation against a scratch SQLite database built fresh per test by a shared <code>BasicsFixtureBuilder</code> (Test Data Builder pattern) — nuke-and-pave via code, never a checked-in binary. One shared app launch per test-class session (<code>[SetUpFixture]</code>), per-test database isolation underneath it.</p>
+<p><strong>Tech Stack:</strong> NUnit 4.6.1, FlaUI.Core/FlaUI.UIA3, coverlet.collector (already referenced), .NET 10.0-windows7.0.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li><strong>No LINQ in business-layer test code — use plain <code>foreach</code> loops</strong> (user preference, stated
+  during Task 1's implementation). This is a style rule for test code operating on the
+  in-memory <code>MyMoney</code> graph, not an architectural change — these tests still never touch a SQL
+  database (data-layer correctness stays out of scope, per "Testing responsibility by layer"
+  above).</li>
+<li>
+<p><strong><code>PersistentContainer : IEnumerable&lt;PersistentObject&gt;</code> diamond gotcha</strong> (discovered during
+  Task 1): every <code>MyMoney</code> collection (<code>Categories</code>, <code>Payees</code>, <code>Currencies</code>, <code>Aliases</code>,
+  <code>Transactions</code>, <code>Accounts</code>, ...) implements <em>two</em> different <code>IEnumerable&lt;T&gt;</code> instantiations —
+  <code>IEnumerable&lt;PersistentObject&gt;</code> via <code>PersistentContainer</code>, and <code>IEnumerable&lt;TSpecific&gt;</code> via
+  its own <code>ICollection&lt;TSpecific&gt;</code>. Passing one of these collections to <em>any</em> generic method
+  expecting <code>IEnumerable&lt;T&gt;</code> (including LINQ, if it were used) fails with a confusing
+  <code>CS0411</code>/type-inference error unless the type argument is given explicitly or a <code>foreach</code>
+  loop is used instead (foreach resolves against the collection's own declared enumerator,
+  not generic inference, so it isn't affected). Given the no-LINQ preference above, <code>foreach</code>
+  is both the required style and the simplest way to avoid this gotcha entirely.</p>
+</li>
+<li>
+<p>Never run <code>dotnet test Source/WPF/MyMoney.sln</code> (whole solution) — pulls in FlaUI <code>UITests</code>/<code>ScenarioTest</code>, hangs unattended. Business-layer runs: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "..."</code>.</p>
+</li>
+<li>FlaUI tests are fully self-driving (no human interaction during a run); the very first FlaUI test run in this plan (Task 3, Step in "run it live") happens with the user present to bootstrap the environment — every run after that is autonomous.</li>
+<li>Fresh Fixture per test, always: business-layer tests build their own minimal in-memory <code>MyMoney</code>; FlaUI tests call <code>BasicsFixtureBuilder.Build()</code> fresh and save it to a brand-new scratch SQLite path — never a checked-in binary, never reused state between tests.</li>
+<li>Entity-lifecycle tests (Categories, Payees, Aliases, Splits, Currencies) follow the CRUD-lifecycle shape: baseline query → add valid → reject invalid (where a real validation seam exists) → update → exact-count query → delete → query empty.</li>
+<li>Every dialog FlaUI test includes the standard dialog-lifecycle checks (Cancel leaves state unchanged, title-bar Close behaves like Cancel, OK applies exactly what was entered) in addition to its specific scenario.</li>
+<li>Every assertion's expected value is derived from source/seed data before the test runs (call the same business-layer API being verified, in the FlaUI test's arrange step, to compute the expected value) — never a value hand-observed from a prior run.</li>
+<li>No new mocking framework or test-support abstractions — reuse <code>MockDatabase</code>, <code>FakeBusinessLayerUiCallback</code>/<code>FakeImportProgressReporter</code> (already defined in <code>QifImporterTests.cs</code>/<code>DatabaseLifecycleTests.cs</code>).</li>
+<li>Testing responsibility by layer: UI tests verify input-passing/display/error-handling wiring only; business-layer tests verify computed correctness plus correct calls to (and error-handling from) the data layer via <code>MockDatabase</code>; data-layer correctness itself is out of scope (already covered elsewhere).</li>
+<li>Update <code>docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md</code>'s <code>Status</code> column for every scenario touched, at the end of each task.</li>
+</ul>
+<hr />
+<h2 id="task-1-shared-fixture-builder-flaui-test-scaffolding">Task 1: Shared fixture builder + FlaUI test scaffolding<a class="headerlink" href="#task-1-shared-fixture-builder-flaui-test-scaffolding" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/MyMoney.TestSupport/BasicsFixtureBuilder.cs</code>
+- Create: <code>Source/WPF/UnitTests/BasicsFixtureBuilderTests.cs</code>
+- Create: <code>Source/WPF/UITests/Basics/BasicsTestSetup.cs</code>
+- Modify: <code>Source/WPF/UITests/UITests.csproj</code> (add <code>ProjectReference</code> to <code>MyMoney.TestSupport.csproj</code>)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>BasicsFixtureBuilder.Build()</code> → <code>MyMoney</code> (public static, <code>Walkabout.Data</code> namespace, in <code>MyMoney.TestSupport</code>). Every later task's business-layer tests may call this or build narrower ad hoc state; every later task's FlaUI tests call this via <code>BasicsTestSetup.OpenFreshDatabase(displayName)</code>.
+- Produces: <code>BasicsTestSetup.OpenFreshDatabase(string displayName)</code> → <code>(string scratchPath, string registeredName)</code>, and <code>BasicsTestSetup.CleanUpDatabase(string scratchPath, string registeredName)</code> — both <code>internal static</code> in <code>Walkabout.UITests.Basics</code>, used by every later FlaUI test's <code>[SetUp]</code>/<code>[TearDown]</code>.
+- Produces: <code>Walkabout.UITests.Basics.BasicsAppSession</code> — a <code>[SetUpFixture]</code> class exposing <code>internal static Application App</code> and <code>internal static UIA3Automation Automation</code> and <code>internal static Window MainWindow</code>, populated in <code>[OneTimeSetUp]</code>, valid for the lifetime of every test in the <code>Walkabout.UITests.Basics</code> namespace.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test for the fixture builder</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/BasicsFixtureBuilderTests.cs</code>:</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class BasicsFixtureBuilderTests
+    {
+        private static Category FindCategoryByName(MyMoney money, string name)
+        {
+            foreach (Category c in money.Categories)
+            {
+                if (c.Name == name)
+                {
+                    return c;
+                }
+            }
+            return null;
+        }
+
+        private static int CountItems&lt;T&gt;(System.Collections.Generic.IEnumerable&lt;T&gt; items)
+        {
+            int count = 0;
+            foreach (T item in items)
+            {
+                count++;
+            }
+            return count;
+        }
+
+        [Test]
+        public void Build_ReturnsExpectedCategoryShape()
+        {
+            MyMoney money = BasicsFixtureBuilder.Build();
+
+            // Category.Name stores the full colon-separated path (e.g. &quot;Fun:Movies&quot;), not just
+            // the leaf segment - Category.Label derives the leaf from Name's last ':' segment.
+            // Confirmed by reading Money.cs during Task 1's implementation.
+            Category fun = FindCategoryByName(money, &quot;Fun&quot;);
+            Assert.That(fun, Is.Not.Null, &quot;Expected a top-level 'Fun' category.&quot;);
+
+            Category movies = FindCategoryByName(money, &quot;Fun:Movies&quot;);
+            Assert.That(movies, Is.Not.Null, &quot;Expected 'Fun:Movies' child category.&quot;);
+            Assert.That(movies.Label, Is.EqualTo(&quot;Movies&quot;));
+            Assert.That(movies.ParentCategory, Is.SameAs(fun));
+
+            Category videos = FindCategoryByName(money, &quot;Fun:Videos&quot;);
+            Assert.That(videos, Is.Not.Null, &quot;Expected 'Fun:Videos' child category.&quot;);
+            Assert.That(videos.ParentCategory, Is.SameAs(fun));
+
+            int moviesTransactionCount = money.Transactions.GetTransactionsByCategory(movies, null).Count;
+            Assert.That(moviesTransactionCount, Is.EqualTo(1), &quot;Expected exactly 1 seeded transaction under Fun:Movies.&quot;);
+        }
+
+        [Test]
+        public void Build_ReturnsExpectedPayeeAndAliasShape()
+        {
+            MyMoney money = BasicsFixtureBuilder.Build();
+
+            Assert.That(CountItems&lt;Payee&gt;(money.Payees), Is.EqualTo(4), &quot;Expected exactly 4 seeded payees (movie, Alaska, duplicate-target, grocery).&quot;);
+            Assert.That(CountItems&lt;Alias&gt;(money.Aliases), Is.EqualTo(3), &quot;Expected exactly 3 seeded aliases (1 plain + 2 narrow, for the regex-consolidation scenario).&quot;);
+        }
+
+        [Test]
+        public void Build_IsFreshEveryCall()
+        {
+            MyMoney first = BasicsFixtureBuilder.Build();
+            MyMoney second = BasicsFixtureBuilder.Build();
+
+            Assert.That(first, Is.Not.SameAs(second), &quot;Each call must return an independent MyMoney graph.&quot;);
+
+            Category firstFun = FindCategoryByName(first, &quot;Fun&quot;);
+            firstFun.Name = &quot;Mutated&quot;;
+
+            Category funInSecond = FindCategoryByName(second, &quot;Fun&quot;);
+            Assert.That(funInSecond, Is.Not.Null, &quot;Mutating one Build() result must not affect another - each call is a fresh graph.&quot;);
+        }
+    }
+}
+</code></pre>
+<p>Note: <code>money.Categories</code>/<code>money.Payees</code>/etc. each implement two different <code>IEnumerable&lt;T&gt;</code>
+instantiations (see Global Constraints' diamond gotcha) — <code>foreach</code> works directly against
+them, but any generic helper taking <code>IEnumerable&lt;T&gt;</code> needs an explicit type argument at the
+call site (<code>CountItems&lt;Payee&gt;(money.Payees)</code>, not <code>CountItems(money.Payees)</code>).</p>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~BasicsFixtureBuilderTests"</code>
+Expected: FAIL — <code>BasicsFixtureBuilder</code> does not exist yet (compile error).</p>
+<ul>
+<li>[ ] <strong>Step 3: Write <code>BasicsFixtureBuilder</code></strong></li>
+</ul>
+<p>Create <code>Source/WPF/MyMoney.TestSupport/BasicsFixtureBuilder.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+
+namespace Walkabout.Data
+{
+    /// &lt;summary&gt;
+    /// Test Data Builder (Meszaros, xUnit Test Patterns) for the Basics scenario catalog's
+    /// shared seed data. Called fresh by every business-layer and FlaUI test that needs it -
+    /// see docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md's &quot;Shared
+    /// fixture builder&quot; section. Generalizes the one-off pattern in
+    /// Source/WPF/UITests/FixtureGenerator.cs into a function called on every test run instead
+    /// of a manually-regenerated checked-in binary.
+    /// &lt;/summary&gt;
+    public static class BasicsFixtureBuilder
+    {
+        public static MyMoney Build()
+        {
+            var money = new MyMoney();
+
+            // Categories: a parent/child pair with one seeded transaction, for Categories
+            // subsection's rename/delete/merge scenarios.
+            Category fun = money.Categories.GetOrCreateCategory(&quot;Fun&quot;, CategoryType.Expense);
+            Category movies = money.Categories.GetOrCreateCategory(&quot;Fun:Movies&quot;, CategoryType.Expense);
+            Category videos = money.Categories.GetOrCreateCategory(&quot;Fun:Videos&quot;, CategoryType.Expense);
+
+            var checking = money.Accounts.AddAccount(&quot;Basics Checking&quot;);
+            checking.Type = AccountType.Checking;
+
+            var moviePayee = money.Payees.AddPayee(1);
+            moviePayee.Name = &quot;AMC THEATRES 1234&quot;;
+
+            var movieTxn = new Transaction();
+            movieTxn.Account = checking;
+            movieTxn.Date = new DateTime(2026, 1, 5);
+            movieTxn.Amount = -32.50M;
+            movieTxn.Payee = moviePayee;
+            movieTxn.Category = movies;
+            money.Transactions.AddTransaction(movieTxn);
+
+            // Payees &amp; Aliases: a second messy payee plus 3 aliases (1 plain, 2 narrow for the
+            // regex-consolidation scenario).
+            var alaskaPayee = money.Payees.AddPayee(2);
+            alaskaPayee.Name = &quot;Alaska Airlines&quot;;
+
+            var plainAlias = money.Aliases.AddAlias(1);
+            plainAlias.Pattern = &quot;AMC THEATRES 1234&quot;;
+            plainAlias.AliasType = AliasType.None;
+            plainAlias.Payee = moviePayee;
+
+            var narrowAlias1 = money.Aliases.AddAlias(2);
+            narrowAlias1.Pattern = &quot;ALASKA AIR 123&quot;;
+            narrowAlias1.AliasType = AliasType.None;
+            narrowAlias1.Payee = alaskaPayee;
+
+            var narrowAlias2 = money.Aliases.AddAlias(3);
+            narrowAlias2.Pattern = &quot;ALASKA  AIRLINES&quot;;
+            narrowAlias2.AliasType = AliasType.None;
+            narrowAlias2.Payee = alaskaPayee;
+
+            // Splits &amp; Transfers: an out-of-balance split, and a linked transfer pair (one
+            // side reconciled, one not).
+            var splitTxn = new Transaction();
+            splitTxn.Account = checking;
+            splitTxn.Date = new DateTime(2026, 1, 10);
+            splitTxn.Amount = -100.00M;
+            splitTxn.Payee = alaskaPayee;
+            var split1 = splitTxn.NonNullSplits.AddSplit();
+            split1.Category = fun;
+            split1.Amount = -40.00M;
+            money.Transactions.AddTransaction(splitTxn);
+
+            var savings = money.Accounts.AddAccount(&quot;Basics Savings&quot;);
+            savings.Type = AccountType.Savings;
+            var transferSource = new Transaction();
+            transferSource.Account = checking;
+            transferSource.Date = new DateTime(2026, 1, 15);
+            transferSource.Amount = -200.00M;
+            money.Transactions.AddTransaction(transferSource);
+            money.Transfer(transferSource, savings);
+
+            // Merging Duplicate Transactions: two near-duplicate transactions (same
+            // amount/date, different FITID).
+            var dupPayee = money.Payees.AddPayee(3);
+            dupPayee.Name = &quot;TARGET T-1234&quot;;
+            var dupA = new Transaction();
+            dupA.Account = checking;
+            dupA.Date = new DateTime(2026, 1, 20);
+            dupA.Amount = -11.73M;
+            dupA.Payee = dupPayee;
+            dupA.FITID = &quot;FID-A&quot;;
+            money.Transactions.AddTransaction(dupA);
+            var dupB = new Transaction();
+            dupB.Account = checking;
+            dupB.Date = new DateTime(2026, 1, 20);
+            dupB.Amount = -11.73M;
+            dupB.Payee = dupPayee;
+            dupB.FITID = &quot;FID-B&quot;;
+            money.Transactions.AddTransaction(dupB);
+
+            // Currencies &amp; Securities: BasicsFixtureBuilder stays lean here deliberately - the
+            // real exchange-rate snapshot and bank contact info gathered for this plan live in
+            // Task 6 (CurrenciesTests.cs) and Task 7 (CurrenciesFlaUiTests.cs) as test-routine-
+            // local data instead, per the user's explicit correction: this data is only
+            // relevant to the Currencies subsection, so it belongs in that subsection's own
+            // test transactions, not baked into the shared builder every other subsection's
+            // tests also carry around. See Task 6/7 below for where it actually lives.
+
+            // Auto-Categorization: payee history at a known amount, for suggestion scenarios.
+            var groceryPayee = money.Payees.AddPayee(4);
+            groceryPayee.Name = &quot;SAFEWAY #4455&quot;;
+            var groceryHistory = new Transaction();
+            groceryHistory.Account = checking;
+            groceryHistory.Date = new DateTime(2026, 1, 3);
+            groceryHistory.Amount = -55.00M;
+            groceryHistory.Payee = groceryPayee;
+            groceryHistory.Category = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+            money.Transactions.AddTransaction(groceryHistory);
+
+            return money;
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~BasicsFixtureBuilderTests"</code>
+Expected: PASS (3 tests). If <code>Category</code>/<code>Split</code>/<code>Transaction</code>/<code>Alias</code> property names differ from what's used above, read <code>Source/WPF/MyMoney.Business/Money.cs</code> for the exact member (e.g. confirm <code>Splits.AddSplit()</code>'s exact name via <code>grep -n "AddSplit" Source/WPF/MyMoney.Business/Money.cs</code>) and adjust — do not guess a second time; verify.</p>
+<ul>
+<li>[ ] <strong>Step 5: Add <code>MyMoney.TestSupport</code> reference to <code>UITests.csproj</code></strong></li>
+</ul>
+<p>Open <code>Source/WPF/UITests/UITests.csproj</code>, find the <code>&lt;ItemGroup&gt;</code> containing the existing three <code>&lt;ProjectReference&gt;</code> lines (<code>MyMoney.csproj</code>, <code>MyMoney.Business.csproj</code>, <code>MyMoney.Data.csproj</code>), add a fourth:</p>
+<pre><code class="language-xml">    &lt;ProjectReference Include=&quot;..\MyMoney.TestSupport\MyMoney.TestSupport.csproj&quot; /&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 6: Write the FlaUI session scaffolding</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/BasicsTestSetup.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Tools;
+using FlaUI.UIA3;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UITests.Basics
+{
+    /// &lt;summary&gt;
+    /// Launches the app once for every FlaUI test in the Walkabout.UITests.Basics namespace
+    /// (app launch is the expensive part - several seconds cold start), while each individual
+    /// test still gets its own scratch database via OpenFreshDatabase/CleanUpDatabase. See
+    /// docs/superpowers/specs/2026-09-18-basics-test-implementation-design.md's &quot;FlaUI test
+    /// session lifecycle&quot; section. Scoped to this namespace only - does not affect the
+    /// existing Walkabout.UITests.PayeeSelectionTests, which launches its own app per test.
+    /// &lt;/summary&gt;
+    [SetUpFixture]
+    public class BasicsAppSession
+    {
+        internal static Application App { get; private set; }
+        internal static UIA3Automation Automation { get; private set; }
+        internal static Window MainWindow { get; private set; }
+
+        [OneTimeSetUp]
+        public void LaunchApp()
+        {
+            App = Application.Launch(LaunchSmokeTests.MyMoneyExePath, &quot;/nosettings&quot;);
+            Automation = new UIA3Automation();
+            MainWindow = App.GetMainWindow(Automation, TimeSpan.FromSeconds(10));
+        }
+
+        [OneTimeTearDown]
+        public void CloseApp()
+        {
+            try
+            {
+                App?.Close();
+            }
+            catch
+            {
+                // best-effort cleanup; a test failure shouldn't be masked by a teardown exception
+            }
+            App?.Dispose();
+            Automation?.Dispose();
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Per-test database isolation within the shared BasicsAppSession. Every FlaUI test calls
+    /// OpenFreshDatabase in [SetUp] and CleanUpDatabase in [TearDown] - true Fresh Fixture, a
+    /// brand-new scratch SQLite file built by BasicsFixtureBuilder every time, never a
+    /// checked-in binary.
+    /// &lt;/summary&gt;
+    internal static class BasicsTestSetup
+    {
+        internal static (string ScratchPath, string RegisteredName) OpenFreshDatabase(string displayName)
+        {
+            string scratchPath = Path.Combine(Path.GetTempPath(), $&quot;BasicsScratch-{Guid.NewGuid():N}.mmdb&quot;);
+
+            MyMoney money = BasicsFixtureBuilder.Build();
+            var db = new SqliteDatabase();
+            db.DatabasePath = scratchPath;
+            db.Create();
+            db.Save(money);
+
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = scratchPath,
+                TestDatabase = true
+            };
+            registry.Save();
+
+            return (scratchPath, displayName);
+        }
+
+        internal static void CleanUpDatabase(string scratchPath, string registeredName)
+        {
+            try
+            {
+                string registryPath = DatabaseRegistry.GetDefaultPath();
+                var registry = DatabaseRegistry.Load(registryPath);
+                registry.Databases.Remove(registeredName);
+                registry.Save();
+            }
+            catch
+            {
+                // best-effort - a cleanup failure shouldn't mask the test's actual result
+            }
+
+            try
+            {
+                if (File.Exists(scratchPath))
+                {
+                    File.Delete(scratchPath);
+                }
+            }
+            catch
+            {
+                // best-effort
+            }
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 7: Write a smoke test proving the scaffolding works — this is the bootstrap run</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/BasicsSmokeTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+
+namespace Walkabout.UITests.Basics
+{
+    [TestFixture]
+    public class BasicsSmokeTests
+    {
+        private (string ScratchPath, string RegisteredName) db;
+
+        [SetUp]
+        public void SetUp()
+        {
+            this.db = BasicsTestSetup.OpenFreshDatabase(&quot;BasicsSmokeTest Fixture&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BasicsTestSetup.CleanUpDatabase(this.db.ScratchPath, this.db.RegisteredName);
+        }
+
+        [Test]
+        public void OpeningFreshScratchDatabase_ShowsSeededCategoryInAccountsPanel()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+
+            // Open via File | Open, same pattern as PayeeSelectionTests.cs's OpenFileViaFileMenu,
+            // selecting this.db.RegisteredName instead of a checked-in fixture's display name.
+            AutomationElement fileMenu = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;File&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(fileMenu, Is.Not.Null, &quot;File menu not found.&quot;);
+            fileMenu.Patterns.ExpandCollapse.Pattern.Expand();
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement openItem = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;MenuFileOpen&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            openItem.Patterns.Invoke.Pattern.Invoke();
+
+            Window openDialog = Retry.WhileNull(() =&gt; mainWindow.ModalWindows.Length &gt; 0 ? mainWindow.ModalWindows[0] : null,
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(openDialog, Is.Not.Null, &quot;Open Database dialog did not appear.&quot;);
+
+            var listBox = openDialog.FindFirstDescendant(cf =&gt; cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            listBox.Select(this.db.RegisteredName);
+
+            AutomationElement openButton = Retry.WhileNull(
+                () =&gt; openDialog.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;ButtonOk&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            openButton.Patterns.Invoke.Pattern.Invoke();
+
+            Retry.WhileFalse(
+                () =&gt; mainWindow.Title.IndexOf(this.db.RegisteredName, StringComparison.OrdinalIgnoreCase) &gt;= 0,
+                TimeSpan.FromSeconds(10));
+            Assert.That(mainWindow.Title, Does.Contain(this.db.RegisteredName).IgnoreCase);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 8: Run this smoke test WITH THE USER PRESENT (the one bootstrap run)</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~BasicsSmokeTests"</code></p>
+<p>This is the one-time bootstrap run from the spec's "FlaUI execution environment" section. Watch it together. If it hangs or errors, diagnose live (window focus, <code>SetForeground</code>, an unhandled dialog) and fix the test code — do not proceed to Task 2 until this passes cleanly. Once it passes, every subsequent FlaUI test in this plan runs autonomously with no assistance.</p>
+<ul>
+<li>[ ] <strong>Step 9: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.TestSupport/BasicsFixtureBuilder.cs Source/WPF/UnitTests/BasicsFixtureBuilderTests.cs Source/WPF/UITests/Basics/BasicsTestSetup.cs Source/WPF/UITests/Basics/BasicsSmokeTests.cs Source/WPF/UITests/UITests.csproj
+git commit -m &quot;test: add BasicsFixtureBuilder and FlaUI session scaffolding for Basics tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-2-auto-categorization-business-layer-tests">Task 2: Auto-Categorization business-layer tests<a class="headerlink" href="#task-2-auto-categorization-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/AutoCategorizationTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>AutoCategorization.AutoCategoryMatch(Transaction t, string payeeOrTransferCaption)</code> → <code>object</code> (either <code>null</code>, a <code>Transaction</code>, or a <code>Split</code> — caller extracts <code>.Category</code> from whichever it gets; see <code>Source/WPF/MyMoney/Views/TransactionsView.xaml.cs:4859-4876</code> for the real call site's pattern, already read and confirmed during planning).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/AutoCategorizationTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class AutoCategorizationTests
+    {
+        private static Account CreateAccount(MyMoney money)
+        {
+            return money.Accounts.AddAccount(&quot;Checking&quot;);
+        }
+
+        [Test]
+        public void AutoCategoryMatch_KnownPayeeHistory_ReturnsMatchingTransaction()
+        {
+            var money = new MyMoney();
+            var account = CreateAccount(money);
+            var category = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;SAFEWAY #4455&quot;;
+
+            var history = new Transaction();
+            history.Account = account;
+            history.Date = new DateTime(2026, 1, 3);
+            history.Amount = -55.00M;
+            history.Payee = payee;
+            history.Category = category;
+            money.Transactions.AddTransaction(history);
+
+            var newTxn = new Transaction();
+            newTxn.Account = account;
+            newTxn.Date = new DateTime(2026, 2, 3);
+            newTxn.Amount = -55.00M;
+
+            object result = AutoCategorization.AutoCategoryMatch(newTxn, &quot;SAFEWAY #4455&quot;);
+
+            Assert.That(result, Is.Not.Null, &quot;Expected a match from known payee history.&quot;);
+            var matched = result as Transaction;
+            Assert.That(matched, Is.Not.Null, &quot;Expected the match to be a plain (non-split) Transaction.&quot;);
+            Assert.That(matched.Category, Is.SameAs(category));
+        }
+
+        [Test]
+        public void AutoCategoryMatch_NoPriorHistoryForPayee_ReturnsNull()
+        {
+            var money = new MyMoney();
+            var account = CreateAccount(money);
+
+            var newTxn = new Transaction();
+            newTxn.Account = account;
+            newTxn.Date = new DateTime(2026, 2, 3);
+            newTxn.Amount = -55.00M;
+
+            object result = AutoCategorization.AutoCategoryMatch(newTxn, &quot;NEVER SEEN BEFORE INC&quot;);
+
+            Assert.That(result, Is.Null, &quot;Expected no match when the payee has no transaction history at all.&quot;);
+        }
+
+        [Test]
+        public void AutoCategoryMatch_ZeroAmount_FallsBackToClosestByDate()
+        {
+            var money = new MyMoney();
+            var account = CreateAccount(money);
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;ACME PAYROLL&quot;;
+            var oldCategory = money.Categories.GetOrCreateCategory(&quot;Income:Salary-Old&quot;, CategoryType.Income);
+            var newCategory = money.Categories.GetOrCreateCategory(&quot;Income:Salary-New&quot;, CategoryType.Income);
+
+            var older = new Transaction();
+            older.Account = account;
+            older.Date = new DateTime(2025, 6, 1);
+            older.Amount = 1000.00M;
+            older.Payee = payee;
+            older.Category = oldCategory;
+            money.Transactions.AddTransaction(older);
+
+            var mostRecent = new Transaction();
+            mostRecent.Account = account;
+            mostRecent.Date = new DateTime(2026, 1, 1);
+            mostRecent.Amount = 1200.00M;
+            mostRecent.Payee = payee;
+            mostRecent.Category = newCategory;
+            money.Transactions.AddTransaction(mostRecent);
+
+            var newTxn = new Transaction();
+            newTxn.Account = account;
+            newTxn.Date = new DateTime(2026, 1, 15);
+            newTxn.Amount = 0M;
+
+            object result = AutoCategorization.AutoCategoryMatch(newTxn, &quot;ACME PAYROLL&quot;);
+
+            var matched = result as Transaction;
+            Assert.That(matched, Is.Not.Null);
+            Assert.That(matched, Is.SameAs(mostRecent), &quot;With a zero amount, the closest-by-date transaction should win, not amount-based nearest-neighbor.&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~AutoCategorizationTests"</code>
+Expected: FAIL or PASS-by-accident is not possible here since <code>AutoCategorization</code>/<code>AutoCategoryMatch</code> already exist in <code>MyMoney.Business</code> (no new production code needed — this is characterization testing of existing logic). Expected outcome: all 3 tests PASS immediately, since this task adds test coverage for already-correct existing code, not new functionality. If any fails, that's a real bug in <code>AutoCategorization</code> — do not "fix the test to match"; read <code>Source/WPF/MyMoney.Business/AutoCategorization.cs</code> again, confirm which behavior is actually correct against the tracking doc's scenario description, and if the code is wrong, file a GitHub issue the same way earlier bugs in this project were filed (do not silently patch production code as a side effect of this test-writing pass without flagging it).</p>
+<ul>
+<li>[ ] <strong>Step 3: Update tracking doc Status</strong></li>
+</ul>
+<p>In <code>docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md</code>, under "Auto-Categorization", update the <code>Status</code> column for the three rows covered ("Empty category auto-fills...", "No matching payee history...", "Zero-amount transaction falls back...") from <code>Business-layer gap</code> to <code>Written</code> with <code>AutoCategorizationTests.cs</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/AutoCategorizationTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add AutoCategorization business-layer tests&quot;
+</code></pre>
+<hr />
+<h2 id="task-3-quick-search-advanced-queries-business-layer-tests-one-flaui-test">Task 3: Quick Search &amp; Advanced Queries business-layer tests + one FlaUI test<a class="headerlink" href="#task-3-quick-search-advanced-queries-business-layer-tests-one-flaui-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/QuickSearchQueryTests.cs</code>
+- Create: <code>Source/WPF/UITests/Basics/QuickSearchFlaUiTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>MyMoney.ExecuteQuery(QueryRow[] query)</code> → <code>IList&lt;Transaction&gt;</code> (<code>Money.cs:10570</code>). <code>QueryRow</code> (<code>Query.cs:54</code>) has <code>Field Field</code>, <code>Operation Operation</code>, <code>string Value</code>, <code>Conjunction Conjunction</code> settable properties. <code>Field</code>/<code>Operation</code>/<code>Conjunction</code> enums defined in <code>Query.cs</code>.
+- Note: <code>QuickFilterParser&lt;T&gt;</code>/<code>Filter&lt;T&gt;</code> (<code>Source/WPF/MyMoney.Business/Utilities/QuickFilterParser.cs</code>) are <code>internal</code>, and <code>Filter&lt;T&gt;.IsMatch</code> requires a <code>FilteredObservableCollection&lt;T&gt;</code> (also <code>internal</code>, abstract) — not a standalone predicate. Before writing the Quick Search parser test (Step 1 below), read <code>Source/WPF/MyMoney.Business/Utilities/FilteredObservableCollection.cs</code> in full and find the concrete subclass the real UI uses for transactions (search for <code>: FilteredObservableCollection&lt;Transaction&gt;</code>) to confirm the minimal concrete collection a test can construct. <code>UnitTests</code> already has <code>InternalsVisibleTo</code> access to <code>MyMoney.Business</code>'s internal types (confirmed via the existing <code>CsvTransactionImporterTests.cs</code> precedent).</p>
+<ul>
+<li>[ ] <strong>Step 1: Read <code>FilteredObservableCollection&lt;Transaction&gt;</code>'s concrete subclass</strong></li>
+</ul>
+<p>Run: <code>grep -n "FilteredObservableCollection&lt;Transaction&gt;" -r Source/WPF/MyMoney.Business Source/WPF/MyMoney</code></p>
+<p>Confirm the concrete class name and its constructor requirements before writing Step 2's test — this determines whether <code>QuickFilterParser&lt;Transaction&gt;</code> can be tested with a lightweight concrete collection or needs the full <code>MyMoney</code>-backed one.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing tests for <code>ExecuteQuery</code> (this part has a fully confirmed signature — write this regardless of Step 1's finding)</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/QuickSearchQueryTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class ExecuteQueryTests
+    {
+        private static MyMoney BuildMoneyWithCategorizedTransactions()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var groceries = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+            var fuel = money.Categories.GetOrCreateCategory(&quot;Auto:Fuel&quot;, CategoryType.Expense);
+
+            for (int i = 0; i &lt; 3; i++)
+            {
+                var t = new Transaction();
+                t.Account = account;
+                t.Date = new DateTime(2026, 1, 1 + i);
+                t.Amount = -20.00M - i;
+                t.Category = groceries;
+                money.Transactions.AddTransaction(t);
+            }
+
+            var fuelTxn = new Transaction();
+            fuelTxn.Account = account;
+            fuelTxn.Date = new DateTime(2026, 1, 10);
+            fuelTxn.Amount = -40.00M;
+            fuelTxn.Category = fuel;
+            money.Transactions.AddTransaction(fuelTxn);
+
+            return money;
+        }
+
+        [Test]
+        public void ExecuteQuery_SingleFieldEquals_ReturnsExactCount()
+        {
+            MyMoney money = BuildMoneyWithCategorizedTransactions();
+
+            var query = new[]
+            {
+                new QueryRow { Field = Field.Category, Operation = Operation.Equals, Value = &quot;Food:Groceries&quot; }
+            };
+
+            IList&lt;Transaction&gt; result = money.ExecuteQuery(query);
+
+            Assert.That(result.Count, Is.EqualTo(3), &quot;Expected exactly the 3 seeded Groceries transactions.&quot;);
+        }
+
+        [Test]
+        public void ExecuteQuery_NoMatchingValue_ReturnsEmpty()
+        {
+            MyMoney money = BuildMoneyWithCategorizedTransactions();
+
+            var query = new[]
+            {
+                new QueryRow { Field = Field.Category, Operation = Operation.Equals, Value = &quot;Nonexistent:Category&quot; }
+            };
+
+            IList&lt;Transaction&gt; result = money.ExecuteQuery(query);
+
+            Assert.That(result.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ExecuteQuery_TwoRowsWithAndConjunction_NarrowsResult()
+        {
+            MyMoney money = BuildMoneyWithCategorizedTransactions();
+
+            var query = new[]
+            {
+                new QueryRow { Field = Field.Category, Operation = Operation.Equals, Value = &quot;Food:Groceries&quot; },
+                new QueryRow { Field = Field.Payment, Operation = Operation.GreaterThan, Value = &quot;21.00&quot;, Conjunction = Conjunction.And }
+            };
+
+            IList&lt;Transaction&gt; result = money.ExecuteQuery(query);
+
+            Assert.That(result.Count, Is.EqualTo(1), &quot;Expected exactly 1 Groceries transaction with a payment greater than 21.00 (the -22.00 and -21.00 rows, whichever the Payment field's sign convention counts).&quot;);
+        }
+    }
+}
+</code></pre>
+<p>Note on Step 2's third test: <code>Field.Payment</code> and the exact sign convention for expense amounts needs confirming — before running, read <code>Money.cs</code>'s <code>ExecuteQuery</code> implementation (search <code>case Field.Payment</code>) to confirm whether <code>Payment</code> compares the raw signed <code>Amount</code> or an absolute value, and adjust the expected count/threshold to match reality, not a guess.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run tests, fix based on actual <code>ExecuteQuery</code> semantics, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~ExecuteQueryTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Write the QuickFilterParser test using Step 1's findings</strong></li>
+</ul>
+<p>Using the concrete <code>FilteredObservableCollection&lt;Transaction&gt;</code> subclass found in Step 1, add a test class to the same file exercising <code>QuickFilterParser&lt;Transaction&gt;.Parse</code> with a literal match, an <code>and</code>, an <code>or</code>, and a quoted literal containing an operator word (the tracking doc's <code>"costco &amp;gas"</code> escaping example) — each assertion checking <code>Filter&lt;Transaction&gt;.IsMatch(collection, transaction)</code> against the concrete collection instance. Write this test only after Step 1's read confirms the exact construction path; do not guess the collection's constructor.</p>
+<ul>
+<li>[ ] <strong>Step 5: Write the one thin FlaUI test for Quick Search</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/QuickSearchFlaUiTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Input;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+
+namespace Walkabout.UITests.Basics
+{
+    [TestFixture]
+    public class QuickSearchFlaUiTests
+    {
+        private (string ScratchPath, string RegisteredName) db;
+
+        [SetUp]
+        public void SetUp()
+        {
+            this.db = BasicsTestSetup.OpenFreshDatabase(&quot;QuickSearchFlaUiTests Fixture&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BasicsTestSetup.CleanUpDatabase(this.db.ScratchPath, this.db.RegisteredName);
+        }
+
+        [Test]
+        public void TypingIntoQuickSearch_FiltersTransactionGridToMatchingPayeeOnly()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // Expected result is source-derived: BasicsFixtureBuilder seeds exactly one
+            // transaction whose payee is &quot;AMC THEATRES 1234&quot; (see BasicsFixtureBuilder.cs).
+            AutomationElement quickSearchBox = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;QuickFilterTextBox&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(quickSearchBox, Is.Not.Null, &quot;Quick Search box not found - confirm its real AutomationId via Source/WPF/MyMoney's XAML before adjusting this test.&quot;);
+
+            quickSearchBox.AsTextBox().Enter(&quot;AMC&quot;);
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement[] visibleRows = mainWindow.FindAllDescendants(cf =&gt; cf.ByControlType(FlaUI.Core.Definitions.ControlType.DataItem));
+            Assert.That(visibleRows.Length, Is.EqualTo(1), &quot;Expected exactly 1 visible transaction row after filtering to 'AMC'.&quot;);
+        }
+    }
+}
+</code></pre>
+<p>Note: <code>QuickFilterTextBox</code> is a placeholder automation ID pending confirmation — before running this test, find the real <code>AutomationId</code>/<code>x:Name</code> of the Quick Search textbox in <code>Source/WPF/MyMoney</code>'s XAML (search for the control bound to quick-filter text) and substitute it. This is real reconnaissance work, not a guess left in the final test.</p>
+<ul>
+<li>[ ] <strong>Step 6: Extract the shared <code>OpenFixtureDatabase.Open</code> helper (used by every later FlaUI test)</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/OpenFixtureDatabase.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.Linq;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+
+namespace Walkabout.UITests.Basics
+{
+    internal static class OpenFixtureDatabase
+    {
+        internal static void Open(Window mainWindow, string registeredName)
+        {
+            AutomationElement fileMenu = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;File&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            fileMenu.Patterns.ExpandCollapse.Pattern.Expand();
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement openItem = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;MenuFileOpen&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            openItem.Patterns.Invoke.Pattern.Invoke();
+
+            Window openDialog = Retry.WhileNull(
+                () =&gt; mainWindow.ModalWindows.FirstOrDefault(),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(openDialog, Is.Not.Null, &quot;Open Database dialog did not appear.&quot;);
+
+            var listBox = openDialog.FindFirstDescendant(cf =&gt; cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            listBox.Select(registeredName);
+
+            AutomationElement openButton = Retry.WhileNull(
+                () =&gt; openDialog.FindFirstDescendant(cf =&gt; cf.ByAutomationId(&quot;ButtonOk&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            openButton.Patterns.Invoke.Pattern.Invoke();
+
+            Retry.WhileFalse(
+                () =&gt; mainWindow.Title.IndexOf(registeredName, StringComparison.OrdinalIgnoreCase) &gt;= 0,
+                TimeSpan.FromSeconds(10));
+        }
+    }
+}
+</code></pre>
+<p>Refactor Task 1's <code>BasicsSmokeTests.cs</code> to call <code>OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName)</code> instead of its inline copy of the same logic, removing the duplication.</p>
+<ul>
+<li>[ ] <strong>Step 7: Run the FlaUI test (autonomous — bootstrap already happened in Task 1)</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~QuickSearchFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 8: Update tracking doc Status, commit</strong></li>
+</ul>
+<p>Update the "Quick Search &amp; Advanced Queries" rows' <code>Status</code> in the tracking doc, then:</p>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/QuickSearchQueryTests.cs Source/WPF/UITests/Basics/QuickSearchFlaUiTests.cs Source/WPF/UITests/Basics/OpenFixtureDatabase.cs Source/WPF/UITests/Basics/BasicsSmokeTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Quick Search/ExecuteQuery business-layer tests and one FlaUI wiring test&quot;
+</code></pre>
+<hr />
+<h2 id="task-4-categories-business-layer-tests">Task 4: Categories business-layer tests<a class="headerlink" href="#task-4-categories-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/CategoriesTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Categories.GetOrCreateCategory(string name, CategoryType type)</code> → <code>Category</code>; <code>Category.OnDelete()</code>; <code>MyMoney.Transactions.ReCategorize</code>... — confirm exact <code>ReCategorize</code> owner: <code>Money.cs:12270</code> shows <code>public void ReCategorize(Category oldCategory, Category newCategory)</code> as an instance method; confirm which class owns it (search context around line 12270) before assuming it's on <code>Transaction</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm <code>ReCategorize</code>'s owning type</strong></li>
+</ul>
+<p>Run: <code>sed -n '12250,12275p' Source/WPF/MyMoney.Business/Money.cs</code> and read enough surrounding context to identify the enclosing <code>class</code>. Use that exact type in Step 2's test.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/CategoriesTests.cs</code> with these cases (write real bodies for each, following <code>AutoCategorizationTests.cs</code>'s style — fresh <code>MyMoney</code> per test):</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class CategoriesTests
+    {
+        [Test]
+        public void GetOrCreateCategory_ColonSeparatedName_CreatesParentAndChild()
+        {
+            var money = new MyMoney();
+
+            Category child = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+
+            Assert.That(child.Name, Is.EqualTo(&quot;Groceries&quot;));
+            Assert.That(child.ParentCategory, Is.Not.Null);
+            Assert.That(child.ParentCategory.Name, Is.EqualTo(&quot;Food&quot;));
+        }
+
+        [Test]
+        public void GetOrCreateCategory_CalledTwiceWithSameName_ReturnsSameInstance()
+        {
+            var money = new MyMoney();
+
+            Category first = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+            int countAfterFirst = money.Categories.Count;
+            Category second = money.Categories.GetOrCreateCategory(&quot;Food:Groceries&quot;, CategoryType.Expense);
+
+            Assert.That(second, Is.SameAs(first), &quot;Calling GetOrCreateCategory twice with the same name must not create a duplicate.&quot;);
+            Assert.That(money.Categories.Count, Is.EqualTo(countAfterFirst));
+        }
+
+        [Test]
+        public void OnDelete_CategoryWithNoTransactions_RemovesItImmediately()
+        {
+            var money = new MyMoney();
+            Category unused = money.Categories.GetOrCreateCategory(&quot;Unused&quot;, CategoryType.Expense);
+            int countBefore = money.Categories.Count;
+
+            unused.OnDelete();
+
+            Assert.That(money.Categories.Count, Is.EqualTo(countBefore - 1));
+        }
+
+        [Test]
+        public void ReCategorize_MovesAllTransactionsFromOldToNewCategory()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            Category oldCategory = money.Categories.GetOrCreateCategory(&quot;Fun:Videos&quot;, CategoryType.Expense);
+            Category newCategory = money.Categories.GetOrCreateCategory(&quot;Fun:Movies&quot;, CategoryType.Expense);
+
+            for (int i = 0; i &lt; 2; i++)
+            {
+                var t = new Transaction();
+                t.Account = account;
+                t.Date = System.DateTime.Now;
+                t.Amount = -10.00M - i;
+                t.Category = oldCategory;
+                money.Transactions.AddTransaction(t);
+            }
+
+            money.ReCategorize(oldCategory, newCategory);
+
+            int stillOnOldCategory = 0;
+            int nowOnNewCategory = 0;
+            foreach (Transaction t in money.Transactions)
+            {
+                if (t.Category == oldCategory) stillOnOldCategory++;
+                if (t.Category == newCategory) nowOnNewCategory++;
+            }
+
+            Assert.That(stillOnOldCategory, Is.EqualTo(0), &quot;No transaction should remain on the old category.&quot;);
+            Assert.That(nowOnNewCategory, Is.EqualTo(2), &quot;Both transactions should now be on the new category.&quot;);
+        }
+    }
+}
+</code></pre>
+<p>If Step 1 found <code>ReCategorize</code> on a different type than <code>MyMoney</code> (e.g. <code>Transactions</code>), change <code>money.ReCategorize(...)</code> to the correct call site accordingly before running.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run tests to verify they pass (or reveal a real bug)</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CategoriesTests"</code></p>
+<p>If <code>GetOrCreateCategory_CalledTwiceWithSameName_ReturnsSameInstance</code> fails, that's real information about the API's actual contract — read the implementation, and if it genuinely doesn't deduplicate, rewrite the test to assert the real behavior (documenting reality) rather than forcing a false pass.</p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/CategoriesTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Categories business-layer tests (GetOrCreateCategory, OnDelete, ReCategorize)&quot;
+</code></pre>
+<hr />
+<h2 id="task-5-categories-flaui-tests">Task 5: Categories FlaUI tests<a class="headerlink" href="#task-5-categories-flaui-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/CategoriesFlaUiTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>BasicsTestSetup.OpenFreshDatabase</code>/<code>CleanUpDatabase</code> (Task 1), <code>OpenFixtureDatabase.Open</code> (Task 3), <code>BasicsAppSession.MainWindow</code> (Task 1).</p>
+<ul>
+<li>[ ] <strong>Step 1: Read the Categories panel's rename-collision UI to confirm exact automation IDs</strong></li>
+</ul>
+<p>Run: <code>grep -rn "AutomationId\|x:Name" Source/WPF/MyMoney/Controls/CategoriesControl.xaml 2&gt;/dev/null || find Source/WPF/MyMoney -iname "*Categories*.xaml"</code> to locate the real control and its element names before writing Step 2 — this codebase's exact <code>AutomationId</code> values must come from reading the XAML, not guessing.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/CategoriesFlaUiTests.cs</code> with (using automation IDs confirmed in Step 1 in place of any placeholder below):</p>
+<pre><code class="language-csharp">using System;
+using System.Linq;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Input;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+
+namespace Walkabout.UITests.Basics
+{
+    [TestFixture]
+    public class CategoriesFlaUiTests
+    {
+        private (string ScratchPath, string RegisteredName) db;
+
+        [SetUp]
+        public void SetUp()
+        {
+            this.db = BasicsTestSetup.OpenFreshDatabase(&quot;CategoriesFlaUiTests Fixture&quot;);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BasicsTestSetup.CleanUpDatabase(this.db.ScratchPath, this.db.RegisteredName);
+        }
+
+        [Test]
+        public void RenamingCategoryToExistingName_IsRejected()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // Expected result is source-derived: BasicsFixtureBuilder seeds both &quot;Fun:Movies&quot;
+            // and &quot;Fun:Videos&quot; under the same parent, so attempting to rename Movies to
+            // &quot;Videos&quot; must not create a second same-named sibling.
+            AutomationElement moviesNode = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Movies&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            Assert.That(moviesNode, Is.Not.Null, &quot;Expected 'Movies' category node in the Categories panel.&quot;);
+
+            moviesNode.Click();
+            Keyboard.Type(VirtualKeyShort.F2);
+            Wait.UntilInputIsProcessed();
+            Keyboard.Type(&quot;Videos&quot;);
+            Keyboard.Type(VirtualKeyShort.ENTER);
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement stillMovies = mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Movies&quot;));
+            AutomationElement videosNodes = mainWindow.FindAllDescendants(cf =&gt; cf.ByName(&quot;Videos&quot;)).Length == 1
+                ? mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Videos&quot;))
+                : null;
+
+            Assert.That(stillMovies, Is.Not.Null, &quot;'Movies' node should still exist - the rename-onto-an-existing-name should have been rejected, not silently merged.&quot;);
+            Assert.That(mainWindow.FindAllDescendants(cf =&gt; cf.ByName(&quot;Videos&quot;)).Length, Is.EqualTo(1), &quot;Expected exactly 1 'Videos' node - no duplicate created by the rejected rename.&quot;);
+        }
+
+        [Test]
+        public void CancelOnCategoryDialog_LeavesCategoryUnchanged()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            int categoryCountBefore = mainWindow.FindAllDescendants(
+                cf =&gt; cf.ByControlType(FlaUI.Core.Definitions.ControlType.TreeItem)).Length;
+
+            AutomationElement moviesNode = Retry.WhileNull(
+                () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Movies&quot;)),
+                TimeSpan.FromSeconds(5)).Result;
+            moviesNode.Click();
+            Keyboard.Type(VirtualKeyShort.F2);
+            Wait.UntilInputIsProcessed();
+            Keyboard.Type(&quot;Should Not Apply&quot;);
+            Keyboard.Type(VirtualKeyShort.ESCAPE);
+            Wait.UntilInputIsProcessed();
+
+            AutomationElement stillMovies = mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(&quot;Movies&quot;));
+            Assert.That(stillMovies, Is.Not.Null, &quot;Escape/Cancel during rename must leave the category name unchanged.&quot;);
+            int categoryCountAfter = mainWindow.FindAllDescendants(
+                cf =&gt; cf.ByControlType(FlaUI.Core.Definitions.ControlType.TreeItem)).Length;
+            Assert.That(categoryCountAfter, Is.EqualTo(categoryCountBefore), &quot;Cancel must not change the category count.&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Run tests, adjust automation IDs/interaction sequence based on real findings from Step 1, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~CategoriesFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/CategoriesFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Categories FlaUI wiring tests (rename-collision rejection, cancel)&quot;
+</code></pre>
+<hr />
+<h2 id="task-6-currencies-securities-business-layer-tests">Task 6: Currencies &amp; Securities business-layer tests<a class="headerlink" href="#task-6-currencies-securities-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/CurrenciesTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Currencies.AddCurrency(int id)</code> → <code>Currency</code>; <code>Currencies.RemoveCurrency(Currency item, bool forceRemoveAfterSave = false)</code> → <code>bool</code>; <code>Currency.GetCultureForCurrency(string symbol)</code> → <code>CultureInfo</code> (static, <code>Money.cs:4524</code>).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/CurrenciesTests.cs</code>:</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class CurrenciesTests
+    {
+        [Test]
+        public void AddCurrency_ValidCode_Persists()
+        {
+            var money = new MyMoney();
+            int countBefore = money.Currencies.Count;
+
+            var currency = money.Currencies.AddCurrency(1);
+            currency.Symbol = &quot;EUR&quot;;
+            currency.Ratio = 0.92M;
+
+            Assert.That(money.Currencies.Count, Is.EqualTo(countBefore + 1));
+            Assert.That(money.Currencies.Count(c =&gt; c.Symbol == &quot;EUR&quot;), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void GetCultureForCurrency_UnrecognizedCode_FallsBackToCurrentCulture()
+        {
+            // Documents the actual (non-rejecting) behavior per the tracking doc's finding:
+            // there is no validation seam here, so this test asserts reality, not an
+            // aspirational &quot;should reject invalid codes&quot; contract.
+            var culture = Currency.GetCultureForCurrency(&quot;ZZZ&quot;);
+
+            Assert.That(culture, Is.EqualTo(System.Globalization.CultureInfo.CurrentCulture),
+                &quot;An unrecognized currency code is documented to silently fall back to CultureInfo.CurrentCulture, not throw or return null.&quot;);
+        }
+
+        [Test]
+        public void RemoveCurrency_ExistingUnusedCurrency_RemovesIt()
+        {
+            var money = new MyMoney();
+            var currency = money.Currencies.AddCurrency(1);
+            currency.Symbol = &quot;EUR&quot;;
+            int countBefore = money.Currencies.Count;
+
+            bool removed = money.Currencies.RemoveCurrency(currency);
+
+            Assert.That(removed, Is.True);
+            Assert.That(money.Currencies.Count, Is.EqualTo(countBefore - 1));
+        }
+
+        // Real, fixed exchange-rate snapshot (x-rates.com USD table, Jan 1 2026 06:18 UTC) and
+        // real public bank head-office info (gathered via WebSearch, 2026-09-18), used as test
+        // transaction data for this subsection only - per the user's explicit correction, this
+        // does NOT live in the shared BasicsFixtureBuilder (every other subsection's tests
+        // would otherwise carry it around for no reason). Split 5/5 with Task 7's FlaUI test:
+        // this business-layer test covers EUR/CAD/GBP/JPY/AUD; Task 7 covers the other 5.
+        [Test]
+        public void MultiCurrencyTransactions_ComputeCorrectUsdEquivalent()
+        {
+            var money = new MyMoney();
+
+            (string Symbol, decimal UsdRatio, string BankName)[] currencyData =
+            {
+                (&quot;EUR&quot;, 0.870649M, &quot;Intesa Sanpaolo&quot;),
+                (&quot;CAD&quot;, 1.398494M, &quot;Royal Bank of Canada&quot;),
+                (&quot;GBP&quot;, 0.746607M, &quot;HSBC&quot;),
+                (&quot;JPY&quot;, 156.885957M, &quot;MUFG Bank&quot;),
+                (&quot;AUD&quot;, 1.403242M, &quot;Commonwealth Bank of Australia&quot;),
+            };
+
+            foreach (var data in currencyData)
+            {
+                var currency = money.Currencies.AddCurrency(money.Currencies.Count + 1);
+                currency.Symbol = data.Symbol;
+                currency.Ratio = data.UsdRatio;
+
+                var account = money.Accounts.AddAccount($&quot;{data.BankName} ({data.Symbol})&quot;);
+                account.Type = AccountType.Checking;
+                account.Currency = data.Symbol;
+
+                var payee = money.Payees.AddPayee(money.Payees.Count() + 1);
+                payee.Name = data.BankName;
+
+                var deposit = new Transaction();
+                deposit.Account = account;
+                deposit.Date = new System.DateTime(2026, 1, 1);
+                deposit.Amount = 1000.00M; // 1000 units of the foreign currency
+                deposit.Payee = payee;
+                money.Transactions.AddTransaction(deposit);
+
+                // Currency.Ratio is documented as &quot;the current ratio of the given currency to
+                // the US dollar&quot; (Money.cs:4563-4565), i.e. 1 USD = Ratio units of the foreign
+                // currency - so dividing the foreign-currency amount by Ratio gives the USD
+                // equivalent. This is the source-documented formula, not a guess.
+                decimal expectedUsdEquivalent = deposit.Amount / currency.Ratio;
+
+                Assert.That(account.Currency, Is.EqualTo(data.Symbol));
+                Assert.That(deposit.Amount / currency.Ratio, Is.EqualTo(expectedUsdEquivalent),
+                    $&quot;USD equivalent for a {data.Symbol} 1000 deposit at {data.BankName} should compute via amount / ratio.&quot;);
+            }
+
+            Assert.That(money.Currencies.Count, Is.EqualTo(5));
+            Assert.That(money.Accounts.Count(a =&gt; a.Currency != null), Is.EqualTo(5));
+        }
+    }
+}
+</code></pre>
+<p>Note: <code>money.Currencies.Count(c =&gt; c.Symbol == "EUR")</code>-style LINQ calls require <code>using System.Linq;</code> — add it to this file's using directives if the build fails on ambiguous/missing <code>Count</code>/<code>FirstOrDefault</code> overloads (also check for an unrelated pre-existing ambiguity between <code>Enumerable.FirstOrDefault</code>/<code>Count</code> and <code>ImmutableArrayExtensions</code> if one surfaces — resolve by fully qualifying <code>System.Linq.Enumerable.Count(...)</code> at the call site if needed).</p>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~CurrenciesTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 3: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/CurrenciesTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Currencies business-layer tests (AddCurrency, RemoveCurrency, invalid-code fallback)&quot;
+</code></pre>
+<hr />
+<h2 id="task-7-currencies-securities-flaui-test">Task 7: Currencies &amp; Securities FlaUI test<a class="headerlink" href="#task-7-currencies-securities-flaui-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: same shared FlaUI helpers as Tasks 3/5. This task builds its own dedicated scratch
+  database (extending <code>BasicsFixtureBuilder</code>'s output with 5 more currency-denominated
+  accounts) rather than using the plain <code>BasicsTestSetup.OpenFreshDatabase</code> fixture as-is — see
+  Step 2.</p>
+<ul>
+<li>[ ] <strong>Step 1: Read the Currencies view's XAML to confirm automation IDs</strong></li>
+</ul>
+<p>Run: <code>find Source/WPF/MyMoney -iname "*Currenc*.xaml"</code> then <code>grep -n "AutomationId\|x:Name" &lt;that file&gt;</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI tests, using the other 5 real currencies/banks (CHF, MXN, INR, BRL, CNY — the EUR/CAD/GBP/JPY/AUD half already went into Task 6's business-layer test)</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.IO;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Input;
+using FlaUI.Core.Tools;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.UITests.Basics
+{
+    [TestFixture]
+    public class CurrenciesFlaUiTests
+    {
+        private (string ScratchPath, string RegisteredName) db;
+
+        // Real, fixed exchange-rate snapshot (x-rates.com USD table, Jan 1 2026 06:18 UTC) and
+        // real public bank head-office info (gathered via WebSearch, 2026-09-18) - the other 5
+        // of the 10 currencies/banks gathered for this plan, kept local to this FlaUI test
+        // rather than the shared BasicsFixtureBuilder per the user's explicit correction.
+        private static readonly (string Symbol, decimal UsdRatio, string BankName)[] CurrencyData =
+        {
+            (&quot;CHF&quot;, 0.822901M, &quot;UBS&quot;),
+            (&quot;MXN&quot;, 17.229844M, &quot;BBVA Mexico&quot;),
+            (&quot;INR&quot;, 96.008501M, &quot;State Bank of India&quot;),
+            (&quot;BRL&quot;, 5.143522M, &quot;Banco do Brasil&quot;),
+            (&quot;CNY&quot;, 6.701622M, &quot;Industrial and Commercial Bank of China&quot;),
+        };
+
+        [SetUp]
+        public void SetUp()
+        {
+            string scratchPath = Path.Combine(Path.GetTempPath(), $&quot;CurrenciesScratch-{Guid.NewGuid():N}.mmdb&quot;);
+            string displayName = &quot;CurrenciesFlaUiTests Fixture&quot;;
+
+            MyMoney money = BasicsFixtureBuilder.Build();
+            foreach (var data in CurrencyData)
+            {
+                var currency = money.Currencies.AddCurrency(money.Currencies.Count + 1);
+                currency.Symbol = data.Symbol;
+                currency.Ratio = data.UsdRatio;
+
+                var account = money.Accounts.AddAccount($&quot;{data.BankName} ({data.Symbol})&quot;);
+                account.Type = AccountType.Checking;
+                account.Currency = data.Symbol;
+            }
+
+            var sqliteDb = new SqliteDatabase();
+            sqliteDb.DatabasePath = scratchPath;
+            sqliteDb.Create();
+            sqliteDb.Save(money);
+
+            string registryPath = DatabaseRegistry.GetDefaultPath();
+            var registry = DatabaseRegistry.Load(registryPath);
+            registry.Databases[displayName] = new DatabaseEntry
+            {
+                Engine = DataEngineType.Sqlite,
+                Path = scratchPath,
+                TestDatabase = true
+            };
+            registry.Save();
+
+            this.db = (scratchPath, displayName);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BasicsTestSetup.CleanUpDatabase(this.db.ScratchPath, this.db.RegisteredName);
+        }
+
+        [Test]
+        public void CurrenciesView_ShowsAllFiveSeededCurrencyRows()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // Expected result is source-derived: this test seeded exactly 5 currency rows
+            // above (CHF, MXN, INR, BRL, CNY) - not observed from a prior run.
+            foreach (var data in CurrencyData)
+            {
+                AutomationElement row = Retry.WhileNull(
+                    () =&gt; mainWindow.FindFirstDescendant(cf =&gt; cf.ByName(data.Symbol)),
+                    TimeSpan.FromSeconds(5)).Result;
+                Assert.That(row, Is.Not.Null, $&quot;Expected a '{data.Symbol}' row in the Currencies view.&quot;);
+            }
+        }
+
+        [Test]
+        public void AddingNewCurrencyRow_PersistsWithEnteredCode()
+        {
+            Window mainWindow = BasicsAppSession.MainWindow;
+            OpenFixtureDatabase.Open(mainWindow, this.db.RegisteredName);
+
+            // &quot;SEK&quot; is deliberately not one of this test's 5 seeded currencies, so its
+            // expected pre/post state (0 rows, then exactly 1) is known in advance.
+            int sekRowsBefore = mainWindow.FindAllDescendants(cf =&gt; cf.ByName(&quot;SEK&quot;)).Length;
+            Assert.That(sekRowsBefore, Is.EqualTo(0));
+
+            // Navigate to View | Currencies and add a new row - exact automation IDs from Step 1.
+            // ... (interaction sequence using the AutomationIds confirmed in Step 1) ...
+
+            int sekRowsAfter = mainWindow.FindAllDescendants(cf =&gt; cf.ByName(&quot;SEK&quot;)).Length;
+            Assert.That(sekRowsAfter, Is.EqualTo(1));
+        }
+    }
+}
+</code></pre>
+<p>The second test's interaction sequence is intentionally left for Step 1's real automation IDs to fill in — write the actual <code>Keyboard.Type</code>/<code>Click</code> calls navigating to View | Currencies and adding a row once those IDs are confirmed, following <code>CategoriesFlaUiTests.cs</code>'s interaction style (find control, click, type, <code>Wait.UntilInputIsProcessed()</code>).</p>
+<ul>
+<li>[ ] <strong>Step 3: Run the tests, fill in Step 2's interaction sequence and adjust automation IDs to match Step 1's real findings, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~CurrenciesFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/CurrenciesFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Currencies FlaUI wiring tests using real CHF/MXN/INR/BRL/CNY snapshot data&quot;
+</code></pre>
+<hr />
+<h2 id="task-8-payees-aliases-business-layer-tests">Task 8: Payees &amp; Aliases business-layer tests<a class="headerlink" href="#task-8-payees-aliases-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/PayeesAndAliasesTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>MyMoney.FindAliasMatches(Alias alias, IEnumerable&lt;Transaction&gt; transactions)</code> → <code>IEnumerable&lt;PersistentObject&gt;</code> (<code>Money.cs:1774</code>); <code>MyMoney.ApplyAlias(Alias alias, IEnumerable&lt;Transaction&gt; transactions)</code> → <code>int</code> (<code>Money.cs:1808</code>); <code>MyMoney.FindSubsumedAliases(Alias alias)</code> → <code>IEnumerable&lt;Alias&gt;</code> (<code>Money.cs:1761</code>); <code>Aliases.AddAlias(int id)</code> → <code>Alias</code> (<code>Money.cs:3988</code>); <code>Alias.Pattern</code>/<code>Alias.AliasType</code>/<code>Alias.Payee</code> settable properties.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/PayeesAndAliasesTests.cs</code>:</p>
+<pre><code class="language-csharp">using System.Linq;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class PayeesAndAliasesTests
+    {
+        [Test]
+        public void ApplyAlias_MatchingTransactions_RenamesPayee()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var rawPayee = money.Payees.AddPayee(1);
+            rawPayee.Name = &quot;ACH DEBIT XFER 99182&quot;;
+            var cleanPayee = money.Payees.AddPayee(2);
+            cleanPayee.Name = &quot;Alaska Airlines&quot;;
+
+            var t = new Transaction();
+            t.Account = account;
+            t.Date = System.DateTime.Now;
+            t.Amount = -50.00M;
+            t.Payee = rawPayee;
+            money.Transactions.AddTransaction(t);
+
+            var alias = new Alias();
+            alias.Pattern = &quot;ACH DEBIT XFER 99182&quot;;
+            alias.AliasType = AliasType.None;
+            alias.Payee = cleanPayee;
+
+            int applied = money.ApplyAlias(alias, new[] { t });
+
+            Assert.That(applied, Is.EqualTo(1));
+            Assert.That(t.Payee, Is.SameAs(cleanPayee));
+        }
+
+        [Test]
+        public void FindAliasMatches_NoMatchingTransactions_ReturnsEmpty()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;Something Else Entirely&quot;;
+
+            var t = new Transaction();
+            t.Account = account;
+            t.Date = System.DateTime.Now;
+            t.Amount = -50.00M;
+            t.Payee = payee;
+            money.Transactions.AddTransaction(t);
+
+            var alias = new Alias();
+            alias.Pattern = &quot;PATTERN THAT MATCHES NOTHING&quot;;
+            alias.AliasType = AliasType.None;
+
+            var matches = money.FindAliasMatches(alias, new[] { t });
+
+            Assert.That(matches.Any(), Is.False);
+        }
+
+        [Test]
+        public void FindSubsumedAliases_BroaderRegexSubsumesNarrowerAliases()
+        {
+            var money = new MyMoney();
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;Alaska Airlines&quot;;
+
+            var narrow1 = money.Aliases.AddAlias(1);
+            narrow1.Pattern = &quot;ALASKA AIR 123&quot;;
+            narrow1.AliasType = AliasType.None;
+            narrow1.Payee = payee;
+
+            var narrow2 = money.Aliases.AddAlias(2);
+            narrow2.Pattern = &quot;ALASKA  AIRLINES&quot;;
+            narrow2.AliasType = AliasType.None;
+            narrow2.Payee = payee;
+
+            var broaderRegex = new Alias();
+            broaderRegex.Pattern = &quot;.*ALASKA[ ]+AIR.*&quot;;
+            broaderRegex.AliasType = AliasType.Regex;
+
+            var subsumed = money.FindSubsumedAliases(broaderRegex).ToList();
+
+            Assert.That(subsumed.Count, Is.EqualTo(2), &quot;Expected both narrow aliases to be subsumed by the broader regex.&quot;);
+            Assert.That(subsumed, Does.Contain(narrow1));
+            Assert.That(subsumed, Does.Contain(narrow2));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests, verify or correct against actual <code>FindSubsumedAliases</code>/<code>AliasType.Regex</code> matching semantics</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~PayeesAndAliasesTests"</code></p>
+<p>If <code>FindSubsumedAliases_BroaderRegexSubsumesNarrowerAliases</code> fails, read <code>Money.cs:1761</code>'s implementation directly — this is the scenario the tracking doc flagged as "entirely unverified today," so a failure here is genuinely new information, not a test-writing mistake to paper over. If the regex-matching semantics differ from what's assumed above (e.g. it compares patterns as strings rather than testing whether the narrow pattern's own literal text matches the broad regex), adjust the test to match the real, read implementation, and note the actual behavior in this task's commit message.</p>
+<ul>
+<li>[ ] <strong>Step 3: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/PayeesAndAliasesTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Payees and Aliases business-layer tests (ApplyAlias, FindAliasMatches, FindSubsumedAliases)&quot;
+</code></pre>
+<hr />
+<h2 id="task-9-payees-aliases-flaui-tests">Task 9: Payees &amp; Aliases FlaUI tests<a class="headerlink" href="#task-9-payees-aliases-flaui-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/PayeesFlaUiTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: same shared FlaUI helpers as prior FlaUI tasks.</p>
+<ul>
+<li>[ ] <strong>Step 1: Read the Rename Payee dialog's XAML to confirm automation IDs</strong></li>
+</ul>
+<p>Run: <code>find Source/WPF/MyMoney -iname "*RenamePayee*"</code> then read the <code>.xaml</code> for its controls' <code>AutomationId</code>/<code>x:Name</code> values (Auto-Rename checkbox, alias-pattern textbox, OK/Cancel buttons).</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/PayeesFlaUiTests.cs</code> with two tests, following the established <code>[SetUp]</code>/<code>[TearDown]</code>/<code>OpenFixtureDatabase.Open</code> structure:</p>
+<ol>
+<li><code>RenamePayeeWithAutoRename_CreatesAliasAndRenamesTransaction</code> — right-click the fixture's <code>AMC THEATRES 1234</code> transaction, invoke Rename Payee, type a clean name, check Auto-Rename, click OK; assert (source-derived: fixture seeds exactly this one raw payee string) the transaction's payee display now shows the clean name and a new alias exists.</li>
+<li><code>CancelRenamePayeeDialog_LeavesPayeeUnchanged</code> — same setup, but click Cancel; assert the payee name is unchanged and no new alias was created (standard dialog-lifecycle check).</li>
+<li><code>TitleBarCloseOnRenamePayeeDialog_LeavesPayeeUnchanged</code> — <code>RenamePayeeDialog</code> is a genuine modal window (unlike Categories' inline tree-edit in Task 5, which has no title bar), so the standard dialog-lifecycle convention's second check applies here: same setup as test 2, but close via the dialog window's standard title-bar Close button (<code>dialog.Close()</code> via FlaUI's <code>Window</code> API, or invoke the <code>TitleBar</code>'s close button <code>AutomationElement</code> directly) instead of the Cancel button; assert the same unchanged-state outcome as test 2.</li>
+</ol>
+<p>Use the exact automation IDs found in Step 1 in place of any assumed name.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run tests, adjust based on Step 1's real findings, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~PayeesFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/PayeesFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Payees FlaUI wiring tests (rename with auto-alias, cancel)&quot;
+</code></pre>
+<hr />
+<h2 id="task-10-splits-transfers-business-layer-tests">Task 10: Splits &amp; Transfers business-layer tests<a class="headerlink" href="#task-10-splits-transfers-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/SplitsAndTransfersTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>MyMoney.Transfer(Transaction t, Account to)</code> (<code>Money.cs:1580</code>); <code>MyMoney.RemoveTransfer(Transaction t)</code> (<code>Money.cs:1551</code>); <code>Splits.Unassigned</code>/<code>HasUnassigned</code> (<code>Money.cs:13295-13311</code>, exact owning type is <code>Splits</code>, confirm via the surrounding class declaration before use).</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm <code>Splits.Unassigned</code>'s owning type and how to obtain a <code>Splits</code> instance from a <code>Transaction</code></strong></li>
+</ul>
+<p>Run: <code>sed -n '13200,13260p' Source/WPF/MyMoney.Business/Money.cs</code> to find the enclosing class and how a <code>Transaction</code> exposes its <code>Splits</code>/<code>NonNullSplits</code> property.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/SplitsAndTransfersTests.cs</code>:</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class SplitsAndTransfersTests
+    {
+        [Test]
+        public void Split_NotSummingToTotal_ReportsUnassignedAmount()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var category = money.Categories.GetOrCreateCategory(&quot;Fun&quot;, CategoryType.Expense);
+
+            var t = new Transaction();
+            t.Account = account;
+            t.Date = System.DateTime.Now;
+            t.Amount = -100.00M;
+            var splits = t.NonNullSplits;
+            var s = splits.AddSplit();
+            s.Category = category;
+            s.Amount = -40.00M;
+            money.Transactions.AddTransaction(t);
+
+            Assert.That(splits.HasUnassigned, Is.True);
+            Assert.That(splits.Unassigned, Is.EqualTo(-60.00M));
+        }
+
+        [Test]
+        public void Transfer_CreatesLinkedTransactionInTargetAccount()
+        {
+            var money = new MyMoney();
+            var source = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var target = money.Accounts.AddAccount(&quot;Savings&quot;);
+
+            var t = new Transaction();
+            t.Account = source;
+            t.Date = System.DateTime.Now;
+            t.Amount = -200.00M;
+            money.Transactions.AddTransaction(t);
+
+            money.Transfer(t, target);
+
+            Assert.That(t.Transfer, Is.Not.Null, &quot;Source transaction should now have a Transfer link.&quot;);
+            Transaction linked = t.Transfer.Transaction;
+            Assert.That(linked.Account, Is.SameAs(target));
+            Assert.That(linked.Amount, Is.EqualTo(200.00M), &quot;The linked transaction in the target account should carry the opposite sign.&quot;);
+        }
+
+        [Test]
+        public void RemoveTransfer_UnreconciledBothSides_RemovesBothTransactions()
+        {
+            var money = new MyMoney();
+            var source = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var target = money.Accounts.AddAccount(&quot;Savings&quot;);
+
+            var t = new Transaction();
+            t.Account = source;
+            t.Date = System.DateTime.Now;
+            t.Amount = -200.00M;
+            money.Transactions.AddTransaction(t);
+            money.Transfer(t, target);
+            Transaction linked = t.Transfer.Transaction;
+
+            money.RemoveTransfer(t);
+
+            Assert.That(t.IsDeleted, Is.True);
+            Assert.That(linked.IsDeleted, Is.True);
+        }
+    }
+}
+</code></pre>
+<p>Confirmed during Task 1's implementation: the correct member is <code>Transaction.NonNullSplits</code> (not <code>GetOrCreateSplits</code>), already used above.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SplitsAndTransfersTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Investigate and add the reconciled-transfer-blocks-delete case</strong></li>
+</ul>
+<p>Per the spec's Open Questions, the exact enforcement point for "can't delete a transaction whose transfer partner is reconciled" hasn't been traced yet. Run: <code>grep -n "Reconciled" Source/WPF/MyMoney.Business/Money.cs | grep -i "transfer\|remove"</code> to find it. Add a fourth test, <code>RemoveTransfer_PartnerIsReconciled_IsBlocked</code>, asserting the actual enforcement found (exception type, or a bool return, or silent no-op — whichever the real code does), documenting genuine behavior.</p>
+<ul>
+<li>[ ] <strong>Step 5: Update tracking doc Status (including resolving the "not fully verified" note), commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/SplitsAndTransfersTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Splits and Transfers business-layer tests, resolve reconciled-transfer-delete enforcement&quot;
+</code></pre>
+<hr />
+<h2 id="task-11-splits-transfers-flaui-tests">Task 11: Splits &amp; Transfers FlaUI tests<a class="headerlink" href="#task-11-splits-transfers-flaui-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/SplitsAndTransfersFlaUiTests.cs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Read the Splits dialog and transaction grid's F6 handling for automation IDs</strong></li>
+</ul>
+<p>Run: <code>find Source/WPF/MyMoney -iname "*Split*.xaml"</code> and confirm the F6 balance shortcut's exact target control in <code>Source/WPF/MyMoney/Views/TransactionsView.xaml.cs</code> (already referenced in the spec — search <code>F6</code> in that file).</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI test</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/SplitsAndTransfersFlaUiTests.cs</code> with one test, <code>F6OnOutOfBalanceSplit_FillsRemainingAmount</code>: open the fixture (which seeds a split transaction with $60 unassigned per <code>BasicsFixtureBuilder</code>), navigate to that transaction's split row, focus the empty/partial split amount field, press F6, and assert (source-derived from the known seed amounts) the field now shows exactly <code>60.00</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run test, adjust automation IDs based on Step 1, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~SplitsAndTransfersFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/SplitsAndTransfersFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Splits and Transfers FlaUI wiring test (F6 balance)&quot;
+</code></pre>
+<hr />
+<h2 id="task-12-merging-duplicate-transactions-business-layer-tests">Task 12: Merging Duplicate Transactions business-layer tests<a class="headerlink" href="#task-12-merging-duplicate-transactions-business-layer-tests" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UnitTests/MergingDuplicateTransactionsTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>Transaction.FindPotentialDuplicate(Transaction t, IList&lt;Transaction&gt; tc, TimeSpan searchRange)</code> → <code>Transaction</code> (static, <code>Money.cs:9708</code>); <code>Transaction.Merge(Transaction t)</code> → <code>bool</code> (<code>Money.cs:12405</code>, merges <code>t</code>'s fields into <code>this</code> only where <code>this</code>'s own field is empty — confirmed by reading the implementation during planning).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UnitTests/MergingDuplicateTransactionsTests.cs</code>:</p>
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Tests
+{
+    [TestFixture]
+    public class MergingDuplicateTransactionsTests
+    {
+        [Test]
+        public void FindPotentialDuplicate_SameAmountAndCloseDate_ReturnsMatch()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var payee = money.Payees.AddPayee(1);
+            payee.Name = &quot;TARGET T-1234&quot;;
+
+            var existing = new Transaction();
+            existing.Account = account;
+            existing.Date = new DateTime(2026, 1, 20);
+            existing.Amount = -11.73M;
+            existing.Payee = payee;
+            existing.FITID = &quot;FID-A&quot;;
+            money.Transactions.AddTransaction(existing);
+
+            var incoming = new Transaction();
+            incoming.Account = account;
+            incoming.Date = new DateTime(2026, 1, 20);
+            incoming.Amount = -11.73M;
+            incoming.Payee = payee;
+            incoming.FITID = &quot;FID-B&quot;;
+
+            var candidates = new List&lt;Transaction&gt; { existing };
+            Transaction match = Transaction.FindPotentialDuplicate(incoming, candidates, TimeSpan.FromDays(3));
+
+            Assert.That(match, Is.SameAs(existing));
+        }
+
+        [Test]
+        public void Merge_PreservesCategoryFromOneSideAndMemoFromOther()
+        {
+            var money = new MyMoney();
+            var account = money.Accounts.AddAccount(&quot;Checking&quot;);
+            var category = money.Categories.GetOrCreateCategory(&quot;Shopping&quot;, CategoryType.Expense);
+
+            var survivor = new Transaction();
+            survivor.Account = account;
+            survivor.Date = new DateTime(2026, 1, 20);
+            survivor.Amount = -11.73M;
+            survivor.Memo = &quot;Original memo&quot;;
+            money.Transactions.AddTransaction(survivor);
+
+            var duplicate = new Transaction();
+            duplicate.Account = account;
+            duplicate.Date = new DateTime(2026, 1, 20);
+            duplicate.Amount = -11.73M;
+            duplicate.Category = category;
+            money.Transactions.AddTransaction(duplicate);
+
+            bool changed = survivor.Merge(duplicate);
+
+            Assert.That(changed, Is.True);
+            Assert.That(survivor.Category, Is.SameAs(category), &quot;Category should be copied from the duplicate since the survivor had none.&quot;);
+            Assert.That(survivor.Memo, Is.EqualTo(&quot;Original memo&quot;), &quot;Memo should be preserved from the survivor since it already had one.&quot;);
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~MergingDuplicateTransactionsTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 3: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UnitTests/MergingDuplicateTransactionsTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Merging Duplicate Transactions business-layer tests (FindPotentialDuplicate, Merge)&quot;
+</code></pre>
+<hr />
+<h2 id="task-13-merging-duplicate-transactions-flaui-test">Task 13: Merging Duplicate Transactions FlaUI test<a class="headerlink" href="#task-13-merging-duplicate-transactions-flaui-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/MergingDuplicateTransactionsFlaUiTests.cs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Read the duplicate-connector UI's automation IDs</strong></li>
+</ul>
+<p>Run: <code>grep -rln "Merge\b" Source/WPF/MyMoney/Views/*.xaml.cs</code> to find the duplicate-connector's click handler and its control's <code>AutomationId</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI test</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/MergingDuplicateTransactionsFlaUiTests.cs</code> with one test, <code>ClickingMergeOnDuplicateConnector_CollapsesToOneTransaction</code>: open the fixture (which seeds the two <code>TARGET T-1234</code> near-duplicates per <code>BasicsFixtureBuilder</code>), select one, find and click the Merge connector, and assert (source-derived: fixture seeds exactly 2 duplicate rows) exactly 1 <code>TARGET T-1234</code> transaction row remains afterward.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run test, adjust based on Step 1's findings, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~MergingDuplicateTransactionsFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/MergingDuplicateTransactionsFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Merging Duplicate Transactions FlaUI wiring test&quot;
+</code></pre>
+<hr />
+<h2 id="task-14-attachments-flaui-test-follow-up-issue">Task 14: Attachments FlaUI test + follow-up issue<a class="headerlink" href="#task-14-attachments-flaui-test-follow-up-issue" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/AttachmentsFlaUiTests.cs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: File the <code>AttachmentManager</code> extraction follow-up issue</strong></li>
+</ul>
+<p>Per the spec's non-goals, <code>AttachmentManager</code> isn't in <code>MyMoney.Business</code> and extracting it is out of scope for this pass. File a GitHub issue (same pattern as the original migration's deferred items — title, file:line evidence, cross-reference to the tracking doc's Attachments row) before writing this task's test, so the <code>Business-layer gap</code> status in the tracking doc has a concrete issue number to reference.</p>
+<ul>
+<li>[ ] <strong>Step 2: Seed one attachment via <code>BasicsFixtureBuilder</code> and add a FlaUI delete test</strong></li>
+</ul>
+<p>Read <code>Source/WPF/MyMoney/Attachments/AttachmentManager.cs</code> to find its lowest-level file-writing method, and add a small helper to <code>BasicsFixtureBuilder.Build()</code> (Task 1's file) that pre-creates one attachment file on disk for the seeded <code>AMC THEATRES 1234</code> transaction, matching whatever directory convention <code>AttachmentManager</code> expects (<code>&lt;dbname&gt;.Attachments/&lt;account&gt;/&lt;transactionId&gt;</code>, per the tracking doc). Then create <code>Source/WPF/UITests/Basics/AttachmentsFlaUiTests.cs</code> with one test, <code>DeletingAttachment_RemovesFileAndListEntry</code>: open the attachment dialog for that transaction, delete the pre-seeded attachment, and assert (source-derived: exactly one attachment was seeded) the attachment list is now empty and the underlying file no longer exists on disk.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run test, adjust based on real <code>AttachmentManager</code> directory-naming conventions found in Step 2, run again until passing</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~AttachmentsFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status (reference the filed issue number for the deferred extraction), commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/AttachmentsFlaUiTests.cs Source/WPF/MyMoney.TestSupport/BasicsFixtureBuilder.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Attachments FlaUI delete test, seed one attachment in BasicsFixtureBuilder&quot;
+</code></pre>
+<hr />
+<h2 id="task-15-sample-data-flaui-test">Task 15: Sample Data FlaUI test<a class="headerlink" href="#task-15-sample-data-flaui-test" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Create: <code>Source/WPF/UITests/Basics/SampleDataFlaUiTests.cs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Read the Help-menu Sample Data dialog's automation IDs</strong></li>
+</ul>
+<p>Run: <code>find Source/WPF/MyMoney -iname "*SampleData*"</code> and read the dialog's XAML.</p>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing FlaUI test</strong></li>
+</ul>
+<p>Create <code>Source/WPF/UITests/Basics/SampleDataFlaUiTests.cs</code> with two tests. The Sample Data dialog is a genuine modal window, so both checks from the standard dialog-lifecycle convention apply:</p>
+<ol>
+<li><code>PopulateSampleData_OnEmptyDatabase_AddsAccountsAndTransactions</code> — open a genuinely empty scratch database (not the Basics-seeded one — build this via a plain <code>new SqliteDatabase()</code> + <code>Create()</code> with no <code>BasicsFixtureBuilder</code> seeding), invoke Help | Populate Sample Data, confirm the dialog, and assert (source-derived: call <code>SampleDataLoader</code>/<code>SampleDataGenerator</code>'s already-tested output directly in the test's arrange step, per the spec's "Predicted results" convention, to compute the exact expected account count) that the Accounts panel now shows that same count.</li>
+<li>
+<p><code>CancelPopulateSampleDataDialog_LeavesEmptyDatabaseUnchanged</code> — same empty-database setup, but click Cancel (or the dialog's title-bar Close); assert the Accounts panel still shows zero accounts.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Run test, adjust based on real dialog automation IDs, run again until passing</strong></p>
+</li>
+</ol>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~SampleDataFlaUiTests"</code></p>
+<ul>
+<li>[ ] <strong>Step 4: Update tracking doc Status, commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/UITests/Basics/SampleDataFlaUiTests.cs docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;test: add Sample Data FlaUI wiring test (Populate Sample Data dialog)&quot;
+</code></pre>
+<hr />
+<h2 id="task-16-end-of-section-retro-and-tracking-doc-finalization">Task 16: End-of-section retro and tracking doc finalization<a class="headerlink" href="#task-16-end-of-section-retro-and-tracking-doc-finalization" title="Permanent link">#</a></h2>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Run the full Basics business-layer suite once, end to end</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~Walkabout.Tests.AutoCategorizationTests|FullyQualifiedName~Walkabout.Tests.ExecuteQueryTests|FullyQualifiedName~Walkabout.Tests.CategoriesTests|FullyQualifiedName~Walkabout.Tests.CurrenciesTests|FullyQualifiedName~Walkabout.Tests.PayeesAndAliasesTests|FullyQualifiedName~Walkabout.Tests.SplitsAndTransfersTests|FullyQualifiedName~Walkabout.Tests.MergingDuplicateTransactionsTests"</code>
+Expected: all PASS.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run the full Basics FlaUI suite once, end to end</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UITests/UITests.csproj --filter "FullyQualifiedName~Walkabout.UITests.Basics"</code>
+Expected: all PASS, unattended.</p>
+<ul>
+<li>[ ] <strong>Step 3: Spot-check code coverage on the transformation-style APIs touched this pass</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --collect:"XPlat Code Coverage"</code> and check the resulting coverage report for <code>FindSubsumedAliases</code>, <code>Transaction.Merge</code>, <code>AutoCategorization</code> — confirm no branch that was supposed to be hit (per each task's "confirm signature"/investigation steps) was actually missed.</p>
+<ul>
+<li>[ ] <strong>Step 4: Write the retro</strong></li>
+</ul>
+<p>In chat (not a new doc), answer: did any tracking-doc row's description turn out inaccurate once actually tested (e.g. <code>FindSubsumedAliases</code>'s real matching semantics, <code>Splits.Unassigned</code>'s exact member names, the reconciled-transfer-delete enforcement point found in Task 10)? Did any row need splitting? Note findings directly in the tracking doc's affected rows if their descriptions need correcting.</p>
+<ul>
+<li>[ ] <strong>Step 5: Final tracking-doc pass and commit</strong></li>
+</ul>
+<p>Confirm every Basics row's <code>Status</code> column reflects its real outcome (<code>Passing</code> with today's date, <code>Business-layer gap (deferred — issue #NN)</code>, or <code>Not automatable in this environment</code>) — no row should still read <code>Not started</code>.</p>
+<pre><code class="language-bash">git add docs/superpowers/specs/2026-09-18-flaui-ui-wiring-test-scenarios.md
+git commit -m &quot;docs: finalize Basics section status in FlaUI/business-layer scenario catalog&quot;
+</code></pre>
+<hr />
+<h2 id="task-17-consolidate-claudemds-things-that-have-been-gotten-wrong-before-section">Task 17: Consolidate CLAUDE.md's "Things that have been gotten wrong before" section<a class="headerlink" href="#task-17-consolidate-claudemds-things-that-have-been-gotten-wrong-before-section" title="Permanent link">#</a></h2>
+<p><strong>Why:</strong> this plan's own Tasks 1-16 added roughly 20+ gotcha entries to <code>CLAUDE.md</code> (it
+grew from ~100 lines at the start of this plan to 396+ lines / ~30KB by the end of Task 13
+alone), and <code>CLAUDE.md</code> is loaded into context on every session regardless of what's being
+worked on. Not every entry earns that permanent cost equally - some are durable domain/
+architecture knowledge, others are narrow FlaUI test-authoring mechanics only relevant when
+writing more FlaUI tests in this same area.</p>
+<p><strong>Files:</strong>
+- Modify: <code>CLAUDE.md</code>
+- Create: <code>docs/dev/flaui-basics-test-notes.md</code> (or fold into the <code>flaui-wpf-testing</code> skill's
+  own reference material, if that skill is user-level/shared rather than project-local -
+  confirm which before creating a new file)</p>
+<ul>
+<li>[ ] <strong>Step 1: Sort existing entries into two piles</strong></li>
+</ul>
+<p>Re-read every entry added since this plan started (everything from the <code>new Transaction()</code>/
+<code>Transaction(money.Transactions)</code> gotcha onward) and classify each as:
+- <strong>Durable domain/architecture knowledge</strong> - true regardless of what task someone's doing
+  in this codebase (e.g. <code>Category.Name</code> vs <code>Label</code>, the parented-<code>Transaction</code>-constructor
+  requirement, the dual-<code>IEnumerable&lt;T&gt;</code> <code>CS0411</code> ambiguity, <code>RemoveTransfer</code> only removing
+  one side, <code>Alias</code>'s eager regex construction, <code>Transactions.FindPotentialDuplicate</code>'s
+  index-based contract). These stay in <code>CLAUDE.md</code>.
+- <strong>FlaUI test-authoring mechanics</strong> - only relevant when writing/maintaining FlaUI tests in
+  this specific UI area (e.g. stale cell handles after an edit-mode template swap, the
+  toolbox-section <code>Expander</code>/<code>ExpandCollapse</code> pattern, <code>SelectionItem</code> vs <code>Click()</code>
+  reliability, the duplicate-connector Merge button having no <code>AutomationId</code>, the Currencies
+  grid's F4/one-Enter sequence, the "Save Changes" prompt on a second <code>Open()</code> in one
+  session). These move out.</p>
+<ul>
+<li>[ ] <strong>Step 2: Move the FlaUI-mechanics pile</strong></li>
+</ul>
+<p>Write them to <code>docs/dev/flaui-basics-test-notes.md</code> (or the <code>flaui-wpf-testing</code> skill's
+reference material - check <code>C:\Users\MarkBran\.claude\skills\flaui-wpf-testing\references\</code>
+for where this repo's other FlaUI findings already live before deciding). Preserve the
+reasoning ("why", not just "what") for each - these notes exist so a future FlaUI-test-writing
+session doesn't have to rediscover them the hard way. Add one link line in <code>CLAUDE.md</code> at the
+top of its own gotcha section pointing to wherever they landed.</p>
+<ul>
+<li>[ ] <strong>Step 3: Tighten the durable pile in place</strong></li>
+</ul>
+<p>For entries staying in <code>CLAUDE.md</code>, cut anything that's really just restating what the code
+already makes obvious, and merge near-duplicate entries discovered across different tasks
+(e.g. multiple entries touching <code>Transactions.ExecuteQuery</code>/<code>Transaction.Matches</code> semantics
+could likely consolidate into one).</p>
+<ul>
+<li>[ ] <strong>Step 4: Verify and commit</strong></li>
+</ul>
+<p>Confirm <code>CLAUDE.md</code> still reads coherently top to bottom (no dangling references to entries
+that moved), and that the new linked doc's content isn't duplicated back in <code>CLAUDE.md</code>. Run
+<code>dotnet build</code>/<code>dotnet test</code> is not needed here (docs-only change).</p>
+<pre><code class="language-bash">git add CLAUDE.md docs/dev/flaui-basics-test-notes.md
+git commit -m &quot;docs: consolidate CLAUDE.md gotchas, move FlaUI-specific mechanics to a linked doc&quot;
+</code></pre>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>

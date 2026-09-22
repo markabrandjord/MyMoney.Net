@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+    <link rel="canonical" href="https://clovett.github.io/MyMoney.Net/superpowers/plans/2026-09-16-persistence-concurrency-phase1/">
+    <link rel="shortcut icon" href="../../../img/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Persistence Concurrency — Phase 1 (Test Infra + Schema Foundation) Implementation Plan - MyMoney.Net</title>
+    <link href="../../../css/bootstrap-3.3.7.min.css" rel="stylesheet">
+    <link href="../../../css/font-awesome-4.7.0.css" rel="stylesheet">
+    <link href="../../../css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../../css/highlight.css">
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+        <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    <script src="../../../js/jquery-3.2.1.min.js"></script>
+    <script src="../../../js/bootstrap-3.3.7.min.js"></script>
+    <script src="../../../js/highlight.pack.js"></script>
+    
+    <base target="_top">
+    <script>
+      var base_url = '../../..';
+      var is_top_frame = false;
+        
+        var pageToc = [
+          {title: "Persistence Concurrency \u2014 Phase 1 (Test Infra + Schema Foundation) Implementation Plan", url: "#_top", children: [
+              {title: "Global Constraints", url: "#global-constraints" },
+              {title: "What\u0027s next", url: "#whats-next" },
+          ]},
+        ];
+
+    </script>
+    <script src="../../../js/base.js"></script>
+      <script src="https://consentdeliveryfd.azurefd.net/mscc/lib/v2/wcp-consent.js"></script> 
+</head>
+
+<body>
+<script>
+if (is_top_frame) { $('body').addClass('wm-top-page'); }
+</script>
+
+
+
+<div class="container-fluid wm-page-content">
+  <a name="_top"></a>
+    
+
+    
+
+    <h1 id="persistence-concurrency-phase-1-test-infra-schema-foundation-implementation-plan">Persistence Concurrency — Phase 1 (Test Infra + Schema Foundation) Implementation Plan<a class="headerlink" href="#persistence-concurrency-phase-1-test-infra-schema-foundation-implementation-plan" title="Permanent link">#</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Land the two test-infrastructure prerequisites (#28, #25) and the schema-level
+foundation (rowversion/version columns, missing foreign keys, missing indexes — issue #24) that
+every later phase of the persistence-concurrency redesign depends on.</p>
+<p><strong>Architecture:</strong> No behavior changes to <code>IDatabase</code>'s write API yet — this phase only makes the
+existing generic table-creation mechanism (<code>ColumnMapping</code>/<code>TableMapping</code> in <code>MyMoney.Business</code>,
+<code>GetCreateTableScript</code> in <code>MyMoney.Data</code>) capable of emitting a per-row version column, foreign
+keys, and secondary indexes, and adds the object-model storage slot (<code>PersistentObject.RowVersion</code>)
+those future primitives will read and check. Nothing yet calls or enforces the version check — that
+lands in Phase 2, alongside the new <code>SaveOne</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> primitives themselves, since
+each primitive's write logic and its conflict check are naturally the same piece of code.</p>
+<p><strong>Tech Stack:</strong> .NET 10 (<code>net10.0-windows7.0</code>), <code>Microsoft.Data.SqlClient</code>, <code>System.Data.SQLite</code>,
+NUnit 4.6.1.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md</code> (R4's schema
+groundwork, R6, R7's #24 fold-in)</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">#</a></h2>
+<ul>
+<li>SQL Server support stays DEBUG-only; Release always uses SQLite. No change to that in this phase.</li>
+<li>The generic <code>GetCreateTableScript</code>/<code>ColumnMapping</code> mechanism must stay engine-agnostic in the
+  parts it already handles (existing column emission) — only the new version/FK/index emission
+  is engine-branching, and it branches on the existing <code>DbFlavor</code> enum, not a new abstraction.
+  New tables (<code>Money.cs</code>) require the <code>[TableMapping]</code>/<code>[ColumnMapping]</code> attribute style already
+  used by every other persistent entity — no <code>Fluent</code>/code-first-style mapping introduced here.</li>
+<li>This phase adds no new <code>IDatabase</code> methods and does not touch <code>Save(MyMoney)</code> or any <code>UpdateXxx</code>/
+  <code>ReadXxx</code> override — those are Phase 2+. Nothing in this phase is user-visible.</li>
+<li>Every task must leave <code>dotnet build Source/WPF/MyMoney.sln</code> at 0 errors and
+  <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> green (see Task 2's Global Constraint on why <code>-m:1</code>).</li>
+</ul>
+<hr />
+<h3 id="task-1-make-sqlserverdatabasecontracttests-discoverable-28">Task 1: Make <code>SqlServerDatabaseContractTests</code> discoverable (#28)<a class="headerlink" href="#task-1-make-sqlserverdatabasecontracttests-discoverable-28" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs:31-32</code>
+- Modify: <code>docs/dev/index.md</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing new.
+- Produces: nothing new — this task only adds test-discovery metadata, no production code.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the NUnit category attribute</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs</code>, change:</p>
+<pre><code class="language-csharp">    [TestFixture]
+    public class SqlServerDatabaseContractTests : DatabaseContractTests
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">    [TestFixture]
+    [Category(&quot;RequiresSqlServer&quot;)]
+    public class SqlServerDatabaseContractTests : DatabaseContractTests
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify the category is honored by an explicit filter</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter "TestCategory=RequiresSqlServer" --list-tests</code>
+Expected: lists every test method in <code>SqlServerDatabaseContractTests</code> and nothing from
+<code>MockDatabaseContractTests</code>/<code>SqliteDatabaseContractTests</code>/<code>MockDatabaseSmokeTests</code> (none of those
+carry the category).</p>
+<ul>
+<li>[ ] <strong>Step 3: Document how to run it</strong></li>
+</ul>
+<p>Add a new subsection to <code>docs/dev/index.md</code> (near wherever the existing <code>dotnet test</code> invocations
+are documented) with this exact content:</p>
+<pre><code class="language-markdown">### Running the SQL Server contract tests
+
+`SqlServerDatabaseContractTests` (in `MyMoney.TestSupport`) is tagged
+`[Category(&quot;RequiresSqlServer&quot;)]` and is **not** run by
+`dotnet test Source/WPF/UnitTests/UnitTests.csproj` or CI. It requires a real SQL Server instance
+and three environment variables (`MYMONEY_TEST_SQLSERVER_USER_CONNECTION`,
+`MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION`, `MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE=1`) — it fails
+fast, rather than skipping, if any are unset. Run it explicitly:
+
+    dotnet test Source/WPF/MyMoney.TestSupport/MyMoney.TestSupport.csproj --filter &quot;TestCategory=RequiresSqlServer&quot;
+
+This is a manual/local verification step, not part of CI — CI has no SQL Server instance to point
+it at.
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.TestSupport/SqlServerDatabaseContractTests.cs docs/dev/index.md
+git commit -m &quot;Tag SqlServerDatabaseContractTests RequiresSqlServer and document how to run it (closes #28)&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-stop-dotnet-tests-project-parallelism-from-racing-the-two-sql-server-test-projects-25">Task 2: Stop <code>dotnet test</code>'s project parallelism from racing the two SQL-Server test projects (#25)<a class="headerlink" href="#task-2-stop-dotnet-tests-project-parallelism-from-racing-the-two-sql-server-test-projects-25" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>docs/dev/index.md</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing new.
+- Produces: nothing new — documentation-only fix, matching the root cause (MSBuild's cross-project
+  test-host parallelism, not anything fixable inside a <code>.runsettings</code> or NUnit attribute, since the
+  collision is between two separate OS processes each starting a fresh <code>MyMoney()</code> with the same
+  deterministic ID counters against one shared live database).</p>
+<ul>
+<li>[ ] <strong>Step 1: Confirm the documented fix still reproduces/resolves correctly</strong></li>
+</ul>
+<p>Run (requires <code>MYMONEY_TEST_SQLSERVER_USER_CONNECTION</code>/<code>MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION</code>/
+<code>MYMONEY_TEST_ALLOW_DESTRUCTIVE_WIPE=1</code> set):
+<code>dotnet test Source/WPF/MyMoney.sln</code>
+Expected: intermittent PK-violation failures in <code>UnitTests</code> are possible (this is the bug, not a
+regression you're introducing).</p>
+<p>Then run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code>
+Expected: fully green, no code changes — <code>-m:1</code> forces MSBuild to run one project's test host at a
+time, so <code>MyMoney.TestSupport</code> and <code>UnitTests</code> never write to the shared live SQL Server
+concurrently.</p>
+<ul>
+<li>[ ] <strong>Step 2: Document <code>-m:1</code> as required whenever SQL Server env vars are set</strong></li>
+</ul>
+<p>Add to <code>docs/dev/index.md</code>, immediately after (or near) the existing <code>dotnet test</code> command
+reference:</p>
+<pre><code class="language-markdown">### Required flag when SQL Server env vars are set
+
+`dotnet test Source/WPF/MyMoney.sln` runs each test project's host as a separate process. When
+`MYMONEY_TEST_SQLSERVER_USER_CONNECTION`/`MYMONEY_TEST_SQLSERVER_ADMIN_CONNECTION` are set,
+`MyMoney.TestSupport` (home of `SqlServerDatabaseContractTests`) and `UnitTests` (home of
+`SqlServerStoredProcDatabaseTests`) can run concurrently and race against the same live database —
+both start a fresh `MyMoney()` whose ID counters begin from the same deterministic value, so their
+first-inserted rows can collide on primary key. Always pass `-m:1` to force serial project
+execution when those env vars are set:
+
+    dotnet test Source/WPF/MyMoney.sln -m:1
+
+This is not needed when the SQL Server env vars are unset (those test fixtures skip/no-op) or when
+running a single test project directly.
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add docs/dev/index.md
+git commit -m &quot;Document -m:1 as required for dotnet test when SQL Server env vars are set (closes #25)&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-add-rowversionversion-column-emission-to-the-shared-schema-generator">Task 3: Add <code>RowVersion</code>/<code>Version</code> column emission to the shared schema generator<a class="headerlink" href="#task-3-add-rowversionversion-column-emission-to-the-shared-schema-generator" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs:324-343</code> (<code>LazyCreateTables</code>), <code>:345-378</code>
+  (<code>GetCreateTableScript</code>), <code>:380-</code> (<code>CreateOrUpdateTable</code>)
+- Modify: <code>Source/WPF/MyMoney.Data/Properties/AssemblyInfo.cs</code> (add <code>InternalsVisibleTo</code>)
+- Modify: <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs:552-</code> (<code>CreateOrUpdateTable</code>), and its second
+  call site at <code>:651</code>
+- Test: <code>Source/WPF/UnitTests/SqlMappingTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>DbFlavor</code> enum (<code>MyMoney.Business/IDatabase.cs:12</code>), existing <code>TableMapping</code>/
+  <code>ColumnMapping</code> (<code>MyMoney.Business/Mapping.cs</code>).
+- Produces: <code>SqlDatabase.GetCreateTableScript(TableMapping mapping, DbFlavor flavor)</code> (signature
+  change — both call sites updated in this task) — Task 4/5 (FK/index emission) and Phase 2's
+  per-entity read/write wiring both depend on this signature and on the reserved column name
+  <code>RowVersion</code> (SQL Server) / <code>Version</code> (SQLite) existing in every table.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/UnitTests/SqlMappingTests.cs</code> (create the file if it doesn't exist yet — check
+first with <code>Test-Path</code> before assuming):</p>
+<pre><code class="language-csharp">using NUnit.Framework;
+using Walkabout.Data;
+
+namespace Walkabout.Data.Tests
+{
+    [TestFixture]
+    public class SqlMappingTests
+    {
+        [TableMapping(TableName = &quot;MappingTestTable&quot;)]
+        private class FakeRow
+        {
+            [ColumnMapping(ColumnName = &quot;Id&quot;, IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_SqlServer_AppendsRowVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Contain(&quot;[RowVersion] ROWVERSION NOT NULL&quot;));
+        }
+
+        [Test]
+        public void GetCreateTableScript_Sqlite_AppendsIntegerVersionColumn()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeRow) };
+            string script = SqlDatabase.GetCreateTableScript(mapping, DbFlavor.Sqlite);
+            Assert.That(script, Does.Contain(&quot;[Version] INTEGER NOT NULL DEFAULT 1&quot;));
+            Assert.That(script, Does.Not.Contain(&quot;ROWVERSION&quot;));
+        }
+    }
+}
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlMappingTests"</code>
+Expected: FAIL with a compile error — <code>GetCreateTableScript</code> doesn't yet take a <code>DbFlavor</code>
+parameter, and (confirmed: no <code>InternalsVisibleTo</code> exists anywhere in <code>MyMoney.Data</code> today) the
+test project can't see it yet either. Add, in
+<code>Source/WPF/MyMoney.Data/Properties/AssemblyInfo.cs</code>:</p>
+<pre><code class="language-csharp">using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo(&quot;UnitTests&quot;)]
+</code></pre>
+<p>Re-run the same command — it should now fail only on the missing <code>DbFlavor</code> parameter, not on
+visibility.</p>
+<ul>
+<li>[ ] <strong>Step 3: Change <code>GetCreateTableScript</code>'s signature and add version-column emission</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, change:</p>
+<pre><code class="language-csharp">        internal static string GetCreateTableScript(TableMapping mapping)
+        {
+            ...
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(string.Format(&quot;create table [{0}] (&quot;, mapping.TableName));
+            bool first = true;
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                // generate SQL...
+                if (!first)
+                {
+                    sb.AppendLine(&quot;,&quot;);
+                }
+                column.GetSqlDefinition(sb);
+
+                first = false;
+            }
+            sb.AppendLine();
+            sb.AppendLine(&quot;)&quot;);
+            return sb.ToString();
+        }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">        internal static string GetCreateTableScript(TableMapping mapping, DbFlavor flavor)
+        {
+            ...
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(string.Format(&quot;create table [{0}] (&quot;, mapping.TableName));
+            bool first = true;
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                // generate SQL...
+                if (!first)
+                {
+                    sb.AppendLine(&quot;,&quot;);
+                }
+                column.GetSqlDefinition(sb);
+
+                first = false;
+            }
+
+            // Every table gets an optimistic-concurrency version column, engine-appropriate:
+            // SQL Server's ROWVERSION is engine-maintained (no application code ever sets it);
+            // SQLite has no equivalent type, so it's a plain application-maintained counter.
+            // See docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+            sb.AppendLine(&quot;,&quot;);
+            if (flavor == DbFlavor.SqlServer)
+            {
+                sb.Append(&quot;  [RowVersion] ROWVERSION NOT NULL&quot;);
+            }
+            else
+            {
+                sb.Append(&quot;  [Version] INTEGER NOT NULL DEFAULT 1&quot;);
+            }
+
+            sb.AppendLine();
+            sb.AppendLine(&quot;)&quot;);
+            return sb.ToString();
+        }
+</code></pre>
+<p>Update both call sites to pass the flavor:</p>
+<p><code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> inside <code>CreateOrUpdateTable</code> (the one that calls
+<code>GetCreateTableScript(mapping)</code> around line 385): change to
+<code>GetCreateTableScript(mapping, this.DbFlavor)</code>.</p>
+<p><code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code>, both call sites (lines 557 and 651): change
+<code>GetCreateTableScript(mapping)</code> to <code>GetCreateTableScript(mapping, DbFlavor.Sqlite)</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~SqlMappingTests"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 5: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green (SQLite-backed tests exercise the new
+column via real <code>LazyCreateTables()</code> calls; no existing test should reference <code>RowVersion</code>/
+<code>Version</code> yet, since nothing reads/writes it until Phase 2).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/Mapping.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/MyMoney.Data/Properties/AssemblyInfo.cs Source/WPF/UnitTests/SqlMappingTests.cs
+git commit -m &quot;Add per-flavor optimistic-concurrency version column to generated schema&quot;
+</code></pre>
+<hr />
+<h3 id="task-4-derive-foreign-key-constraints-automatically-from-columnobjectmapping">Task 4: Derive foreign-key constraints automatically from <code>ColumnObjectMapping</code><a class="headerlink" href="#task-4-derive-foreign-key-constraints-automatically-from-columnobjectmapping" title="Permanent link">#</a></h3>
+<blockquote>
+<p><strong>Pre-flight correction (ruled before dispatch):</strong> the original draft of this task assumed
+issue #24's six named gaps (<code>Account.CategoryForPrincipal</code>/<code>CategoryForInterest</code>,
+<code>Split.Category</code>/<code>Split.Transaction</code>, <code>Transaction.Account</code>/<code>Payee</code>/<code>Category</code>) were plain
+<code>[ColumnMapping(ColumnName = "...")]</code> int columns that needed new <code>ForeignKeyTable</code>/
+<code>ForeignKeyColumn</code> arguments hand-added. Verified against the actual code
+(<code>Money.cs:3129</code>, <code>:3145</code>, <code>:11049</code>, <code>:13780</code>, <code>:13797</code>, and the <code>Transaction.Account</code>/<code>.Payee</code>
+declarations) that all of them are already declared via the domain model's existing
+<code>[ColumnObjectMapping(ColumnName = "...", KeyProperty = "Id")]</code> attribute
+(<code>Mapping.cs:190-193</code>, <code>internal class ColumnObjectMapping : ColumnMapping { public string
+KeyProperty { get; set; } }</code>) — a distinct, already-present attribute the original draft never
+checked for. Deriving the FK automatically from that existing attribute (via reflection on the
+referenced type's own <code>[TableMapping]</code>) fixes all six gaps <em>and</em> every other object-reference
+column in the schema in one generic change, with <strong>zero manual edits to <code>Money.cs</code></strong> — safer and
+more complete than hand-flagging six properties by name.</p>
+</blockquote>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/Mapping.cs:190-193</code> (<code>ColumnObjectMapping</code>), <code>:215-234</code>
+  (<code>MappingEngine.ResolveColumnType</code>)
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (<code>GetCreateTableScript</code>, extended further)
+- Test: <code>Source/WPF/UnitTests/SqlMappingTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>GetCreateTableScript(TableMapping, DbFlavor)</code> (Task 3); existing
+  <code>ColumnObjectMapping : ColumnMapping</code> and <code>MappingEngine.GetColumnsFromObject</code>/
+  <code>ResolveColumnType</code> (<code>Mapping.cs:190-234</code>) — <code>GetColumnsFromObject</code> already collects
+  <code>ColumnObjectMapping</code>-attributed properties into <code>TableMapping.Columns</code> today (confirmed:
+  <code>MemberInfo.GetCustomAttributes(typeof(ColumnMapping), false)</code> matches subclass attribute
+  instances too), so no change is needed there.
+- Produces: <code>ColumnObjectMapping.ForeignKeyTable</code> (new property, populated automatically inside
+  <code>ResolveColumnType</code> — never set by hand on any domain-model property). No later task in this
+  phase consumes it further, but Phase 2 (which touches insert ordering for the new atomic
+  primitives) must respect the same FK dependency order <code>Load()</code> already uses (Categories before
+  Accounts before Transactions before Splits), since these FKs now enforce it at the database
+  level, not just the C# object model.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/UnitTests/SqlMappingTests.cs</code>:</p>
+<pre><code class="language-csharp">        [TableMapping(TableName = &quot;MappingTestParentTable&quot;)]
+        private class FakeParentRow
+        {
+            [ColumnMapping(ColumnName = &quot;Id&quot;, IsPrimaryKey = true)]
+            public int Id { get; set; }
+        }
+
+        [TableMapping(TableName = &quot;MappingTestChildTable&quot;)]
+        private class FakeChildRow
+        {
+            [ColumnMapping(ColumnName = &quot;Id&quot;, IsPrimaryKey = true)]
+            public int Id { get; set; }
+
+            [ColumnObjectMapping(ColumnName = &quot;ParentId&quot;, KeyProperty = &quot;Id&quot;)]
+            public FakeParentRow Parent { get; set; }
+        }
+
+        [Test]
+        public void GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            string script = SqlDatabase.GetCreateTableScript(mapping, DbFlavor.SqlServer);
+            Assert.That(script, Does.Contain(&quot;FOREIGN KEY ([ParentId]) REFERENCES [MappingTestParentTable]([Id])&quot;));
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping"</code>
+Expected: FAIL — <code>ForeignKeyTable</code> doesn't exist on <code>ColumnObjectMapping</code> yet, and nothing derives it.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the property and derive it during <code>ResolveColumnType</code></strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/Mapping.cs</code>, change:</p>
+<pre><code class="language-csharp">    internal class ColumnObjectMapping : ColumnMapping
+    {
+        public string KeyProperty { get; set; }
+    }
+</code></pre>
+<p>to:</p>
+<pre><code class="language-csharp">    internal class ColumnObjectMapping : ColumnMapping
+    {
+        public string KeyProperty { get; set; }
+        public string ForeignKeyTable { get; set; }
+    }
+</code></pre>
+<p>In <code>MappingEngine.ResolveColumnType</code>, find:</p>
+<pre><code class="language-csharp">            if (mapping is ColumnObjectMapping)
+            {
+                ColumnObjectMapping co = (ColumnObjectMapping)mapping;
+                string propName = co.KeyProperty;
+                if (string.IsNullOrEmpty(propName))
+                {
+                    throw new Exception(&quot;ColumnObjectMapping must have a valid KeyProperty&quot;);
+                }
+                PropertyInfo pi = propertyType.GetProperty(propName);
+                if (pi == null)
+                {
+                    throw new Exception(string.Format(&quot;Could not find KeyProperty named '{0}' on class '{1}'&quot;, propName, propertyType.FullName));
+                }
+                // get the dereferenced type.
+                propertyType = pi.PropertyType;
+
+            }
+</code></pre>
+<p>and insert the FK-table derivation <em>before</em> the <code>propertyType = pi.PropertyType;</code> line (while
+<code>propertyType</code> still refers to the referenced object type, e.g. <code>Account</code>, not yet overwritten
+with the key property's type):</p>
+<pre><code class="language-csharp">            if (mapping is ColumnObjectMapping)
+            {
+                ColumnObjectMapping co = (ColumnObjectMapping)mapping;
+                string propName = co.KeyProperty;
+                if (string.IsNullOrEmpty(propName))
+                {
+                    throw new Exception(&quot;ColumnObjectMapping must have a valid KeyProperty&quot;);
+                }
+                PropertyInfo pi = propertyType.GetProperty(propName);
+                if (pi == null)
+                {
+                    throw new Exception(string.Format(&quot;Could not find KeyProperty named '{0}' on class '{1}'&quot;, propName, propertyType.FullName));
+                }
+
+                // Derive the FK target table from the referenced type's own [TableMapping] --
+                // see docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R7 (#24).
+                object[] tableAttrs = propertyType.GetCustomAttributes(typeof(TableMapping), false);
+                if (tableAttrs != null &amp;&amp; tableAttrs.Length &gt; 0)
+                {
+                    co.ForeignKeyTable = ((TableMapping)tableAttrs[0]).TableName;
+                }
+
+                // get the dereferenced type.
+                propertyType = pi.PropertyType;
+
+            }
+</code></pre>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>'s <code>GetCreateTableScript</code>, after the version-column
+block added in Task 3 and before the closing <code>sb.AppendLine(")")</code>:</p>
+<pre><code class="language-csharp">            foreach (ColumnMapping column in mapping.Columns)
+            {
+                if (column is ColumnObjectMapping co &amp;&amp; !string.IsNullOrEmpty(co.ForeignKeyTable))
+                {
+                    sb.AppendLine(&quot;,&quot;);
+                    sb.Append(string.Format(&quot;  FOREIGN KEY ([{0}]) REFERENCES [{1}]([{2}])&quot;,
+                        column.ColumnName, co.ForeignKeyTable, co.KeyProperty));
+                }
+            }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateTableScript_DerivesForeignKeyFromColumnObjectMapping"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 5: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green. This change now emits real FK
+constraints for every existing <code>ColumnObjectMapping</code> column in the whole schema (Accounts,
+Transactions, Splits, and others) — pay particular attention to any SQLite-backed test that
+creates a fresh sample database. A genuinely orphaned reference (a pre-existing bug, not this
+task's fault) would now surface as a real FK-constraint failure at table-creation/insert time
+instead of silently succeeding. If one fails, that's a real pre-existing data-integrity bug the
+new FK just caught — do not weaken the constraint to make the symptom disappear; report it and
+pause this task for a decision rather than silently loosening the FK.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/Mapping.cs Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
+git commit -m &quot;Derive foreign-key constraints from ColumnObjectMapping automatically (closes #24's FK gap)&quot;
+</code></pre>
+<hr />
+<h3 id="task-5-derive-secondary-indexes-automatically-from-columnobjectmapping">Task 5: Derive secondary indexes automatically from <code>ColumnObjectMapping</code><a class="headerlink" href="#task-5-derive-secondary-indexes-automatically-from-columnobjectmapping" title="Permanent link">#</a></h3>
+<blockquote>
+<p><strong>Pre-flight correction (ruled before dispatch):</strong> same reasoning as Task 4 — issue #24 named
+two specific columns (<code>Transaction.Account</code>, <code>Split.Transaction</code>) as needing indexes, but the
+original draft's <code>IsIndexed</code> flag hand-added to those two properties would miss every other
+object-reference column in the schema for no reason: every <code>ColumnObjectMapping</code> column is
+exactly the kind of foreign-key/join column that benefits from an index, and Task 4 already
+gives this task a reliable way to identify all of them generically. Auto-indexing every
+<code>ColumnObjectMapping</code> column — not just the two issue #24 named — is strictly more complete,
+equally low-risk (purely additive <code>CREATE INDEX</code> statements), and needs no new <code>IsIndexed</code>
+property or any manual <code>Money.cs</code> edits at all.</p>
+</blockquote>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code> (new method, called from <code>CreateOrUpdateTable</code>)
+- Modify: <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code> (<code>CreateOrUpdateTable</code>, same wiring)
+- Test: <code>Source/WPF/UnitTests/SqlMappingTests.cs</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>TableMapping</code>/<code>ColumnObjectMapping.ForeignKeyTable</code> (Task 4), <code>this.ExecuteNonQuery</code>
+  (existing on both <code>SqlDatabase</code>/<code>SqliteDatabase</code>).
+- Produces: <code>SqlDatabase.GetCreateIndexScripts(TableMapping mapping)</code> returning
+  <code>IEnumerable&lt;string&gt;</code> — no later task in this phase consumes it further; Phase 2 doesn't need
+  to touch index scripts.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Add to <code>Source/WPF/UnitTests/SqlMappingTests.cs</code> (reusing <code>FakeParentRow</code>/<code>FakeChildRow</code> from
+Task 4):</p>
+<pre><code class="language-csharp">        [Test]
+        public void GetCreateIndexScripts_EmitsIndexForColumnObjectMapping()
+        {
+            var mapping = new TableMapping { ObjectType = typeof(FakeChildRow) };
+            var scripts = SqlDatabase.GetCreateIndexScripts(mapping).ToList();
+            Assert.That(scripts, Has.One.Matches&lt;string&gt;(s =&gt;
+                s.Contains(&quot;CREATE INDEX&quot;) &amp;&amp; s.Contains(&quot;MappingTestChildTable&quot;) &amp;&amp; s.Contains(&quot;ParentId&quot;)));
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForColumnObjectMapping"</code>
+Expected: FAIL — <code>GetCreateIndexScripts</code> doesn't exist yet.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the emission method</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>, add a new method near <code>GetCreateTableScript</code>:</p>
+<pre><code class="language-csharp">        internal static IEnumerable&lt;string&gt; GetCreateIndexScripts(TableMapping mapping)
+        {
+            foreach (ColumnMapping column in mapping.Columns)
+            {
+                if (column is ColumnObjectMapping)
+                {
+                    yield return string.Format(&quot;CREATE INDEX [IX_{0}_{1}] ON [{0}] ([{1}])&quot;,
+                        mapping.TableName, column.ColumnName);
+                }
+            }
+        }
+</code></pre>
+<p>(Add <code>using System.Collections.Generic;</code> at the top of the file if not already present.)</p>
+<ul>
+<li>[ ] <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~GetCreateIndexScripts_EmitsIndexForColumnObjectMapping"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 5: Wire index creation into <code>CreateOrUpdateTable</code>'s new-table path</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Data/SqlDatabase.cs</code>'s <code>CreateOrUpdateTable</code>, in the branch that creates a
+brand-new table (the <code>if (!this.TableExists(...))</code> branch), after
+<code>this.ExecuteNonQuery(createTable);</code>, add:</p>
+<pre><code class="language-csharp">                foreach (string indexScript in GetCreateIndexScripts(mapping))
+                {
+                    this.ExecuteNonQuery(indexScript);
+                }
+</code></pre>
+<p>Repeat the identical addition in <code>Source/WPF/MyMoney.Data/SqliteDatabase.cs</code>'s
+<code>CreateOrUpdateTable</code>, in its equivalent new-table branch (around line 557, right after its own
+<code>this.ExecuteNonQuery(createTable);</code> call).</p>
+<ul>
+<li>[ ] <strong>Step 6: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Data/SqlDatabase.cs Source/WPF/MyMoney.Data/SqliteDatabase.cs Source/WPF/UnitTests/SqlMappingTests.cs
+git commit -m &quot;Derive secondary indexes from ColumnObjectMapping automatically (closes #24's index gap)&quot;
+</code></pre>
+<hr />
+<h3 id="task-6-add-the-rowversion-storage-slot-to-persistentobject">Task 6: Add the <code>RowVersion</code> storage slot to <code>PersistentObject</code><a class="headerlink" href="#task-6-add-the-rowversion-storage-slot-to-persistentobject" title="Permanent link">#</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>Source/WPF/MyMoney.Business/Money.cs:389-</code> (<code>PersistentObject</code>)
+- Test: <code>Source/WPF/UnitTests/DataTests.cs</code> (or wherever <code>PersistentObject</code> itself already has
+  direct unit coverage — check first; if none exists, add to <code>SqlMappingTests.cs</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: nothing new.
+- Produces: <code>PersistentObject.RowVersion</code> (<code>public long</code>, get/set) — Phase 2's <code>SaveOne</code>/
+  <code>SaveTransfer</code>/<code>SaveBatch</code> implementations populate this on load and check it on write; nothing
+  in this phase populates or reads it yet (the column exists in the schema per Task 3, but no
+  read/write path touches the property until Phase 2, since that wiring is naturally part of
+  building each entity's atomic-write primitive, not a separate pass).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<pre><code class="language-csharp">        [Test]
+        public void PersistentObject_RowVersion_DefaultsToZeroAndIsSettable()
+        {
+            var account = new Account();
+            Assert.That(account.RowVersion, Is.EqualTo(0));
+            account.RowVersion = 42;
+            Assert.That(account.RowVersion, Is.EqualTo(42));
+        }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~PersistentObject_RowVersion_DefaultsToZeroAndIsSettable"</code>
+Expected: FAIL — <code>RowVersion</code> doesn't exist.</p>
+<ul>
+<li>[ ] <strong>Step 3: Add the property</strong></li>
+</ul>
+<p>In <code>Source/WPF/MyMoney.Business/Money.cs</code>'s <code>PersistentObject</code> class, add:</p>
+<pre><code class="language-csharp">        /// &lt;summary&gt;
+        /// Opaque optimistic-concurrency token: SQL Server's native ROWVERSION converted to a
+        /// long via BitConverter for storage-agnostic use here, or SQLite's plain integer
+        /// counter, depending on which IDatabase loaded this object. Only ever compared for
+        /// exact equality (never ordering) when writing back — see
+        /// docs/superpowers/specs/2026-09-16-persistence-concurrency-design.md, R4.
+        /// &lt;/summary&gt;
+        [XmlIgnore]
+        public long RowVersion { get; set; }
+</code></pre>
+<p>(This property is deliberately excluded from <code>[DataContract]</code>/XML serialization — it is
+persistence-tier bookkeeping, not domain data, and must not round-trip through <code>XmlStore</code>/
+<code>MockDatabase</code>'s <code>DataContractSerializer</code> snapshot. Confirm <code>XmlIgnore</code> is already <code>using</code>'d at the
+top of <code>Money.cs</code> — it is, per its existing use elsewhere in the file.)</p>
+<ul>
+<li>[ ] <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>dotnet test Source/WPF/UnitTests/UnitTests.csproj --filter "FullyQualifiedName~PersistentObject_RowVersion_DefaultsToZeroAndIsSettable"</code>
+Expected: PASS.</p>
+<ul>
+<li>[ ] <strong>Step 5: Full build and regression check</strong></li>
+</ul>
+<p>Run: <code>dotnet build Source/WPF/MyMoney.sln</code> — expect 0 errors.
+Run: <code>dotnet test Source/WPF/MyMoney.sln -m:1</code> — expect green (confirms <code>RowVersion</code> being excluded
+from serialization doesn't break any existing <code>MockDatabase</code>/<code>XmlStore</code> round-trip test).</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Source/WPF/MyMoney.Business/Money.cs Source/WPF/UnitTests/
+git commit -m &quot;Add PersistentObject.RowVersion storage slot for future optimistic-concurrency checks&quot;
+</code></pre>
+<hr />
+<h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">#</a></h2>
+<p>This plan stops at the schema/property foundation deliberately — it's the part every later phase
+depends on, and it's already substantial once you account for the engine-branching in the shared
+mapping code. The next plan (Phase 2) builds <code>IDatabase.SaveOne&lt;T&gt;</code>/<code>SaveTransfer</code>/<code>SaveBatch</code> with
+real atomicity and the actual <code>RowVersion</code> conflict check wired into each entity's write path, for
+<code>MockDatabase</code> first, then <code>SqliteDatabase</code> (WAL mode + <code>busy_timeout</code>), then
+<code>SqlServerStoredProcDatabase</code> (proper <code>BEGIN/END TRAN</code> spanning each primitive's stored-proc calls —
+closing issue #27). Phase 3 wires the ~20 UI/business call sites (register grid, transfer, QIF/OFX/
+CSV import, reconciliation, the three merge dialogs, recategorize, and the remaining single-entity
+dialogs) to the new primitives and retires <code>IDatabase.Save(MyMoney)</code> (issue #1's remaining #19
+slice rides along here, alongside Phase 2's SQL Server work). Phase 4 is Layer 2 (the <code>UiDispatcher</code>/
+<code>SynchronizationContext</code> decision for issue #7, and the pull-based refresh mechanism).</p>
+
+  <br>
+    
+
+    <br>
+</div>
+
+<footer class="container-fluid wm-page-content">
+  <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a> using <a href="https://github.com/gristlabs/mkdocs-windmill">Windmill</a> theme by Grist Labs.</p>
+</footer>
+
+</body>
+</html>
